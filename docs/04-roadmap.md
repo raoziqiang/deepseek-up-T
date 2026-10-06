@@ -136,7 +136,7 @@
 **目标**：改造本身可复现、可审计、可回滚，升级后能快速重打。
 
 **当前状态**
-- ✅ 本项目已交付：`env` / `doctor` / `snapshot create|list|diff|restore` / `baseline write` / `precheck` / `asar ls|cat|grep` / `upgrade`。
+- ✅ 本项目已交付：`env` / `doctor` / `snapshot create|list|diff|restore|prune` / `baseline write` / `precheck` / `asar ls|cat|grep` / `upgrade`。
 - ✅ **升级检测已交付**（`dsht upgrade`）：把 `state/baseline.json` 与现场比对，一次回答「升级发生了没有 / 哪些 L3 声明需要重打 / 哪些只是从未落盘 / 重打前哪份原版素材已过期 / L0 声明有没有与现场漂移」。
 - ✅ L3 改动的声明式描述已落地：`patches/*.yml` + `vendor/whale/build.mjs`（构建到暂存位）+ `vendor/whale/install.mjs`（落盘 + 逐项核对）。
 - ✅ `../tools/` 的 23 个脚本**已全部归拢**到 `vendor/`（asar 三件套、构建链 6 个、视觉验证 6 个、Provider 探针 8 个）；`../tools/` 保留为历史副本，等 T1 验收后再删。见 `vendor/README.md`。

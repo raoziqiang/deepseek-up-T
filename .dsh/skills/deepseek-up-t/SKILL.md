@@ -53,8 +53,10 @@ DSH 的组合，报告退出码、问题数与逐条 diff。**差异行数要恰
 | `node src/cli.mjs doctor` | 体检。0 错误才算干净，警告要读 |
 | `node src/cli.mjs precheck [--patch 文件] [--profile-json 文件]` | 权威组合预检（探针家，真实 `$DSH_HOME` 只读） |
 | `node src/cli.mjs snapshot create\|list\|diff\|restore` | 改动前后的配置快照与回滚 |
+| `node src/cli.mjs snapshot prune [--keep N] [--keep-match GLOB] [--yes]` | 快照清理。**默认只预演**；不加 `--yes` 绝不动磁盘 |
 | `node src/cli.mjs baseline write` | 收尾：固化基线 |
 | `node src/cli.mjs upgrade [--no-hash]` | 升级检测 + 重打计划（`--json` 可机读） |
+| `node test/run.mjs` | 跑全部 `test/*.test.mjs`（发现式）。改完任何 `src/`、`plugins/` 之前之后都该跑 |
 | `node src/cli.mjs asar ls\|cat\|grep` | 只读地读安装包里**真正在跑的那份代码** |
 | `node vendor/whale/build.mjs` | 按 `patches/*.yml` 构建暂存包（**不碰安装目录**） |
 | `node vendor/whale/install.mjs --yes` | **唯一**会覆盖在用 `app.asar` 的操作。须先完全退出 Harness |

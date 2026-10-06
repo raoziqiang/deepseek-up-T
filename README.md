@@ -35,6 +35,7 @@ node src/cli.mjs doctor     # 体检：组合层不变量 / 插件可解析 / �
 node src/cli.mjs snapshot create -m "改之前"   # 留快照
 node src/cli.mjs snapshot list                 # 列出快照
 node src/cli.mjs snapshot restore <id>         # 回滚（回滚前会自动再留一份）
+node src/cli.mjs snapshot prune                # 快照保留策略（默认只预演，--yes 才真删）
 node src/cli.mjs precheck                      # 改完 cordis.patch.yml 后、重启前，预检组合
 node src/cli.mjs baseline write                # 把当前事实固化为基线
 node src/cli.mjs upgrade                       # Harness 升级后：哪些 L3 改动要重打、素材过期没

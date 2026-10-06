@@ -7,6 +7,7 @@
 //   node src/cli.mjs snapshot list      列出快照
 //   node src/cli.mjs snapshot diff <id> 与当前现场对比
 //   node src/cli.mjs snapshot restore <id> --yes
+//   node src/cli.mjs snapshot prune     快照保留策略（预演；--yes 才删）
 //   node src/cli.mjs baseline write     固化基线
 
 import fs from 'node:fs';
@@ -18,6 +19,7 @@ import {
 import { runDoctor } from './doctor.mjs';
 import {
   createSnapshot, listSnapshots, restoreSnapshot, diffSnapshot, TRACKED_FILES,
+  planPrune, deleteSnapshots,
 } from './snapshot.mjs';
 import {
   readAsarHeader, walkAsar, listAsarPaths, readAsarEntry, grepAsarContent,
@@ -31,7 +33,7 @@ const TAG = { error: 'FAIL', warn: 'WARN', info: 'INFO', ok: 'OK  ' };
 const VALUE_OPTS = new Map([
   ['-m', 'message'], ['--message', 'message'],
   ['--out', 'out'], ['--limit', 'limit'], ['--file', 'file'],
-  ['--profile-json', 'profileJson'],
+  ['--profile-json', 'profileJson'], ['--keep', 'keep'],
 ]);
 
 function parseArgs(argv) {
@@ -41,6 +43,7 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === '--patch') { (opts.patch ??= []).push(argv[++i]); continue; }
+    if (a === '--keep-match') { (opts.keepMatch ??= []).push(argv[++i]); continue; }
     if (VALUE_OPTS.has(a)) { opts[VALUE_OPTS.get(a)] = argv[++i]; continue; }
     if (a.startsWith('-') && a.length > 1) { flags.add(a); continue; }
     positional.push(a);
@@ -207,6 +210,52 @@ async function cmdSnapshot({ flags, positional, opts }) {
     if (res.preSnapshot) console.log(`\n回滚前的现场已存为快照 ${res.preSnapshot}`);
     console.log('\n注意：改动要生效需要重启 Harness（或触发 profile 重载）。');
     return 0;
+  }
+
+  if (sub === 'prune' || sub === 'gc') {
+    const keepN = opts.keep === undefined ? 10 : Number.parseInt(opts.keep, 10);
+    if (!Number.isInteger(keepN) || keepN < 0) {
+      console.error(`--keep 需要一个非负整数（收到 ${JSON.stringify(opts.keep)}）`);
+      return 2;
+    }
+    const keepMatch = opts.keepMatch ?? [];
+    const plan = planPrune({ keep: keepN, keepMatch });
+
+    if (flags.has('--json')) {
+      console.log(JSON.stringify(plan, null, 2));
+    } else {
+      console.log(
+        `快照保留策略：最近 ${plan.keepN} 份`
+        + (keepMatch.length ? ` + 匹配 ${keepMatch.map((p) => `"${p}"`).join(' / ')} 的全部` : '')
+        + `\n共 ${plan.total} 份 → 保留 ${plan.keep.length}，删除 ${plan.drop.length}\n`,
+      );
+      if (plan.keep.length) {
+        console.log('保留：');
+        for (const s of plan.keep) console.log(`  · ${s.id}  ${s.why}`);
+      }
+      if (plan.drop.length) {
+        console.log('\n将删除：');
+        for (const s of plan.drop) {
+          const when = s.createdAt ? s.createdAt.replace('T', ' ').slice(0, 19) : '?';
+          console.log(`  ✗ ${s.id}  ${when}  ${s.label ?? ''}`);
+        }
+      }
+    }
+
+    if (!plan.drop.length) {
+      if (!flags.has('--json')) console.log('\n没有需要删除的快照。');
+      return 0;
+    }
+    if (!flags.has('--yes')) {
+      if (!flags.has('--json')) console.log('\n这是预演，没有删除任何东西。确认请加 --yes 重跑。');
+      return 0;
+    }
+
+    const res = deleteSnapshots(plan.drop.map((s) => s.id));
+    console.log(`\n已删除 ${res.removed.length} 份快照（在 ${res.root} 内）`);
+    for (const r of res.removed) console.log(`  ✗ ${r.id}`);
+    for (const r of res.refused) console.error(`  拒绝 ${r.id}：${r.why}`);
+    return res.refused.length ? 1 : 0;
   }
 
   console.error(`未知子命令：snapshot ${sub}`);
@@ -538,6 +587,7 @@ function usage() {
   snapshot list           列出快照
   snapshot diff <id>      快照与当前现场对比
   snapshot restore <id>   回滚（需 --yes；回滚前自动留一份）
+  snapshot prune          快照保留策略（默认只预演；--keep N / --keep-match GLOB / --yes）
   baseline write          把当前事实固化为 state/baseline.json
   upgrade                 升级检测：Harness 升级后哪些 L3 改动需要重打、素材是否过期
   precheck                组合预检：隔离探针家里 dump 出权威组合结果（真实 profile 只读）

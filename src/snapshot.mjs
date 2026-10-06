@@ -162,4 +162,76 @@ export async function diffSnapshot(id) {
   return { id, rows, asarChanged, meta };
 }
 
+// ─────────────────────────── 保留策略（快照清理）───────────────────────────
+//
+// 快照一份只有几 KB，但「可以随便留」不等于「应该无限留」：`snapshot restore` 的选择
+// 列表会越来越长，而真正要回滚的那一份会被埋在几十条中间。所以给一个**默认预演**的
+// 清理器：先算清楚保留谁、删谁，再由人加 `--yes` 真删。
+
+/**
+ * 极简 glob：只实现 `*`（任意长度）与 `?`（单个字符），其余字符一律按字面量。
+ * 刻意不引入依赖——`src/` 的全部价值就在于「DSH 装坏了也能跑」。
+ */
+export function globToRe(pattern) {
+  let out = '';
+  for (const ch of String(pattern)) {
+    if (ch === '*') out += '.*';
+    else if (ch === '?') out += '.';
+    else out += ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+  return new RegExp(`^${out}$`);
+}
+
+/**
+ * 只做计划，不碰磁盘。保留规则（与删除无关，纯加法）：
+ *   1. 最新的 `keep` 份；
+ *   2. 任何 id 匹配 `keepMatch` 里任一 glob 的（例如 `*-M0-*`、`*改动前*`）。
+ * 其余全部进 `drop`。
+ */
+export function planPrune({ keep = 10, keepMatch = [] } = {}, P = resolvePaths()) {
+  const all = listSnapshots(P); // listSnapshots 已按 id 降序 = 新在前
+  const matchers = keepMatch.map((pat) => ({ pat, re: globToRe(pat) }));
+  const keepRows = [];
+  const dropRows = [];
+  all.forEach((s, i) => {
+    if (i < keep) { keepRows.push({ ...s, why: `最近 ${keep} 份之内（第 ${i + 1} 新）` }); return; }
+    const hit = matchers.find((m) => m.re.test(String(s.id)));
+    if (hit) { keepRows.push({ ...s, why: `匹配保留规则「${hit.pat}」` }); return; }
+    dropRows.push({ ...s, why: `不在最近 ${keep} 份内，也不匹配任何保留规则` });
+  });
+  return { total: all.length, keepN: keep, keepMatch, keep: keepRows, drop: dropRows };
+}
+
+/**
+ * 真删。每个 id 都要过三道检查才允许 `rmSync`：
+ *   1. 必须是一个**纯目录名**（不含 `/`、`\`，不是 `.` / `..`）；
+ *   2. `path.resolve` 之后必须仍在快照目录**里面**（防止 `..` 逃逸）；
+ *   3. 里面必须有 `meta.json`（确认这真的是一个快照，而不是别的什么东西）。
+ * 被拒的进 `refused`，不抛异常——调用方要能一次性看到全部结果。
+ */
+export function deleteSnapshots(ids, P = resolvePaths()) {
+  const root = path.resolve(P.snapshotsDir);
+  const removed = [];
+  const refused = [];
+  for (const raw of ids) {
+    const id = String(raw ?? '');
+    if (!id || id === '.' || id === '..' || /[\\/]/.test(id)) {
+      refused.push({ id, why: '不是一个纯目录名（含路径分隔符或为相对路径片段）' });
+      continue;
+    }
+    const dir = path.resolve(path.join(root, id));
+    if (dir !== path.join(root, id) || !dir.startsWith(root + path.sep)) {
+      refused.push({ id, why: `解析后不在快照目录内：${dir}` });
+      continue;
+    }
+    if (!exists(dir) || !exists(path.join(dir, 'meta.json'))) {
+      refused.push({ id, why: '目录不存在，或不是快照（没有 meta.json）' });
+      continue;
+    }
+    fs.rmSync(dir, { recursive: true, force: false });
+    removed.push({ id, dir });
+  }
+  return { removed, refused, root };
+}
+
 export { human };

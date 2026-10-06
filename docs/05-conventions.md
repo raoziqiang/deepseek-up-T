@@ -64,7 +64,10 @@
   怎么验：<doctor / diff / 界面观察>
   怎么撤：<恢复哪个快照>
   ```
-- 提交前必跑：`node src/cli.mjs doctor` 且 `snapshot diff <快照id>` 只显示预期改动。
+- 提交前必跑：`node test/run.mjs`（发现式跑全 `test/*.test.mjs`，4 套全绿）、`node src/cli.mjs doctor`（0 error）、
+  且 `snapshot diff <快照id>` 只显示预期改动。
+  **加了一套新测试就什么都不用改**——`test/run.mjs` 自己发现；反过来，`test/` 下一套都找不到时它以退出码 2 报错，
+  而不是「0 套通过」地装成成功。
 - 大文件（`app.asar`、动画帧、构建产物）**不入库**，已在 `.gitignore`。
 
 ## 记录义务

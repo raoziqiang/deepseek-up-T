@@ -12,6 +12,7 @@
 | `node src/cli.mjs snapshot list` | 列出快照 |
 | `node src/cli.mjs snapshot diff <id>` | 快照与当前现场对比（文件级 sha256） |
 | `node src/cli.mjs snapshot restore <id>` | 回滚（需 `--yes`，回滚前自动再留一份） |
+| `node src/cli.mjs snapshot prune` | 快照保留策略：默认**只预演**，`--keep N` / `--keep-match GLOB` / `--yes` 才真删 |
 | `node src/cli.mjs baseline write` | 固化 `state/baseline.json` |
 | `node src/cli.mjs precheck` | **权威组合预检**：隔离探针家里 dump 出运行中应用真正会看到的清单（真实 profile 只读、`$DSH_HOME` 不被写入） |
 | `node src/cli.mjs precheck --profile-json <文件>` | 同上，但用**候选** package.json 顶替真实 profile 的那一份 —— 用来在落盘前试「再加一个 bundle 会不会炸」 |
@@ -19,6 +20,7 @@
 | `node src/cli.mjs asar cat <路径>` | 读出安装包里单个条目的**原文**（`--out` 落盘） |
 | `node src/cli.mjs asar grep <正则>` | 在安装包内容里检索（只扫文本类条目） |
 | `node src/cli.mjs upgrade` | **升级检测**：安装包/版本/profile 变了没有、哪些 L3 声明需要重打、哪些只是从未落盘、原版素材是否过期、L0 声明有没有漂移 |
+| `node test/run.mjs [关键字]` | 发现式跑 `test/*.test.mjs` 全部（也可只跑匹配的那几套）；找不到任何测试文件时**退出码 2**，不装成成功 |
 
 代码在 `src/`，**零依赖**——`doctor` 必须在「DSH 装坏了」的时候还能跑。
 
@@ -36,29 +38,18 @@
 | `vendor/whale/patch-session-controller.mjs` | 视觉模型自动路由的锚点替换 | 只写暂存树 |
 | `vendor/whale/bundle.mjs` | 动画模块 → CSP 允许的经典脚本 | 只写暂存树 |
 | `vendor/whale/install.mjs` | 落盘（三道保险）/ `--rollback` | **写安装包** |
+| `vendor/visual/*.mjs` | 6 个：抓帧 / 描轮廓 / 帧数值分析 / 帧配色 / 形状检查 / 静态服务 | 只读 |
+| `vendor/route/*.mjs` | 8 个：Provider 与网关探针（`store-go-credential.mjs` 会写凭据库） | 只读为主 |
 
-约定见 `vendor/README.md`。四条铁律：省略 `--out` 绝不原地重写、写安装包前必须过进程守卫、
-落盘后必须拿实际差异集合与声明逐项比对、声明读不到就报错不用默认值。
-
-**构建与落盘是两步**，刻意分开：
-
-```powershell
-node vendor/whale/build.mjs            # → state/staged/app.asar（可随便重跑、失败、比对）
-node vendor/whale/install.mjs --yes    # 需要先完全退出 Harness
-```
-
-| `vendor/visual/*.mjs` | 视觉验证 6 个（抓帧 / 描轮廓 / 数值分析 / 形状 / 配色 / 静态服务） | 只读 |
-| `vendor/route/*.mjs` | Provider 与网关探针 8 个（`store-go-credential.mjs` 会写凭据库） | 只读为主 |
-
-约定见 `vendor/README.md`。四条铁律：省略 `--out` 绝不原地重写、写安装包前必须过进程守卫、
-落盘后必须拿实际差异集合与声明逐项比对、声明读不到就报错不用默认值。
-
-**构建与落盘是两步**，刻意分开：
+**构建与落盘是两步**，刻意分开（这就是「写安装包必须由人挑时间」的落地方式）：
 
 ```powershell
 node vendor/whale/build.mjs            # → state/staged/app.asar（可随便重跑、失败、比对）
 node vendor/whale/install.mjs --yes    # 需要先完全退出 Harness
 ```
+
+约定见 `vendor/README.md`。四条铁律：省略 `--out` 绝不原地重写、写安装包前必须过进程守卫、
+落盘后必须拿实际差异集合与声明逐项比对、声明读不到就报错不用默认值。
 
 ## 归拢状态（`../tools/`，共 23 个脚本）
 
@@ -77,7 +68,8 @@ node vendor/whale/install.mjs --yes    # 需要先完全退出 Harness
 - [x] **升级检测** —— `dsht upgrade`，2026-10-06 完成，见下方记录
 - [x] **候选清单预检** —— `precheck --profile-json <文件>`，2026-10-06 完成，见下方记录
 - [ ] 自动重打：`upgrade` 目前只报告 + 给命令，不自动落盘（写安装包必须由人挑时间）
-- [ ] 快照保留策略：自动保留最近 N 份 + 所有带标签的
+- [x] 快照保留策略：`snapshot prune`（默认预演）+ 三层拒绝守卫，2026-10-06 完成，见下方记录
+- [x] 测试总入口 `test/run.mjs`（发现式），2026-10-06 完成，见下方记录
 - [ ] `doctor` 扩展：接入 profile 重载后的运行时探测
 - [x] 处置 `app.asar.tmp` 残留（115.8MB）—— 确认是坏构建，已删除
 
@@ -338,6 +330,79 @@ L3 状态在这种情况下仍能靠 `insert` 条目的存在性判定，所以�
 
 **教训**：这套工具的每一条命令都得能被用在「改动**之前**」。只能事后验证的诊断，
 价值只有一半 —— 因为它拦不住任何事。
+
+### 2026-10-06 · 快照保留策略 `snapshot prune`
+
+**为什么**
+快照一份只有几 KB，所以「可以随便留」；但留到几十份之后，`snapshot restore <id>` 的选择成本就
+从「记得改之前有一份」变成「在一堆 `…改动前` 里挑出一个」。工程化的要求不是「多留」或「少留」，
+而是**留多少由一条说得清的规则决定**。这条规则还必须能被**预演** —— 一个会删目录的工具，
+如果第一次运行就是真删，那它本身就是风险来源。
+
+**规则（纯加法，三条互不排除）**
+1. 最新的 `--keep N` 份（默认 10）；
+2. 任何 id 匹配 `--keep-match <glob>` 的（可重复；只实现 `*` / `?`，其余字符按字面量 ——
+   刻意不引依赖，`src/` 的全部价值就在于「DSH 装坏了也能跑」）；
+3. 其余进删除集。
+`planPrune` 连磁盘都不碰，只产出 `{total, keepN, keepMatch, keep, drop}`；
+`--yes` 做的事就是**把这份预演输出执行掉**，中间没有第二套逻辑。
+
+**三层拒绝守卫（`deleteSnapshots`）**—— 删之前每个 id 都要过：
+1. 必须是一个**纯目录名**：非空、不含 `/` 或 `\`、不是 `.` / `..`；
+2. `path.resolve` 之后必须仍在快照目录**里面**（`dir.startsWith(root + path.sep)`，挡 `..` 逃逸）；
+3. 里面必须有 `meta.json`（确认这真的是一个快照，而不是别的什么东西 —— 比如手滑建的空目录）。
+被拒的进 `refused` 并让命令**退出码 1**，但不抛异常：调用方要能一次性看到全部结果，
+而不是删到第三个才炸掉、前两个已经没了。
+
+**怎么验的**
+- `test/snapshot.test.mjs`（**15/15 通过**，新增）：全部在 `fs.mkdtempSync` 的临时目录里跑，
+  **绝不碰 `state/snapshots/`**。钉住：glob 的三条语义（`*` 含空串 / `?` 单字符 / `.` `+` 按字面量
+  + 整串锚定不做子串匹配）、`keep` 取最新 N、`--keep-match` 是**加法不是替换**、`keep=0` 只留匹配项、
+  `keep>总数` 一份不删、**keep 与 drop 严格互补无重叠**、`planPrune` 只读不改盘；
+  然后是拒绝路径（`..`/`../..`/`a/b`/`a\b`/空串 五个全拒、不存在的目录拒、**没有 `meta.json` 的目录拒
+  且原目录必须还在**）、正常路径（删掉的消失、**其余快照逐个比对完全不受影响**），
+  最后一条是「预演之后真删，删的**正是**预演那一批」——把「预演忠实」这件事本身也钉住。
+- 真实现场（6 份快照）：`snapshot prune`（默认）→ 退出码 0、`没有需要删除的快照`；
+  `--keep 1 --keep-match "*-M0-*"` → 保留最新 1 份 + M0，列出 4 份将删除；
+  `--keep abc` → 退出码 2 + `--keep 需要一个非负整数（收到 "abc"）`；
+  `--json` → `total=6 keep=3 drop=3`；**预演之后 `state/snapshots` 目录数仍是 6**。
+
+**顺带修掉的文档缺陷**：`tracks/T5-engineering/README.md` 里「四条铁律 + 构建与落盘两步」整段
+**重复了两遍**，而 `vendor/visual` / `vendor/route` 两行被写在了代码块**外面**（表格已经结束），
+渲染时会变成散落的正文。已把两行并回表格、重复段落删掉、并把「构建与落盘是两步」补上它存在的
+理由（这就是「写安装包必须由人挑时间」的落地方式）。
+
+**教训**：删东西的工具，**默认行为必须是预演**；而预演的可信度不能靠文档承诺，要有一条断言
+（「真删的那批 == 预演的那批」）把它钉住。另外，「保留规则」永远只做加法 —— 只要有一类
+「必须永远保留」的快照，规则就得是 `keep N ∪ match globs`。
+
+### 2026-10-06 · 测试总入口 `test/run.mjs`（发现式）
+
+**为什么**
+`package.json` 里的 `"test": "node test/upgrade.test.mjs && node test/plugin.test.mjs"` 是**手写清单**：
+后来加的两套（`skill.test.mjs`、`snapshot.test.mjs`）**从来没进过总入口**。
+这不是「忘了跑一次」，而是**防线静默失效** —— `npm test` 全绿，而两套测试一次都没执行。
+手写清单的失效模式永远是同一个方向：**它不会因为漏了东西而变红**。
+
+**改法**
+- `test/run.mjs`：`readdirSync(test/)` 取全部 `*.test.mjs` 排序后逐个跑，收集退出码；
+  可用位置参数过滤（`node test/run.mjs snapshot`）。`spawnSync(..., { stdio: 'inherit' })`
+  而**不用管道**：受限沙箱里管道式 stdio 会直接 EPERM，直通终端既拿得到完整输出又不需要捕获。
+  **`test/` 下一套都找不到时以退出码 2 报错**（打印「这不是「通过」，是没有防线」），
+  而不是「0 套通过」地装成成功 —— 这跟 `doctor` 那条「非法 level 直接抛错」是同一个原则。
+- `package.json`：`"test": "node test/run.mjs"`；`test:upgrade` / `test:plugin` / `test:skill` /
+  `test:snapshot` 四个别名全部改为 `node test/run.mjs <关键字>`，不再各自写死文件路径。
+- `docs/05-conventions.md` 的「提交前必跑」补上 `node test/run.mjs`（4 套全绿）。
+- `.dsh/skills/deepseek-up-t/SKILL.md` 命令表补上这一行。
+
+**怎么验的**
+`node test/run.mjs` → `PASS plugin.test.mjs` / `PASS skill.test.mjs` / `PASS snapshot.test.mjs` /
+`PASS upgrade.test.mjs`，`4/4 套测试通过`，退出码 0。这一次它**真的**把四套都跑了 ——
+而改之前，同样的「全绿」只覆盖两套。
+
+**教训**：**能发现的东西就不要手写清单**。凡是「新增一项时要记得回来改」的地方，
+都要问一句「忘了改会怎样」——如果答案是「静默地少测一块」，那就把它改成发现式；
+实在必须手写，就让「清单为空」变成错误而不是成功。
 
 
 

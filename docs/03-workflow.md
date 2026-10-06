@@ -33,6 +33,9 @@ node src/cli.mjs snapshot diff <id>        # 先看差在哪
 node src/cli.mjs snapshot restore <id>     # 回滚（回滚前自动再留一份）
 ```
 
+快照**只在收尾时清理**（`snapshot prune`，见 ⑦）：攒到几十份之后，真正要回滚的那一份会被埋在
+一堆 `…改动前` 中间，选择成本比留快照贵得多。
+
 ## ③ 改
 
 按 [02-architecture.md](02-architecture.md) 的优先级选层。绝大多数改动就是在 `cordis.patch.yml` 里加一段：
@@ -102,6 +105,8 @@ L3 的落盘与 Harness 是否运行互斥。**当前会话本身就跑在 Harne
 
 - 在对应 `tracks/T*/README.md` 记录这次改动（改了什么、为什么、怎么验、怎么撤）。
 - `node src/cli.mjs baseline write` 刷新基线。
+- 快照攒多了就清一次：`node src/cli.mjs snapshot prune`（**默认只预演**，看清保留谁、删谁之后再加 `--yes`；
+  `--keep N` 改保留份数，`--keep-match "*-M0-*"` 指定永不删除的一类）。
 - git 提交（见 [05-conventions.md](05-conventions.md)）。
 
 ---
