@@ -115,5 +115,20 @@ check('L0 仍判定为「升级幸存，无需重打」', out.includes('声明�
 check('给出重打步骤', out.includes('node vendor/whale/install.mjs --yes'));
 check('有要重打的事 ⇒ 退出码 1', run.status === 1, `实际 ${run.status}`);
 
+// ── `--no-hash`：跳过 sha256 时必须诚实降级，不能偷偷算完再报「逐字节相同」 ──
+console.log('\n── --no-hash 语义 ──');
+const nh = spawnSync(process.execPath, ['src/cli.mjs', 'upgrade', '--no-hash', '--json'], {
+  cwd: PROJECT_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
+});
+const nhJson = JSON.parse(nh.stdout);
+check('--no-hash 时如实标注按大小比较', nhJson.changes.asar.basis === 'size', nhJson.changes.asar.basis);
+check('--no-hash 时 sha256 为空（没有偷偷算）', nhJson.changes.asar.toHash === null);
+check('--no-hash 时「是否原版」不再给结论', nhJson.pristine === null, String(nhJson.pristine));
+check(
+  '--no-hash 时 L3 状态仍能靠 insert 条目判定',
+  nhJson.patches.find((p) => p.layer === 'L3')?.state === 'absent',
+  nhJson.patches.find((p) => p.layer === 'L3')?.state,
+);
+
 console.log(bad ? `\n${bad} 个失败` : `\n全部通过`);
 process.exit(bad ? 1 : 0);

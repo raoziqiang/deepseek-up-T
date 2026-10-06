@@ -148,10 +148,12 @@ export async function currentFacts({ hash = true } = {}) {
     // 归档读不了也要能出报告：下面的判据会显示为「无法判断」。
   }
   // 121MB 的 sha256 只算一次，主归档与备份共用。
+  // `hash: false` 时**不为了「原版比对」偷偷再算一次**：否则 --no-hash 名不副实，
+  // 而且报告里 sha256 显示「?」却给出「逐字节相同」的结论，自相矛盾。
   const asarHash = hash && exists(P.asar) ? await sha256(P.asar) : null;
   let backupsMatch = null;
-  if (exists(P.asar) && exists(P.asarBackup)) {
-    backupsMatch = (asarHash ?? (await sha256(P.asar))) === (await sha256(P.asarBackup));
+  if (asarHash && exists(P.asarBackup)) {
+    backupsMatch = asarHash === (await sha256(P.asarBackup));
   }
   return {
     home: P.home,
@@ -249,15 +251,21 @@ export async function runUpgradeCheck({ hash = true } = {}) {
       to: cur.dshVersion,
       changed: Boolean(baseline) && baseline.dshVersion !== cur.dshVersion,
     },
-    asar: {
-      fromBytes: baseline?.facts?.asarBytes ?? null,
-      toBytes: cur.asarBytes,
-      fromHash: baseline?.facts?.asarHash ?? null,
-      toHash: cur.asarHash,
-      changed: Boolean(baseline) && baseline.facts?.asarHash && cur.asarHash
-        ? baseline.facts.asarHash !== cur.asarHash
-        : null,
-    },
+    asar: (() => {
+      const fromBytes = baseline?.facts?.asarBytes ?? null;
+      const toBytes = cur.asarBytes;
+      const fromHash = baseline?.facts?.asarHash ?? null;
+      const toHash = cur.asarHash;
+      // 优先逐字节；没有 sha256（--no-hash）时退回按大小比较，并如实标注依据，
+      // 免得「大小相同」被读成「内容相同」的证明。
+      const basis = fromHash && toHash ? 'hash' : fromBytes !== null && toBytes !== null ? 'size' : null;
+      const changed = !baseline || basis === null
+        ? null
+        : basis === 'hash'
+          ? fromHash !== toHash
+          : fromBytes !== toBytes;
+      return { fromBytes, toBytes, fromHash, toHash, basis, changed };
+    })(),
     bundles: {
       from: baseline?.bundles ?? [],
       to: cur.bundles,

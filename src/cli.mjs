@@ -439,12 +439,13 @@ async function cmdUpgrade({ flags }) {
   const mark = (changed) => (changed === null ? '(无法判断)' : changed ? '★ 变了' : '未变');
   console.log('\n── 变更 ──');
   console.log(`  Harness 版本     ${pad(c.version.from ?? '?', 14)} → ${pad(c.version.to ?? '?', 14)} ${mark(c.version.changed)}`);
-  console.log(`  app.asar 大小    ${pad(human(c.asar.fromBytes), 14)} → ${pad(human(c.asar.toBytes), 14)} ${mark(c.asar.changed)}`);
-  console.log(`  app.asar sha256  ${pad(c.asar.fromHash?.slice(0, 16) ?? '?', 14)} → ${pad(c.asar.toHash?.slice(0, 16) ?? '?', 14)}`);
+  const asarNote = c.asar.basis === 'size' ? '   （按大小比较：--no-hash 跳过了 sha256）' : '';
+  console.log(`  app.asar 大小    ${pad(human(c.asar.fromBytes), 14)} → ${pad(human(c.asar.toBytes), 14)} ${mark(c.asar.changed)}${asarNote}`);
+  console.log(`  app.asar sha256  ${pad(c.asar.fromHash?.slice(0, 16) ?? '(未算)', 14)} → ${pad(c.asar.toHash?.slice(0, 16) ?? '(未算)', 14)}`);
   console.log(`  profile bundles  ${pad(c.bundles.from.length, 14)} → ${pad(c.bundles.to.length, 14)} ${mark(Boolean(c.bundles.added.length || c.bundles.removed.length))}`);
   for (const b of c.bundles.added) console.log(`        + ${b}`);
   for (const b of c.bundles.removed) console.log(`        - ${b}`);
-  console.log(`  当前是未改造原版？ ${r.pristine === null ? '无法判断' : r.pristine ? '是（app.asar 与原版备份逐字节相同）' : '否（安装包已被改造过）'}`);
+  console.log(`  当前是未改造原版？ ${r.pristine === null ? (c.asar.basis === 'size' ? '无法判断（--no-hash 跳过了逐字节比对）' : '无法判断') : r.pristine ? '是（app.asar 与原版备份逐字节相同）' : '否（安装包已被改造过）'}`);
 
   const l3 = r.patches.filter((p) => p.layer === 'L3');
   const l0 = r.patches.filter((p) => p.layer === 'L0');
@@ -540,7 +541,7 @@ function usage() {
 
 选项
   --json                  机器可读输出
-  --no-hash               doctor：跳过 121MB 安装包的 sha256（更快）
+  --no-hash               doctor / upgrade：跳过 121MB 安装包的 sha256（更快；upgrade 会退回按大小比较）
   --limit N               asar ls / grep 的结果上限
   --out 文件              asar cat 落盘目标
   --file <asar>           覆盖要读的归档路径
