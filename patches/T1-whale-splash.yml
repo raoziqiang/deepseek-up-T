@@ -1,0 +1,79 @@
+# patches/T1-whale-splash.yml
+#
+# T1（外观与体验）的第一次 L3 改造声明。
+# 状态：已构建（产物在 ../../.probe/dist），**尚未落盘** —— 落盘需要先退出 Harness。
+#
+# 执行器：vendor/whale/build.mjs（构建）+ vendor/whale/install.mjs（落盘/回滚）
+# 两者都从这个文件读 verify.expect_diff_entries 与 target.entries，
+# 声明与实际差异不一致就报错退出（见 vendor/lib/harness.mjs 的 readPatchDecl）。
+
+id: T1-whale-splash
+name: 启动窗口画卷鲸鱼动画 + 桌面挂件 + 视觉模型自动路由
+track: T1
+
+target:
+  archive: resources/app.asar
+  entries:
+    # ── 改动的既有条目（4 个）──
+    - path: renderer/welcome.html
+      action: replace              # 换成带画卷/鲸鱼容器的版本
+      source: ../../.probe/build/renderer/welcome.html
+    - path: lib/main.js
+      action: patch                # 锚点替换：挂件窗口的创建与生命周期
+      source: ../../.probe/main.js
+      patcher: vendor/whale/patch-main.mjs
+    - path: lib/preload-app.cjs
+      action: patch                # 锚点替换：挂件的 IPC 桥
+      source: ../../.probe/preload-app.cjs
+      patcher: vendor/whale/patch-preload.mjs
+    - path: dsh/node_modules/@deepseek-ai/dsh-api-session-controller/lib/index.js
+      action: patch                # 锚点替换：按模型能力自动路由视觉请求
+      source: ../../.probe/session-controller.js
+      patcher: vendor/whale/patch-session-controller.mjs
+
+    # ── 新增条目（7 个）──
+    - path: renderer/whale.css
+      action: insert
+      source: ../../.probe/build/renderer/whale.css
+    - path: renderer/whale-splash.js
+      action: insert
+      source: ../../.probe/build/renderer/whale-splash.js
+    - path: renderer/pendant.html
+      action: insert
+      source: ../../.probe/build/renderer/pendant.html
+    - path: renderer/pendant.css
+      action: insert
+      source: ../../.probe/build/renderer/pendant.css
+    - path: renderer/pendant.js
+      action: insert
+      source: ../../.probe/build/renderer/pendant.js
+    - path: lib/preload-charm.cjs
+      action: insert
+      source: ../../.probe/build/lib/preload-charm.cjs
+    - path: lib/welcome/whale-animation.js
+      action: insert
+      source: ../../.probe/build/whale-animation.js      # 经 bundle 成经典脚本（CSP 不允许 ESM）
+      bundler: vendor/whale/bundle.mjs
+
+verify:
+  expect_diff_entries: 11
+  syntax_check:
+    - lib/welcome/whale-animation.js
+    - renderer/whale-splash.js
+    - renderer/pendant.js
+    - lib/main.js
+    - lib/preload-app.cjs
+    - lib/preload-charm.cjs
+    - dsh/node_modules/@deepseek-ai/dsh-api-session-controller/lib/index.js
+
+rollback:
+  - node vendor/whale/install.mjs --rollback
+
+notes: |
+  为什么改：启动界面只有静态 logo，没有品牌感；用户希望有一个可拖拽的桌面挂件。
+
+  已知限制：
+  1. Harness 升级会整体覆盖 app.asar，本次改造需要重新落盘（见 T5 的升级检测待办）。
+  2. 启动窗口有严格 CSP，动画模块必须打成经典脚本，不能用 ESM。
+  3. 当前模型不支持读图，所以鲸鱼形状的结论来自像素描摹（../../tools/trace-whale.mjs）
+     而不是直接观看截图。
