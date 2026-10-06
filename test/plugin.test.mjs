@@ -14,6 +14,8 @@
 
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -221,6 +223,118 @@ check('两条清理路径都可调用且不抛', () => {
     assert.equal(typeof dispose, 'function');
     dispose();
   }
+});
+
+// ── ④ 客户端 bundle（lib/client.js）────────────────────────────────
+//
+// 为什么客户端半侧也要离线测：它的失败同样是**静默**的——包声明了 dsh.client 而 bundle 形态
+// 不对时，表现只是「设置里没有那一页」，既不报错也没有堆栈。
+// 这里给一个 stub 的 window.__ModuleLoader__ 抓下 factory，再自己执行并跑一遍 apply()。
+
+const CLIENT_SRC = readFileSync(path.join(PLUGIN, 'lib', 'client.js'), 'utf8');
+
+function makeReactStub() {
+  return {
+    createElement: (type, props, ...children) => ({ type, props, children }),
+    useState: (initial) => [initial, () => {}],
+    useEffect: () => {},
+  };
+}
+
+function runClientBundle({ withLoader = true } = {}) {
+  let captured = null;
+  const sandbox = {
+    window: withLoader ? { __ModuleLoader__: { load: (spec) => (captured = spec) } } : {},
+    Symbol,
+    Object,
+    Array,
+    JSON,
+    Math,
+    Error,
+    setInterval: () => 0,
+    clearInterval: () => {},
+    fetch: () => Promise.reject(new Error('offline')),
+    console,
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(CLIENT_SRC, sandbox, { filename: 'plugins/dsh-up-t/lib/client.js' });
+  return captured;
+}
+
+const bundle = runClientBundle();
+const clientExports =
+  bundle && typeof bundle.factory === 'function'
+    ? bundle.factory((name) => {
+        if (name === 'react') return makeReactStub();
+        throw new Error(`客户端 bundle 出现了未声明的 require：${name}`);
+      })
+    : null;
+
+const clientState = { injectKeys: [], registers: [] };
+
+check('lib/client.js 是经典脚本，不含 ESM 语法', () => {
+  assert.ok(!/^\s*(import|export)\s/m.test(CLIENT_SRC), '不得含 ESM import/export（CSP 不允许）');
+  assert.ok(CLIENT_SRC.includes('__ModuleLoader__'), '必须走 ModuleLoader 协议');
+});
+
+check('没有 __ModuleLoader__ 时静默退出、不抛错', () => {
+  const captured = runClientBundle({ withLoader: false });
+  assert.equal(captured, null);
+});
+
+check('bundle 以 id="dsh-up-t" 注册，factory 导出 Cordis 客户端插件', () => {
+  assert.ok(bundle, '没有抓到 load() 的调用');
+  assert.equal(bundle.id, 'dsh-up-t');
+  assert.equal(typeof bundle.factory, 'function');
+  assert.ok(clientExports, 'factory 没有返回模块');
+  assert.equal(typeof clientExports.apply, 'function');
+  // 注意：vm 里造出来的数组与宿主 realm 不同源，所以只能用 Array.isArray + Array.from 比较。
+  assert.equal(Array.isArray(clientExports.inject), true);
+  assert.deepEqual(Array.from(clientExports.inject), ['slots'], '客户端半侧必须 inject slots');
+  assert.equal(clientExports[Symbol.toStringTag], 'Module');
+});
+
+check('apply() 只向 settings.section 注册一个条目，形态正确', () => {
+  const ctx = {
+    effect(fn) {
+      assert.equal(typeof fn(), 'function', 'ctx.effect 必须返回 disposer');
+    },
+    slots: {
+      inject(key, cb) {
+        clientState.injectKeys.push(key);
+        return cb();
+      },
+      register(entry, component) {
+        clientState.registers.push({ entry, component });
+        return () => {};
+      },
+    },
+  };
+  clientExports.apply(ctx);
+  assert.deepEqual(clientState.injectKeys, ['settings.section']);
+  assert.equal(clientState.registers.length, 1);
+  const { entry, component } = clientState.registers[0];
+  assert.equal(entry.name, 'settings.section');
+  assert.equal(entry.id, 'dsh-up-t');
+  assert.equal(typeof entry.order, 'number');
+  assert.equal(entry.label(), 'deepseek-up-T');
+  assert.equal(typeof entry.inject, 'function');
+  assert.equal(Object.keys(entry.inject()).length, 0, 'business share 应为空对象');
+  assert.equal(typeof component, 'function');
+});
+
+check('设置页组件能渲染出 loading 态（不抛、返回元素树）', () => {
+  const { component } = clientState.registers[0];
+  const el = component();
+  assert.ok(el && typeof el === 'object', '组件必须返回元素');
+  assert.equal(el.type, 'div');
+});
+
+check('package.json 声明了 dsh.client.platform=web 且导出 ./client', () => {
+  const pkg = JSON.parse(readFileSync(path.join(PLUGIN, 'package.json'), 'utf8'));
+  assert.equal(pkg.dsh.client.platform, 'web');
+  assert.equal(pkg.exports['./client'].default, './lib/client.js');
+  assert.equal(pkg.exports['.'].default, './lib/index.js');
 });
 
 // ── 汇总 ────────────────────────────────────────────────────────

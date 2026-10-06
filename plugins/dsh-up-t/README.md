@@ -5,6 +5,10 @@
 在 DSH 界面**左下角**放一个小胶囊：显示 Harness 版本 + 安装包是否被改造过，点开有细节。
 右键点它可隐藏（位置与隐藏状态都存在 `localStorage`）。
 
+另外在**设置里挂了一整页**「deepseek-up-T」（`settings.section` 槽位，`replaceRisk: none`，
+不会遮蔽任何自带界面）。这一页是 T4 那条线的正题：**用 Slot 系统挂自有面板**。
+左下的胶囊走的是更轻的注入通道，两者互不依赖 —— 胶囊是「通道可用」的证明，设置页是「槽位可用」的证明。
+
 ```
 up-T · 44.0.0        ← 灰点：安装包与原版备份大小相同（很可能未被改造）
 up-T · 44.0.0        ← 绿点：大小不同（已被改造）
@@ -45,8 +49,55 @@ up-T · ?             ← 黄点：没有原版备份可比 / 宿主没回应
    桌面壳的 `index.html` 是从安装包静态 dist 直出（`dsh-app://app/`），不经过宿主的 `renderIndex()`。
    `tapIndex` 只为 Web 形态保留（本插件仍然注册了它，作为兼容）。
 
-这三条连同 `apply()` 的行为，全部被 `test/plugin.test.mjs` 的 14 条断言钉住 ——
+这三条连同 `apply()` 的行为，全部被 `test/plugin.test.mjs` 的断言钉住 ——
 因为「行没赶上收集」这类失败是静默的，在真机上很难复现，只能在离线把行为钉死。
+
+## ★ 客户端半侧（`lib/client.js`）与它的第四条约束
+
+**宿主提供的是已构建的客户端 bundle，它自己不会替你构建。** 每个声明了 `dsh.client` 的包，
+启动前必须已经有 `lib/client.js`；缺了会**明确导致激活失败**（`@deepseek-ai/dsh-client-modules`
+的 README 就是这么写的）。而 `profiles/desktop/package.json` **没有 `scripts` 字段** ——
+profile 里根本不存在 `pnpm run build` 这条链，所以「让宿主替我构建」这条路不存在。
+⇒ **`lib/client.js` 是手写并提交进仓库的产物，不是构建结果。**
+
+第 4 条约束：**客户端 bundle 必须是 ModuleLoader 的惰性 CJS factory**，不能是 ESM 模块
+（CSP 不允许 ESM）。形态照抄真实上线的 `dsh-better-sidebar/lib/client.js`：
+
+```js
+window.__ModuleLoader__.load({
+  id: "dsh-up-t",
+  factory: function (require) {
+    var module = { exports: {} };
+    var exports = module.exports;
+    Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
+    var React = require("react");        // React 在外壳冻结的平台模块表里，无需声明
+    // …组件定义…
+    var inject = ["slots"];              // Cordis **服务名**数组（不是槽位名）
+    function apply(ctx) {
+      ctx.effect(function () {
+        return ctx.slots.inject("settings.section", function () {
+          return ctx.slots.register({
+            name: "settings.section",    // 槽位键
+            id: "dsh-up-t",              // 条目 id
+            order: 90,
+            label: function () { return "deepseek-up-T"; },
+            inject: function () { return {}; },   // business share
+          }, UpTSection);
+        });
+      }, "dsh-up-t: settings.section");
+    }
+    exports.apply = apply;
+    exports.inject = inject;
+    return module.exports;
+  },
+});
+```
+
+`package.json` 侧要配两处：`exports["./client"]` 指向该文件，`dsh.client.platform = "web"`。
+
+**槽位规则（`@deepseek-ai/dsh-client-ui-slots`）**：`settings.section` 是 `list` 槽位，
+一个条目就是设置里的一整页；`SlotCore` 构造时预置 `'root'`。注册**未声明**的 slot、
+重复声明子项、缺 `select` 的 chain 都会在**加载时抛错** —— 也就是说挂错座位不会静默，会直接报错。
 
 ## 安装（本地开发形态）
 
@@ -82,9 +133,10 @@ node src\cli.mjs precheck --profile-json state\candidate\package.json
 
 ```powershell
 cd D:\Z1848\harness-ds\deepseek-up-T
-node test\plugin.test.mjs          # 14 条断言：注入行、路由、清理
+node test\plugin.test.mjs          # 20 条断言：注入行、两条路由、客户端 bundle 形态、清理
 node src\cli.mjs doctor            # bundles 全部可解析
 node src\cli.mjs precheck          # 组合可用
 ```
 
-**胶囊真的出现**只能在重启 DSH 之后看到 —— 组合层文件没有热重载。
+**胶囊与设置页真的出现**只能在重启 DSH 之后看到 —— 组合层文件没有热重载。
+（客户端脚本本身按 mtime 重读，所以**改客户端代码之后硬刷新页面即生效**，不用再重启。）

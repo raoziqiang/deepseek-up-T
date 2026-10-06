@@ -114,13 +114,18 @@
 **候选动作**
 1. ✅ **最小可用插件脚手架** —— 2026-10-06 落地：`plugins/dsh-up-t`（`package.json` +
    `cordis.patch.yml` + `lib/index.js` + `assets/client.js`），界面左下角一个显示改造状态的小胶囊。
-   走的是**最轻的那条路**（宿主注册 HTTP 路由 + 推一行注入），不是 Slot 系统 ——
-   后者要求客户端半身被打包进前端（`dsh.client.inject` 那一类），需要构建链。
-   离线单测 14 条断言钉住三条硬约束（注入行必须是内联 `script` 而非 `script-src`；
+   走的是**最轻的那条路**（宿主注册 HTTP 路由 + 推一行注入），不是 Slot 系统。
+   离线单测钉住三条硬约束（注入行必须是内联 `script` 而非 `script-src`；
    不能用对象级 `inject`；桌面端 `tapIndex` 不生效）；`precheck --profile-json` 候选清单预检通过；
-   落盘后 `doctor` 13 个 bundle 全部可解析。**只差重启 DSH 后确认胶囊真的出现。**
-2. 挂一个自有面板到现有槽位（还没有真正用上 Slot 系统）。
-3. 把高频操作做成按钮，减少手动输入。
+   落盘后 `doctor` 13 个 bundle 全部可解析。
+2. ✅ **用 Slot 系统挂一个自有面板** —— 2026-10-06 落地：`plugins/dsh-up-t/lib/client.js`（手写并提交的
+   ModuleLoader 格式客户端 bundle）在 `settings.section` 槽位挂出**设置里的一整页**「deepseek-up-T」。
+   选这个座位是因为它 `list` + `replaceRisk: none`，**不会遮蔽任何自带界面**。
+   关键约束：宿主**只提供已构建的客户端 bundle**、自己不构建，而 profile 里没有 `scripts`，
+   所以这份 `lib/client.js` 只能手写（**这是本项目第一条不依赖任何构建链的客户端产物**）。
+   离线单测 20 条断言钉住 bundle 形态与槽位注册签名。
+3. ⏳ 把高频操作做成按钮，减少手动输入。
+4. ⏳ 重启 DSH 后确认胶囊与设置页真的出现。
 
 **验收**：界面上出现自建面板；刷新/热重载后仍在；Harness 升级后仍在。
 

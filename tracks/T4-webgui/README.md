@@ -58,9 +58,9 @@
 
 - [x] 用 `cordis_inspect_query` 把可用槽位树读出来并记录 —— 2026-10-06 完成，见下方记录
 - [x] 最小可用插件脚手架（host 入口 + client 入口 + `dsh` 声明）—— 2026-10-06 完成：`plugins/dsh-up-t`
-- [ ] 挂一个自有面板到现有槽位（脚手架走的是注入路线，还没用 Slot 系统）
+- [x] 挂一个自有面板到现有槽位 —— 2026-10-06 完成：`settings.section` 一整页「deepseek-up-T」，见下方第三步记录
 - [ ] 把高频操作做成按钮
-- [ ] 重启 DSH 后确认胶囊真的出现
+- [ ] 重启 DSH 后确认胶囊与设置页真的出现
 
 ## 验收
 
@@ -69,6 +69,48 @@
 - Harness 升级后仍在（证明它确实活在 L1 而不是 L3）。
 
 ## 记录
+
+### 2026-10-06 · 第三步：用 Slot 系统挂一页设置（`lib/client.js`）
+
+**为什么这步比第二步难**：第二步的胶囊走的是「注入一段脚本」的轻通道，客户端代码随便写。
+这一步要走槽位系统，就必须是一个**真正的客户端 Cordis 插件**——而宿主**不会替你构建**它。
+
+**查清的四件事**
+1. 客户端半侧能用什么：client `Service/listService` 给出 `layout` / `locale` / `sessions` /
+   **`slots`**（`register` / `registerFactory` / `inject`）/ `theme` / `timer` / `uiWorkspace` / `workspaces`。
+   动态客户端半身（`Builtin/listBuiltins`）另有一套：只有 `ctx`（`get`/`on`/`provide`/`effect`，
+   **没有 `inject`**）、`React`、`host.call`、`styles.insert`。
+2. **宿主只提供已构建的客户端 bundle**（`@deepseek-ai/dsh-client-modules/README.zh.md`：
+   「启动前 `pnpm run build` 必须已产出每个 `lib/client.js`；缺失 bundle 会明确导致激活失败」）。
+   而 `profiles/desktop/package.json` **没有 `scripts` 字段** ⇒ profile 里不存在那条构建链。
+   ⇒ **`lib/client.js` 只能手写并提交进仓库。**
+3. bundle 的**确凿形态**（从真实上线的 `dsh-better-sidebar/lib/client.js` 逆出，1,099,283 字节）：
+   `window.__ModuleLoader__.load({ id, factory: (require) => { … return module.exports } })`，
+   factory 导出的是 `exports.apply` + `exports.inject`（Cordis **服务名**数组，如
+   `["slots","sessions","locale","modules","connection","remote",…]`）；`require("react")` 直接可用。
+4. 槽位注册的**运行期签名**（`dsh-better-sidebar/lib/client.js:23284`，正是 `settings.section`）：
+   `ctx.slots.inject(键, () => ctx.slots.register({ name: 键, id, order, label: () => string, inject: () => businessShare }, 组件))`。
+   另从 `@deepseek-ai/dsh-client-ui-slots/README.zh.md`（7278 字节）确认：四种 kind
+   `single`/`list`/`keyed`/`chain`；组件拿到五个框架 share 组合的 props；
+   **声明即认领**——注册未声明的 slot 会在**加载时抛错**，所以挂错座位不会静默。
+
+**选座位的理由**：`settings.section` 是 `list` 且 `replaceRisk: none` —— 一个条目 = 设置里的一整页，
+**不会遮蔽任何自带界面**。这是「用 Slot 系统挂自有面板」里语义最干净的一种。
+
+**做了什么**：新建 `plugins/dsh-up-t/lib/client.js`（经典脚本、无 ESM；顶部守 `window.__ModuleLoader__`
+缺失就静默退出，绝不影响外壳启动；`inject = ["slots"]`；注册一页 `id: "dsh-up-t"`、`order: 90`、
+标签「deepseek-up-T」，组件 `UpTSection` 每 30 秒从 `/dsh-up-t/status.json` 读一次并渲染三态）；
+`package.json` 加 `exports["./client"]` 与 `dsh.client.platform = "web"`。
+
+**怎么验的**（离线，不 boot 实例）：`test/plugin.test.mjs` 加 6 条断言 —— 在 `node:vm` 里给一个 stub 的
+`window.__ModuleLoader__` 抓下 factory、用假 `require` 执行、断言导出的 `apply`/`inject` 形态，
+再用假 `ctx`（记录 `slots.inject` / `slots.register`）跑 `apply()`，断言注册进 `settings.section`
+且条目形态正确、组件能渲染出 loading 态。**共 20/20 项通过。**
+踩到的坑：vm 里造出来的数组/对象与宿主 realm 不同源，`assert.deepEqual` 会因原型不相等而误报；
+改用 `Array.isArray` + `Array.from` 与 `Object.keys(...).length` 比较。
+
+**还没验的**：设置里真的出现那一页 —— 要看这个界面必须**重启 DSH**（组合层文件没有热重载）。
+不过客户端脚本按 mtime 重读，之后改客户端代码硬刷新即可，不用再重启。
 
 ### 2026-10-06 · 第一步：把运行时事实读出来（没有猜任何 API）
 

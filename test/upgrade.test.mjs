@@ -32,7 +32,10 @@ const decls = (f) => path.join(PROJECT_ROOT, 'patches', f);
 // ── L0：真实现场应当一致 ──
 console.log('── L0 层 ──');
 const live = livePatchEntries(readText(P.cordisPatch));
-check('顶层条目恰好 11 个（不能把 config 里嵌套的 - id: 也算进来）', live.size === 11, `实际 ${live.size}`);
+// 现场 cordis.patch.yml 的顶层条目数。它**不是**一个魔法数字，而是「解析器没被 config 里嵌套的
+// `- id:` 骗到」这条断言的量具：permission 三档 preset 会让朴素正则数出 41 个。每次落盘新条目时
+// 这个数要跟着改——改它的时候请确认「多出来的正好是我加的那一条」。
+check('顶层条目恰好 12 个（不能把 config 里嵌套的 - id: 也算进来）', live.size === 12, `实际 ${live.size}`);
 const t3 = readText(decls('T3-session-search.yml'));
 const applied = inspectL0Decl('T3-session-search.yml', t3, live);
 check('T3 声明判定为 applied', applied.state === 'applied', applied.state);
