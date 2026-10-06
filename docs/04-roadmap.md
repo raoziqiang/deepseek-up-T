@@ -72,8 +72,8 @@
 **目标**：同样的活少花时间少花 token。
 
 **候选动作**
-1. **开会话全文搜索**（P4）。默认 `openAt: never` 时侧边栏只能按标题和工作区名匹配；打开后可以对历史会话内容检索。这是投入产出比最高的一项。
-2. **缓存与压缩参数**：`spill-policy.maxInlineTokens`、`tool-result-pruner.thresholdChars`、`compaction-basic` —— 直接决定长会话的成本。
+1. **开会话全文搜索**（P4）。默认 `openAt: never` 时侧边栏只能按标题和工作区名匹配；打开后可以对历史会话内容检索。这是投入产出比最高的一项。✅ 已落地，待重启验收。
+2. **缓存与压缩参数**：`spill-policy.maxInlineTokens`、`tool-result-pruner.thresholdChars`、`compaction-basic` —— 直接决定长会话的成本。⏳ 缓存侧已结案（命中率 98.3%、压缩净 +92.35M，见 `tracks/T3-efficiency/README.md`）：**不要在缓存上优化，杠杆在「有多少内容进入上下文」**。
 3. **会话标题质量**：`session-title-llm` 的 `targetWords: 5` / `targetCjkCharacters: 10` / `maxInputBytes: 4096`。
 4. **交互习惯**：`ui-conversation.busyEnter: steer` 已设；继续看 `dsh-client-ui-input-trigger` 的快捷键与 `dsh-commands` 的斜杠命令。
 5. **记忆**：`@furongjun1999/dsh-memory` 与 `billion-context` 已在，梳理它们的写入/召回策略。
@@ -89,6 +89,9 @@
 **当前状态**
 - `@deepseek-ai/dsh-client-ui-slots` 是槽位系统。
 - `dsh-better-sidebar@0.24.1` 已经证明这条路可行：它的 `package.json` 暴露了一个 service，**供别的插件注册 sidebar tab 与 file viewer**。
+- ✅ 已用 `cordis_inspect_query`（client `Slots`）把**实时**槽位树读出来并归档到 `tracks/T4-webgui/README.md`：
+  24 个 `replaceRisk: none` 的加法座位 + 替换座位清单 + list 槽位统一注册签名 + `main` / `tool.call.toolview` 的已占用键。
+  ⚠️ 同一次侦察的副产品：`Config/listConfigs` 的 `status: inactive` **不等于关掉**（`tool-fs`/`tool-pwsh` 都报 `inactive` 却正常工作），别据此判断插件是否启用。
 - 插件声明方式（可直接照抄 `dsh-better-sidebar`）：
 
 ```json
