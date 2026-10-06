@@ -29,3 +29,7 @@ dist/
 build/
 *.asar
 *.asar.tmp
+
+# 暂存构建（构建链的中间产物 + 待落盘的整包，可随时用 vendor/whale/build.mjs 重建）
+state/staged/
+state/cmp/

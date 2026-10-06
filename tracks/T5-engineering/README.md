@@ -28,22 +28,29 @@
 | `vendor/asar/list.mjs` | 列条目 / `--get` 抽出条目 | 只读 |
 | `vendor/asar/verify.mjs` | 逐条比对两个归档，`--expect N` 校验「恰好 N 处预期差异」 | 只读 |
 | `vendor/asar/write.mjs` | **单条目重写**，其余条目字节保持不变 | 写安装包 |
+| `vendor/whale/build.mjs` | 按 `patches/*.yml` 生成暂存包 `state/staged/app.asar`（不碰安装目录） | 只写 `state/` |
+| `vendor/whale/patch-main.mjs` | `lib/main.js` 锚点替换（锚点必须唯一） | 只写暂存树 |
+| `vendor/whale/patch-preload.mjs` | `lib/preload-app.cjs` 锚点替换 | 只写暂存树 |
+| `vendor/whale/patch-session-controller.mjs` | 视觉模型自动路由的锚点替换 | 只写暂存树 |
+| `vendor/whale/bundle.mjs` | 动画模块 → CSP 允许的经典脚本 | 只写暂存树 |
 | `vendor/whale/install.mjs` | 落盘（三道保险）/ `--rollback` | **写安装包** |
 
 约定见 `vendor/README.md`。四条铁律：省略 `--out` 绝不原地重写、写安装包前必须过进程守卫、
 落盘后必须拿实际差异集合与声明逐项比对、声明读不到就报错不用默认值。
 
+**构建与落盘是两步**，刻意分开：
+
+```powershell
+node vendor/whale/build.mjs            # → state/staged/app.asar（可随便重跑、失败、比对）
+node vendor/whale/install.mjs --yes    # 需要先完全退出 Harness
+```
+
 ## 待归拢的既有资产（`../tools/`，共 23 个脚本）
 
-已归拢 5 个（上表）。剩余 18 个：
+已归拢 9 个（另新增 `vendor/lib/harness.mjs`）。剩余 14 个：
 
 | 脚本 | 作用 |
 | --- | --- |
-| `patch-main.mjs` | 对 `lib/main.js` 做锚点替换（锚点必须唯一，否则报错） |
-| `patch-preload.mjs` | 对 `lib/preload-app.cjs` 做锚点替换 |
-| `patch-session-controller.mjs` | 对 `dsh-api-session-controller` 做锚点替换 |
-| `bundle-whale.mjs` | 把动画模块打成 CSP 允许的经典脚本 |
-| `build-whale.mjs` | 一键：打包 → 打补丁 → 语法检查 → 重打包 → 交付 |
 | `capture-frames.mjs` | 无头 Chrome + CDP 按时间轴截图 |
 | `trace-whale.mjs` | 在真实渲染像素上描轮廓，打印 ASCII |
 | `analyze-frames.mjs` | 统计每帧占比与质心轨迹 |
@@ -58,11 +65,12 @@
 - [x] **只读安装包工具** —— `dsht asar ls|cat|grep`，2026-10-06 完成
 - [x] **L3 改动的声明式描述** —— `patches/T1-whale-splash.yml` 已写，执行器已能解析并校验（见下方记录）
 - [x] **归拢第一批** —— `vendor/lib/harness.mjs` + `asar` 三件套 + `whale/install.mjs`，2026-10-06 完成
-- [ ] **归拢第二批** —— `vendor/whale/build.mjs` 与 7 个补丁/打包器（构建链），以及视觉验证与 T2 探针
+- [x] **归拢第二批（构建链）** —— `vendor/whale/build.mjs` + 三个 patcher + `bundle.mjs`，2026-10-06 完成
+- [ ] **归拢第三批** —— 视觉验证 6 个 + T2 探针 8 个
 - [ ] **升级检测**：把 `state/baseline.json` 里的 `app.asar` sha256 与当前比对，版本变了就提示哪些 L3 改动需要重打
 - [ ] 快照保留策略：自动保留最近 N 份 + 所有带标签的
 - [ ] `doctor` 扩展：接入 profile 重载后的运行时探测
-- [ ] 处置 `app.asar.tmp` 残留（115.8MB，doctor 每次都会 WARN）
+- [x] 处置 `app.asar.tmp` 残留（115.8MB）—— 确认是坏构建，已删除
 
 ## 验收
 
@@ -150,3 +158,48 @@ in-box bundle) always comes from the same installation as the running dsh, never
 2. `write.mjs` 头注释写「省略 `--out` 写 `<归档>.tmp`」，代码却把「省略」当成原地重写。
    改为省略即写暂存位，只有显式 `--out <归档>` 才原地 + 过守卫——原地重写正在使用的安装包
    必须是**显式**选择。
+
+### 2026-10-06 · 归拢第二批：声明驱动的构建链
+
+**为什么**
+`patch-*.mjs` 这些脚本本身是好的，但它们只知道「拿一个源文件、吐一个产物」，不知道自己在
+`patches/*.yml` 里对应哪一条、也不知道这条声明一共应该改几个条目。声明与执行器之间必须补上
+**闭环**：改几个、改哪些、素材从哪来、产物往哪去，全部由声明驱动。
+
+**做成了什么**
+- 四个脚本原样搬进 `vendor/whale/`（三个 patcher + `bundle.mjs`）。侦察确认它们都是纯
+  `[src, out]` 过滤器，只有 `build-whale.mjs`/`install-whale.mjs` 猜过工作区根，那两个已被
+  `vendor/lib/harness.mjs` 取代。
+- `vendor/whale/build.mjs`：解析声明 → 逐条目生成到 `state/staged/tree/<归档内路径>`（路径镜像，
+  所以声明的键与待写入文件是同一个键，不会错位）→ 按 `verify.syntax_check` 做 `node --check`
+  → `write.mjs --out state/staged/app.asar` → 用 `verify.mjs --json` 把**实际差异条目集合**
+  与声明逐项比对。**整个过程不碰安装目录。**
+- `readPatchDecl()` 补齐逐条目字段解析（`path`/`action`/`source`/`patcher`/`bundler`）与
+  `syntax_check` 列表，并修掉行内注释没剥离的 bug。
+
+**新增的一条关键守卫（值得单独记）**
+`action: patch` 的 `source` 是「原版素材」。构建时强制要求它与 `--from` 归档里的那一份
+**逐字节相同**，否则失败并提示重新抽取。理由：拿旧版本的原版素材去打补丁，**所有锚点仍然会
+命中**，于是产出会静默丢掉新版本的代码——这是最危险的一类失败，因为它看起来完全正常。
+（实测 `../.probe/` 里那三份素材与当前 app.asar 内条目 sha256 一致，所以是可信的。）
+
+**修掉的两个 bug**
+1. 声明里写 `source: xxx.js      # 经 bundle 成经典脚本`，解析后连行内注释一起当成了路径，
+   报「缺少素材：`...whale-animation.js      # 经 bundle 成经典脚本（CSP 不允许 ESM）`」。
+   修法：`unquote()` 里先 `value.replace(/\s+#.*$/, '')` 再 trim。
+2. **注入重复 import**：构建出的 `lib/main.js` 过不了 `node --check` ——
+   `SyntaxError: Identifier 'readFileSync' has already been declared`。
+   原版 `main.js` 的 esbuild 产物第 8 行已经 import 了 `readFileSync`/`writeFileSync`，
+   而 `patch-main.mjs` 无条件再插一行 `import { readFileSync, writeFileSync } from "node:fs";`。
+   修法：改成先扫出已有 `node:fs` 命名绑定集合，**只补缺的名字**；`electron` 的 `screen` 同样
+   改为条件插入。**这个 bug 就是旧 `app.asar.tmp` 坏掉的原因**（见 T1 记录）。
+
+**怎么验**
+- `node vendor/whale/build.mjs` → exit 0，`11 个条目按声明改动，其余 11466 个条目逐字节一致`，
+  暂存包 `state/staged/app.asar` = 121,415,560 B（原版 121,348,951 B）。
+- 7 个 JS 产物逐个 `node --check` 全部通过。
+- 与旧坏暂存包交叉比对：`node vendor/asar/verify.mjs "<旧 app.asar.tmp>" state/staged/app.asar --expect 2`
+  → `OK：恰好 2 个预期条目不同，其余逐字节一致`，差异恰好是
+  `lib/main.js 497450 -> 497395` 与 `lib/welcome/whale-animation.js 23820 -> 23828`
+  ⇒ **确定性构建**：同样的声明每次产出同样的包。
+

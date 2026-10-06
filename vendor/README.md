@@ -14,15 +14,27 @@
 
 ```
 vendor/
-  lib/harness.mjs      vendor 与 src 的唯一接口：路径、Harness 进程守卫、补丁声明解析
-  asar/list.mjs        列条目 / 抽条目
-  asar/verify.mjs      逐字节比对两个归档，--expect N 校验差异数量
-  asar/write.mjs       单条目重写，其余条目字节保持不变
-  whale/install.mjs    把已构建的产物落盘 / 从备份回滚
-  whale/build.mjs      （待归拢）构建：打包 → 打补丁 → 语法检查 → 重打包
-  whale/patch-*.mjs    （待归拢）lib/main.js、lib/preload-app.cjs、session-controller 的锚点替换
-  whale/bundle.mjs     （待归拢）动画模块 → CSP 允许的经典脚本
+  lib/harness.mjs          vendor 与 src 的唯一接口：路径、Harness 进程守卫、补丁声明解析
+  asar/list.mjs            列条目 / 抽条目
+  asar/verify.mjs          逐字节比对两个归档，--expect N 校验差异数量
+  asar/write.mjs           单条目重写，其余条目字节保持不变
+  whale/build.mjs          按 patches/*.yml 构建暂存包（不碰安装目录）
+  whale/install.mjs        把暂存包落盘 / 从备份回滚（唯一会覆盖在用 app.asar 的地方）
+  whale/patch-main.mjs     lib/main.js 的锚点替换
+  whale/patch-preload.mjs  lib/preload-app.cjs 的锚点替换
+  whale/patch-session-controller.mjs  视觉模型自动路由的锚点替换
+  whale/bundle.mjs         动画模块 → CSP 允许的经典脚本
 ```
+
+## 构建与落盘是两步
+
+```powershell
+node vendor/whale/build.mjs     # → state/staged/app.asar（可随便重跑、可比对）
+node vendor/whale/install.mjs --yes   # 需要先退出 Harness
+```
+
+分开的理由：构建可以随时重跑、失败、回退；落盘只有一次机会。
+构建阶段就把「暂存包 vs 原版」逐字节比完了，所以落盘只是一次文件替换。
 
 ## 路径约定
 

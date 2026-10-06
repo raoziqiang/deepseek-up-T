@@ -7,58 +7,31 @@
 //      多一条少一条、或者哪条不是声明里写的，都算失败。
 //
 // 用法：
-//   node vendor/whale/install.mjs --yes                落盘暂存包（默认 app.asar.tmp）
+//   node vendor/whale/install.mjs --yes                落盘暂存包（默认 state/staged/app.asar）
 //   node vendor/whale/install.mjs --rollback           从 app.asar.whale-backup 恢复
 //   node vendor/whale/install.mjs --decl <file>        换一份声明
+//   node vendor/whale/install.mjs --staged <archive>   换暂存包位置
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 import {
   P,
   PROJECT_ROOT,
+  STAGED_ASAR,
   assertHarnessStopped,
   readPatchDecl,
+  runAsarVerify,
+  compareDeclared,
   fail,
 } from '../lib/harness.mjs';
-
-const VERIFY = path.join(PROJECT_ROOT, 'vendor', 'asar', 'verify.mjs');
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(name);
   return i >= 0 ? process.argv[i + 1] : fallback;
 }
 
-/** 从 asar-verify 的问题串里还原出条目路径。 */
-function pathOf(problem) {
-  let m = /^(?:MISSING in new archive|UNPACKED metadata changed|ADDED): (.+)$/.exec(problem);
-  if (m) return m[1];
-  m = /^(?:SIZE differs|BYTES differ): (\S+)/.exec(problem);
-  if (m) return m[1];
-  return null;
-}
-
-function runVerify(original, target, expect) {
-  const result = spawnSync(
-    process.execPath,
-    [VERIFY, original, target, '--expect', String(expect), '--json'],
-    { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, windowsHide: true },
-  );
-  const text = (result.stdout ?? '').trim();
-  if (text === '') {
-    return fail(`asar-verify 没有输出，无法核对。stderr:\n${result.stderr ?? ''}`);
-  }
-  let parsed;
-  try {
-    parsed = JSON.parse(text.split(/\r?\n/).at(-1));
-  } catch {
-    return fail(`asar-verify 的输出不是 JSON：\n${text.slice(0, 500)}`);
-  }
-  return parsed;
-}
-
 function main() {
   const declFile = path.resolve(arg('--decl', path.join(PROJECT_ROOT, 'patches', 'T1-whale-splash.yml')));
-  const staged = arg('--staged', P.asarTmp);
+  const staged = arg('--staged', STAGED_ASAR);
   const rollback = process.argv.includes('--rollback');
 
   if (!fs.existsSync(declFile)) return fail(`找不到补丁声明：${declFile}`);
@@ -77,7 +50,7 @@ function main() {
     assertHarnessStopped('从备份回滚 app.asar');
     fs.copyFileSync(P.asarBackup, P.asar);
     process.stdout.write(`\n已从备份恢复 ${P.asar}\n`);
-    const check = runVerify(P.asarBackup, P.asar, 0);
+    const check = runAsarVerify(P.asarBackup, P.asar, 0);
     process.stdout.write(check.ok ? '核对：恢复后的安装包与备份逐字节一致\n' : '核对失败：恢复结果与原版不一致\n');
     process.exitCode = check.ok ? 0 : 1;
     return;
@@ -92,7 +65,7 @@ function main() {
   }
   if (!fs.existsSync(staged)) {
     return fail(
-      `没有暂存包：${staged}\n先构建：node vendor/whale/build.mjs --install`,
+      `没有暂存包：${staged}\n先构建：node vendor/whale/build.mjs\n`,
     );
   }
   assertHarnessStopped('覆盖 app.asar');
@@ -121,7 +94,7 @@ function main() {
   }
 
   // ── 用声明核对实际差异 ────────────────────────────────────────────────────
-  const check = runVerify(P.asarBackup, P.asar, decl.expect);
+  const check = runAsarVerify(P.asarBackup, P.asar, decl.expect);
   if (!check.ok) {
     process.stderr.write(
       `\n核对失败：预期 ${decl.expect} 个差异，实际 ${check.problems.length} 个。\n` +
@@ -131,10 +104,7 @@ function main() {
     process.exit(1);
   }
 
-  const actual = new Set(check.problems.map(pathOf).filter(Boolean));
-  const declared = new Set(decl.entries.map((e) => e.replace(/\\/g, '/')));
-  const undeclared = [...actual].filter((p) => !declared.has(p));
-  const missing = [...declared].filter((p) => !actual.has(p));
+  const { actual, undeclared, missing } = compareDeclared(decl, check.problems);
   if (undeclared.length > 0 || missing.length > 0) {
     process.stderr.write(
       `\n核对失败：实际差异与声明不符。\n` +

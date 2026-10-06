@@ -70,9 +70,11 @@ notes: |
 2. **必须写 `verify.expect_diff_entries`。** 应用的差异条目数必须**恰好**等于声明值——
    多一处少一处都说明改坏了。`install.mjs` 会拿实际差异集合与 `target.entries` 逐项比对。
 3. **必须写 `rollback`。** 回滚路径不加 `--yes` 确认，因为它是恢复通道。
-4. 生成物（被打进去的文件）放 `../.probe/build/` 与 `../.probe/dist/`，不要放这里。
+4. 源素材放 `../.probe/`（原版缓存）与 `../.probe/build/`（动画/客户端资产）；
+   构建的中间产物在 `state/staged/tree/`、整包在 `state/staged/app.asar`（均已 gitignore，可重建）。不要放这里。
 5. **声明读不到就报错，不要默认值。** 缺 `expect_diff_entries` 时宁可失败退出。
 
-> 状态：M1 已实现 `T1-whale-splash.yml` 的解析与校验链路
-> （`readPatchDecl` + `verify.mjs --json` + `install.mjs` 的集合比对），
-> 构建链本身（`vendor/whale/build.mjs` 等）还在 `../tools/` 原位待归拢。
+> 状态：**已闭环**。`T1-whale-splash.yml` 的构建链与校验链路都已实现并实跑通过。
+> `node vendor/whale/build.mjs` 产出 `state/staged/app.asar`（11 条目按声明改动，其余 11,466 条目逐字节一致），
+> 再 `node vendor/whale/install.mjs --yes` 落盘（需先退出 Harness）。
+> 当前只有这一个声明文件；新增声明时按同样的格式写，执行器无需改代码。

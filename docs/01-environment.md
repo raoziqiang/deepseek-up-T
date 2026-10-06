@@ -14,9 +14,18 @@
 | 归档内包数 | **529**，其中 `/dsh/node_modules/` 下 **503** 个是 DSH 插件 |
 | 原版备份 | `resources\app.asar.whale-backup` = **121,348,951 字节** |
 | 备份 vs 当前 | **sha256 完全一致** ⇒ 当前安装包是**未改造的原版** |
-| 残留 | `resources\app.asar.tmp` = **121,415,608 字节**（比原版多 66,657 字节） |
+| 残留 | `resources\app.asar.tmp` —— **已于 2026-10-06 删除**（确认是坏构建，见下） |
 
-**结论：鲸鱼启动动画还没有落盘。** 这与 `../README-whale-splash.md` 里「已构建打包完成，但差最后一步落盘」的说法一致，且现在有了机器可验证的证据。
+**结论：鲸鱼启动动画还没有落盘。** `../README-whale-splash.md` 里「已构建打包完成，但差最后一步落盘」的说法**与事实不符**：那份 `app.asar.tmp`（121,415,608 字节，mtime 2026-10-01 10:21:16）里的 `lib/main.js` 过不了 `node --check`：
+
+```
+SyntaxError: Identifier 'readFileSync' has already been declared
+```
+
+原因是 `patch-main.mjs` 无条件插入 `import { readFileSync, writeFileSync } from "node:fs";`，
+而原版 `main.js`（esbuild 产物）第 8 行已声明同名绑定 —— 落盘后主进程会拒绝启动。
+已删除该文件（可再生），并在 `vendor/whale/patch-main.mjs` 里修掉根因（只补缺的绑定）。
+现在有一份**语法正确、已交叉验证**的暂存包：`state/staged/app.asar` = 121,415,560 字节。
 
 ## DSH 用户态（DSH_HOME）
 
@@ -85,7 +94,7 @@ C:\Users\Z1848\.dsh\profiles\
 
 | # | 问题 | 证据 | 处置 |
 | --- | --- | --- | --- |
-| P1 | `app.asar.tmp` 残留 115.8 MB | `doctor` WARN | 确认不再需要后删除，或完成落盘 |
+| P1 | `app.asar.tmp` 残留 115.8 MB | `doctor` WARN | ✅ **已处置**（2026-10-06）：确认是坏构建（重复 import），已删除；`doctor` 警告数 3 → 2 |
 | P2 | 鲸鱼启动动画未落盘 | 备份与当前 asar sha256 一致 | 见 T1；落盘前必须退出 Harness 含托盘 |
 | P3 | 4 个 bundle + 3 个 patch 包只存在于安装包内 | `doctor` WARN | 改造它们只能走 L3，风险最高，需单独立项 |
 | P4 | 会话全文搜索默认关闭 | base 里 `session-query-sqlite.openAt: never` | ✅ **已处置**（2026-10-06，改 `path` + `openAt: first-search`），待重启验收 |

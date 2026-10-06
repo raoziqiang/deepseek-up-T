@@ -143,7 +143,7 @@
 | --- | --- | --- |
 | **M0** | 项目骨架 + 环境基线 + `doctor` / `snapshot` / `baseline` | ✅ 已完成 |
 | **M1** | 权威组合预检 `precheck` + 只读安装包工具 `asar` + T3 会话搜索开启 | 🚧 代码与配置已落地，**待重启验收** |
-| **M2** | T5 `../tools/` 归拢进 `vendor/` + T1 鲸鱼动画落盘 | 待办 |
+| **M2** | T5 `../tools/` 归拢进 `vendor/`（构建链闭环）+ T1 鲸鱼动画落盘 | 🚧 构建链**已闭环**；只剩「退出 Harness 后落盘」这一步 |
 | **M3** | T2 新增 Provider + T4 自建 Web 插件样板 | 待办 |
 | **M4** | 升级重打自动化 | 待办 |
 
@@ -153,3 +153,13 @@
 - [x] `dsht asar ls|cat|grep` 能只读地读安装包里**真正在跑的那份代码**
 - [x] `session-query-sqlite` 的 `path` + `openAt: first-search` 已写入 profile patch，且预检 diff 恰好只有这两行
 - [ ] **重启 DSH 后**，按会话内容搜索能命中（这一步只能由人来做）
+
+### M2 的验收标准
+
+- [x] `vendor/whale/build.mjs` 能按 `patches/*.yml` 构建暂存包，且**不碰安装目录**
+- [x] 构建后自检：`11 个条目按声明改动，其余 11466 个条目逐字节一致`
+- [x] 7 个 JS 产物全部通过 `node --check`（这是旧产物栽跟头的地方）
+- [x] 与旧产物交叉比对证明**确定性构建**（差异恰好 2 个预期条目）
+- [ ] **完全退出 Harness 后**执行 `node vendor/whale/install.mjs --yes`，重启能看到动画
+      （这一步需要窗口：托盘图标也要退出）
+- [x] `app.asar.tmp` 残留已确认是坏构建并删除，`doctor` 警告 3 → 2

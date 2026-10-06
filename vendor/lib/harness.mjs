@@ -8,6 +8,7 @@
 
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
+import { readAsarEntry } from '../../src/asar.mjs';
 import {
   PROJECT_ROOT,
   resolvePaths,
@@ -32,6 +33,7 @@ export {
   sha256Short,
   readText,
   readJson,
+  readAsarEntry,
 };
 
 /** 本机 DSH 的全部关键路径（安装目录 / profiles / app.asar / 备份 / 暂存）。 */
@@ -126,20 +128,108 @@ export function readPatchDecl(file) {
   }
   const listIndent = indentOf(lines[heads[0]]);
 
-  const entries = [];
+  const items = [];
   for (let i = heads[0] + 1; i < lines.length; i += 1) {
     const line = lines[i];
     if (line.trim() === '' || line.trimStart().startsWith('#')) continue;
     if (indentOf(line) <= listIndent) break;
-    const m = /^\s*-\s+path:\s*(.+?)\s*$/.exec(line);
-    if (m) entries.push(m[1].replace(/^['"]|['"]$/g, '').replace(/\\/g, '/'));
+    const start = /^\s*-\s+(\w+):\s*(.+?)\s*$/.exec(line);
+    if (start) {
+      items.push({ [start[1]]: unquote(start[2]) });
+      continue;
+    }
+    const cont = /^\s+(\w+):\s*(.+?)\s*$/.exec(line);
+    if (cont && items.length > 0) items[items.length - 1][cont[1]] = unquote(cont[2]);
   }
+  const entries = items.map((it) => it.path).filter(Boolean);
   if (entries.length === 0) throw new Error(`${file} 的 target.entries 为空`);
+  for (const it of items) {
+    if (!it.path) throw new Error(`${file} 的 target.entries 有一条没有 path`);
+  }
+
+  const syntaxHead = lines.map((l, i) => (/^\s*syntax_check:\s*$/.test(l) ? i : -1)).filter((i) => i >= 0)[0];
+  const syntaxCheck = [];
+  if (syntaxHead !== undefined) {
+    const base = indentOf(lines[syntaxHead]);
+    for (let i = syntaxHead + 1; i < lines.length; i += 1) {
+      const line = lines[i];
+      if (line.trim() === '' || line.trimStart().startsWith('#')) continue;
+      if (indentOf(line) <= base) break;
+      const m = /^\s*-\s+(.+?)\s*$/.exec(line);
+      if (m) syntaxCheck.push(unquote(m[1]));
+    }
+  }
 
   return {
     id: idMatch ? idMatch[1] : path.basename(file, '.yml'),
+    file,
     expect: Number(expectMatch[1]),
     entries,
+    items,
+    syntaxCheck,
+  };
+}
+
+/** 取一个 YAML 标量：去掉行内注释、去掉包裹引号、统一路径分隔符。 */
+function unquote(value) {
+  // 行内注释：`source: a/b.js   # 说明` —— 声明里到处是这种中文说明，
+  // 不剥掉就会把注释当成值的一部分（第一次跑构建时正是这么炸的）。
+  const withoutComment = value.replace(/\s+#.*$/, '').trim();
+  return withoutComment.replace(/^['"]|['"]$/g, '').replace(/\\/g, '/');
+}
+
+// —————————————————————————— 归档工具的位置与调用 ——————————————————————————
+
+/** 三个 asar 工具的唯一位置，避免每个脚本各拼一次路径。 */
+export const TOOLS = {
+  list: path.join(PROJECT_ROOT, 'vendor', 'asar', 'list.mjs'),
+  verify: path.join(PROJECT_ROOT, 'vendor', 'asar', 'verify.mjs'),
+  write: path.join(PROJECT_ROOT, 'vendor', 'asar', 'write.mjs'),
+};
+
+/** 暂存包与暂存树：构建产物落在项目里的 state/ 下，不污染安装目录。 */
+export const STAGED_ASAR = path.join(PROJECT_ROOT, 'state', 'staged', 'app.asar');
+export const STAGED_TREE = path.join(PROJECT_ROOT, 'state', 'staged', 'tree');
+
+/** 从 asar-verify 的问题串里还原出条目路径。 */
+export function pathOfProblem(problem) {
+  let m = /^(?:MISSING in new archive|UNPACKED metadata changed|ADDED): (.+)$/.exec(problem);
+  if (m) return m[1];
+  m = /^(?:SIZE differs|BYTES differ): (\S+)/.exec(problem);
+  if (m) return m[1];
+  return null;
+}
+
+/** 跑一次 asar-verify --json 并解析结果；跑不起来就 fail（不是「没问题」）。 */
+export function runAsarVerify(original, target, expect) {
+  const result = spawnSync(
+    process.execPath,
+    [TOOLS.verify, original, target, '--expect', String(expect), '--json'],
+    { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, windowsHide: true },
+  );
+  const text = (result.stdout ?? '').trim();
+  if (text === '') {
+    return fail(`asar-verify 没有输出，无法核对。stderr:\n${result.stderr ?? ''}`);
+  }
+  try {
+    return JSON.parse(text.split(/\r?\n/).at(-1));
+  } catch {
+    return fail(`asar-verify 的输出不是 JSON：\n${text.slice(0, 500)}`);
+  }
+}
+
+/**
+ * 把「实际差异条目集合」与声明集合逐项比对。
+ * 只有两边完全相等才算通过——多一条少一条都说明要么改坏了、要么声明过期了。
+ */
+export function compareDeclared(decl, problems) {
+  const actual = new Set(problems.map(pathOfProblem).filter(Boolean));
+  const declared = new Set(decl.entries.map((e) => e.replace(/\\/g, '/')));
+  return {
+    actual,
+    declared,
+    undeclared: [...actual].filter((p) => !declared.has(p)),
+    missing: [...declared].filter((p) => !actual.has(p)),
   };
 }
 
