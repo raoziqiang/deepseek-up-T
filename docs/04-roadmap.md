@@ -47,7 +47,7 @@
 **已核实的抓手**
 | 抓手 | 在哪 | 现状 |
 | --- | --- | --- |
-| `tool-ralph` | base 行 `disabled: true` | 默认关闭，overlay 可开（base 注释里给了示例） |
+| `tool-ralph` | base 行 `disabled: true` | ⏳ **声明与预检已就绪**（`patches/T2-enable-ralph.yml`：预检 0 问题、只改 1 行），等用户决定是否落盘。它是「每 Round 一个全新子 agent + 有界交接（默认 16384 字符），绝不复制父对话」的迭代循环 ⇒ 长任务上下文成本从 `O(轮数 × 累积历史)` 降到 `O(轮数 × 交接上限)`。base 默认关的理由：**完成是 worker 自我报告，没有独立评估** |
 | `session-query-sqlite` | base `openAt: never` | **会话全文搜索默认关闭**，overlay 可改 `first-search` / `startup` |
 | `spill-policy` | `maxInlineTokens: 12500` | 大结果落盘阈值 |
 | `tool-result-pruner` | `thresholdChars: 8192` | 工具结果预压缩 |

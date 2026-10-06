@@ -1,0 +1,34 @@
+# ── deepseek-up-T · T2 能力扩展 ── 启用 ralph 工具（全新 agent 迭代）
+#
+# 状态：**已预检，尚未落盘**。这是一次「能力开关」，会改变模型可见的工具集，
+#       所以先把证据备齐，由用户决定是否真的开。
+#
+# 为什么值得开：
+#   ralph 是「固定前台 agent 循环」——每一 Round 起一个**全新子 agent**，只带
+#   一份有界结构化交接（默认 ≤16384 字符）与共享工作区，**绝不复制父对话**。
+#   也就是说它把「长期迭代」的上下文成本从 O(轮数 × 历史) 压到 O(轮数 × 交接上限)。
+#   对长会话/长任务的 token 效率是数量级的改善，而 base 里它只是被 disabled 掉了。
+#
+# base 为什么要 disabled（必须照抄这段理由，别当成遗漏）：
+#   base 的注释写着：该工具的描述把 ralph 限制在「人类明确要求的运行」上，而且
+#   完成是 **worker 自我报告，不是独立评估**。所以它默认关着。
+#
+# 配置事实（读自 @deepseek-ai/dsh-tool-ralph 的 README.zh.md）：
+#   · 模型提交 { objective, maxRounds? }，调用阻塞到整轮运行结算
+#   · 终态：complete / blocked / budget-limited
+#   · subagentProvider 默认 spawn；maxRounds 默认 256（部署上限）
+#   · maxHandoffChars / maxResultChars 默认 16384
+#   · 提供方必须存在、支持结构化输出、且报告 inheritsParentContext: false，
+#     否则调用会在任何 Round 开始前直接报错 —— 即配置错也是**安全失败**，不会静默乱跑
+#   · 它是基于 ctx.workflowEngine + ctx.subagents 的普通插件，不新增 agent-loop 模式
+#
+# 为什么只写 disabled: false：
+#   patch 是**按行键合并**的（同 id 命中已存在的行），只覆盖给出的键；
+#   而 config 一旦给出是**整体替换**。这里刻意不给 config，于是继承 base 的
+#   subagentProvider: spawn + maxRounds: 64（比 README 的默认 256 更保守）。
+#
+# 怎么撤：删掉现场 cordis.patch.yml 里这一条，或
+#         node src/cli.mjs snapshot restore <改动前快照 id> --yes
+
+- id: tool-ralph
+  disabled: false
