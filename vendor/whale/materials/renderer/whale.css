@@ -1,0 +1,54 @@
+/* The whale splash layer sits above the welcome UI until the charm settles. */
+#whale-stage {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity 520ms ease-out;
+}
+
+#whale-stage.is-done {
+  opacity: 0;
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+}
+
+/* The charm the splash leaves behind: a draggable whale pinned over the UI. */
+.whale-pendant {
+  position: fixed;
+  z-index: 5;
+  display: block;
+  cursor: grab;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  app-region: no-drag;
+  filter: drop-shadow(0 6px 14px rgba(31, 79, 168, 0.35));
+  transition: transform 160ms ease-out;
+}
+
+.whale-pendant:hover {
+  transform: scale(1.06);
+}
+
+.whale-pendant.is-dragging {
+  cursor: grabbing;
+  transition: none;
+}
+
+/* No splash motion for reduced-motion users: the charm appears immediately. */
+@media (prefers-reduced-motion: reduce) {
+  #whale-stage {
+    transition: none;
+  }
+  .whale-pendant {
+    transition: none;
+  }
+}

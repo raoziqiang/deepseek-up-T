@@ -24,9 +24,13 @@ vendor/
   whale/patch-preload.mjs  lib/preload-app.cjs 的锚点替换
   whale/patch-session-controller.mjs  视觉模型自动路由的锚点替换
   whale/bundle.mjs         动画模块 → CSP 允许的经典脚本
+  whale/materials/         **入库的手写素材**：welcome/pendant 两页、动画模块源、挂件 preload、离线预览页
   visual/                  视觉验证（只读）：抓帧、描轮廓、数值分析、静态预览服务
   route/                   Provider / 网关探针（只读，except store-go-credential 会写凭据）
 ```
+
+`whale/materials/` 是**输入**，不是产物：一份全新 clone 靠它加一份 `app.asar` 就能重建暂存包
+（`action: patch` 的原版缓存例外，见下）。搬进来之后已重建验证：产物与搬家前 **sha256 完全相同**。
 
 ### `vendor/visual/`（6 个，只读）
 
@@ -77,7 +81,9 @@ node vendor/whale/install.mjs --yes --to state/cmp/rehearsal-app.asar
 
 所有路径从 `src/paths.mjs` 来（`vendor/lib/harness.mjs` 再导出），**不在 vendor 里另拼一套**。
 工作区根（`D:\Z1848\harness-ds`）由 `DSH_UP_T_WORKSPACE` 覆盖，默认取项目目录的上一级；
-构建输入资产在 `../.probe/build`，产物在 `../.probe/dist`，原版源码缓存在 `../.probe`。
+构建输入资产分两处：**手写的**在 `vendor/whale/materials/`（入库），**`action: patch` 的原版缓存**在 `../.probe`
+（不入库，可从任意一份 `app.asar` 用 `asar/list.mjs --get` 重抽）；产物在 `../.probe/dist`（历史）与
+`state/staged/app.asar`（现在的正式暂存位）。
 
 刻意**不再**用 `path.resolve(here, '..')` 推工作区根——脚本一搬目录，`..` 就指向别处，
 然后静默写到不该写的位置。

@@ -1,0 +1,66 @@
+/* The desktop charm window is transparent; only the whale is visible. */
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  background: transparent;
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+#charm {
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  /* The whole surface drags the native window. */
+  app-region: drag;
+  display: grid;
+  place-items: center;
+}
+
+#charm:active {
+  cursor: grabbing;
+}
+
+#charm-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+}
+
+#menu {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 8px;
+  background: rgba(17, 28, 51, 0.94);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+  app-region: no-drag;
+}
+
+#menu[hidden] {
+  display: none;
+}
+
+#menu button {
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #e8eefc;
+  font: 11px/1.5 system-ui, "Segoe UI", sans-serif;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+#menu button:hover {
+  background: rgba(255, 255, 255, 0.14);
+}

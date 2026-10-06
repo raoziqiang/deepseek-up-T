@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'">
+    <title>DSH Whale</title>
+    <link rel="stylesheet" href="pendant.css">
+    <script src="../lib/welcome/whale-animation.js" defer></script>
+    <script src="pendant.js" defer></script>
+  </head>
+  <body>
+    <!--
+      A frameless, transparent, always-on-top window containing only the whale
+      charm. The window itself is the drag handle: the renderer asks the main
+      process to move it, which keeps the motion native and smooth.
+    -->
+    <div id="charm" tabindex="0" role="button" aria-label="DSH whale charm">
+      <canvas id="charm-canvas"></canvas>
+    </div>
+    <div id="menu" hidden>
+      <button data-action="toggle-splash">Replay animation</button>
+      <button data-action="reset">Reset position</button>
+      <button data-action="close">Hide charm</button>
+    </div>
+  </body>
+</html>

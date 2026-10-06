@@ -73,12 +73,11 @@ node vendor/whale/install.mjs --yes    # 需要先完全退出 Harness
 - [x] 测试总入口 `test/run.mjs`（发现式），2026-10-06 完成，见下方记录
 - [x] `doctor` 扩展：运行时心跳探测（回答「重启到底有没有把我的插件装进去」），2026-10-06 完成，见下方记录
 - [x] 处置 `app.asar.tmp` 残留（115.8MB）—— 确认是坏构建，已删除
-- [ ] **把 T1 的作者素材搬进仓库**（`D:\Z1848\harness-ds\.probe\build\**`，约 43 KB：`whale-animation.js` 的
-      ESM 源、`renderer/*`、`lib/preload-charm.cjs`、三个 `action: patch` 的原版素材）。
-      现在 `patches/T1-whale-splash.yml` 的 `source:` 指向**仓库之外**的路径 ⇒ 一份全新 clone 拿得到声明
-      却拿不到素材（`vendor/whale/build.mjs` 会响亮报错，不是静默失败，但构建不可只靠仓库复现）。
-      搬完必须重建暂存包并 `node vendor/asar/verify.mjs "<app.asar.whale-backup>" state\staged\app.asar --expect 11`
-      确认产物一字未变 —— 素材换位置不该改变产物；若变了，说明复制的素材版本与当初构建时不一致。
+- [x] **把 T1 的手写素材搬进仓库** —— 2026-10-06 完成：10 个文件（39 KB）进 `vendor/whale/materials/`，
+      声明 `source:` 改指仓库内。验收标准是「产物一字未变」而不是「能跑」：搬家前后重建的
+      `state/staged/app.asar` **sha256 完全相同**（121,416,081 B / 11 条目）。
+      `action: patch` 的原版缓存**不入库**（可从任意 `app.asar` 重抽，且构建时逐字节校验）。
+      同一轮把 `bundle.mjs` 的 banner 从写死路径改成「相对项目根」，暂存包因此 +4 字节（121,416,085 B）。
 - [ ] `vendor/visual/` 那 6 个脚本没有 README，且其中 `capture-frames.mjs` 需要真 Chrome + CDP。
       行为级验证已改由 `test/splash.test.mjs` 的假浏览器承担（更便宜、更精确）；
       这 6 个脚本留给「画得像不像」这类只有像素能回答的问题，值得在 README 里写清各自的适用范围与依赖。
@@ -785,6 +784,45 @@ catch 吞掉，而那一刻**事件监听与定时刷新都还没注册** ——
 3. **假宿主必须模拟真实的联动关系。** 第一版假 DOM 的 `className` 与 `classList` 互相不联动，
    于是「挂件到底建出来没有」被假 DOM 说了谎；`querySelector` 能不能找到 `className` 设的类，
    和真 DOM 一样是测试的前提，不是细节。
+
+### 2026-10-06 · 把 T1 的手写素材搬进仓库（验收标准是「产物一字未变」）
+
+**起因**：写 `test/splash.test.mjs` 时盘素材，发现 T1 那 7 个插入文件的素材全在
+**仓库之外**（`D:\Z1848\harness-ds\.probe\build\**`），声明里的 `source:` 是 `../../.probe/...`。
+后果不是「构建会坏」（`build.mjs` 会响亮报错），而是**一份全新 clone 拿得到声明却拿不到素材**：
+其中 `whale-animation.js` 是**手写的 ESM 源**，归档里只有 bundle 之后的那一份 —— 它只活在这台机器上。
+
+**做了什么**：
+- 10 个手写文件（39 KB）复制进 `vendor/whale/materials/`：`renderer/{welcome.html, whale.css, whale-splash.js,
+  pendant.html, pendant.css, pendant.js}`、`lib/preload-charm.cjs`、`whale-animation.js`、
+  `preview.html`、`client/whale-charm-settings.js`；`patches/T1-whale-splash.yml` 的 8 条 `source:` 改指仓库内。
+- **`action: patch` 的三份原版缓存刻意不入库**（`lib/main.js` 490 KB、`lib/preload-app.cjs` 41 KB、
+  session-controller 124 KB）：它们是上游原文，属安装包内容，体量大；任何一份 `app.asar` 都能原样重抽
+  （`node vendor/asar/list.mjs --get <归档内路径> <目标>`），而构建时会**逐字节校验**它们与当前归档一致 ——
+  不一致直接报错，所以「不入库」不会退化成静默风险。声明顶部与 `patches/README.md` 都写清了这个分界。
+- `vendor/whale/bundle.mjs` 的 banner 原本写死 `GENERATED from ../../.probe/build/whale-animation.js`：
+  素材一搬位置，这句话就变成假话。改成按**相对项目根**生成
+  （`GENERATED from vendor/whale/materials/whale-animation.js …`），`PROJECT_ROOT` 从 `vendor/lib/harness.mjs`
+  导入，不在这里自己推一份。
+
+**怎么验的（关键）**：这类「搬家」最容易被「构建 exit 0」蒙过去，所以验收标准定成**产物一字未变** ——
+先记下搬家前 `state/staged/app.asar` 的 sha256（`E6A1EAD1EAAF9433A3214F65B20D484DCA7BDA1308286B20C576A3FFC9E5DD71`，121,416,081 B），
+再用新路径重建到 `state/cmp/repro-check.asar` ⇒ **sha256 完全相同**。
+随后改 banner 重建正式暂存包：11 个条目按声明改动、其余 11,466 逐字节一致，大小 121,416,085（+4 字节，
+正是 banner 里那句路径变长的那几字节）。全套 **9/9 套**测试、`doctor` 0 错误 2 警告。
+
+**教训**：
+1. **「能构建」不等于「构建的是同一件东西」。** 搬素材、换路径、升级工具链这类动作，正确的验收标准是
+   **产物哈希不变**，而不是「跑通了」。定下哈希再动手，任何意外的内容变化都会当场暴露。
+2. **手写素材和上游原文要分开对待。** 前者必须入库（丢了不可再生），后者应该**从权威来源现取 + 逐字节校验**
+   （库里存一份反而会引入「库里那份过期了」这种新故障）。
+3. **产物里不要写死路径。** banner、日志、生成的注释一旦写死位置，就会在搬家那天开始说谎。
+4. **把「逐字节参与构建」的文件纳入版本控制，必须同时锁住行尾。** 本机 `core.autocrlf=true`，而这次入库
+   的文件是 LF —— 没有规则的话，下次 checkout 会把它们写成 CRLF：`app.asar` 的产物随之变化，
+   而 `test/fixtures/welcome-html-broken-before-2026-10-06.html` 的 sha256 也会变
+   （`test/assets.test.mjs` 正是**按哈希**认这份证据的）。两者都不会让任何命令报错，
+   只会让「产物哈希」和「证据哈希」这两类断言开始说谎。所以新增 `.gitattributes`：`* -text`
+   （只关 EOL 归一化，不影响 diff/合并）。**入库一个字节敏感的文件，等于同时接管了它的行尾命运。**
 
 
 

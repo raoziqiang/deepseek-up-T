@@ -69,6 +69,9 @@
   **加了一套新测试就什么都不用改**——`test/run.mjs` 自己发现；反过来，`test/` 下一套都找不到时它以退出码 2 报错，
   而不是「0 套通过」地装成成功。
 - 大文件（`app.asar`、动画帧、构建产物）**不入库**，已在 `.gitignore`。
+- **行尾一律不转换**（`.gitattributes` 里 `* -text`）：有些文件是逐字节参与工作的
+  （`vendor/whale/materials/**` 会原样打进 `app.asar`；`test/fixtures/*` 按 sha256 认证据），
+  本机 `core.autocrlf=true`，一旦被改写成 CRLF，产物与证据哈希都会静默变化。
 
 ## 记录义务
 

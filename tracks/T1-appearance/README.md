@@ -9,7 +9,7 @@
 - `dsh-whale-widget@0.3.18` 已装为 **L1 插件**：Web 右下角余额小鲸鱼、气泡点击序列、音效、角色、动图。
 - 数据目录：`.dsh/whale-audio`、`.dsh/whale-bubble-imgs`、`.dsh/whale-roles`（多数为空）。
 - **动画仍未落盘**：`app.asar` 与 `app.asar.whale-backup` 的 sha256 一致（`doctor` 可验）。
-- **待落盘的暂存包已就绪且已验证**：`state/staged/app.asar`（121,416,081 B，11 条目按声明改动，其余 11,466 条目逐字节一致）。
+- **待落盘的暂存包已就绪且已验证**：`state/staged/app.asar`（121,416,085 B，11 条目按声明改动，其余 11,466 条目逐字节一致）。
 
 ## 主战场
 
@@ -30,8 +30,17 @@
 - [x] 把主题/气泡等偏好从 asar 侧迁到 `dsh-whale-widget` 的 L1 设置 —— **侦察后结论是「本来就不该这么做」**：`dsh-whale-widget` 0.3.18 的 `package.json` 只声明 `dsh.bundle.patch`，**没有任何 `Config` schema**，它的偏好本来就不在 asar 里，而是落在 `$DSH_HOME\.dshw-size.json` / `.dshw-turn.json` / `.dshw-usage.json`（设备本地，随用随写）。四层改造面（L0–L3）管的是**组合与代码**，不管这层用户数据。⇒ 这条待办的前提是错的，撤销；真要改默认值应改 widget 自己的默认值（L1 包内），而不是「迁到 L1 设置」（见下方记录）。
 - [x] 桌面挂件窗口的**开关**（设置 →「通用」里那一行）—— 2026-10-06 完成：出货 Harness 有整套挂件机制，却没有任何代码调用 `window.dshWhaleCharm`，于是 `whale-charm.json` 永远是 `enabled: false`、挂件永不出现且不报错。开关改由 L1 插件 `dsh-up-t` 提供（`settings.general.item`），**不碰安装包、硬刷新即生效**。见下方记录与 [plugins/dsh-up-t/README.md](../../plugins/dsh-up-t/README.md)。
 - [ ] 桌面挂件菜单的「Replay animation」目前是空操作（`"replay"` 发给主窗口，而启动画面在欢迎窗口）—— 要修必须改安装包（打通主进程作用域），单独一步。
-- [ ] 让 T1 的构建**只靠仓库就能复现**：作者素材（`.probe/build/**`，约 43 KB：`whale-animation.js` 的 ESM 源、`renderer/*`、`preload-charm.cjs`、三个 `action: patch` 的原版素材）现在在**仓库之外**，而声明里的 `source:` 指向那些仓库外路径。`vendor/whale/build.mjs` 缺素材时会响亮报错（不是静默），但一份全新 clone 仍然构建不出来。搬进仓库后必须重建暂存包并用 `node vendor/asar/verify.mjs "<app.asar.whale-backup>" state\staged\app.asar --expect 11` 确认产物一字不差（素材换位置不该改变产物）。
-- [ ] **仓库外那个 `.probe/build/whale-animation.js` 是唯一一份「bundle 之前」的源** —— 归档里只有 bundle 后的 23828 B 那一份。上面这条待办不落，它就只活在这台机器上。
+- [x] 把 T1 的**手写素材**搬进仓库 —— 2026-10-06 完成：10 个文件（39 KB）进了 `vendor/whale/materials/`
+      （`renderer/` 六件、`lib/preload-charm.cjs`、`whale-animation.js` 的 ESM 源、离线预览页、挂件设置页残留物），
+      声明里的 `source:` 一并改指仓库内。**验收方式不是「能跑」，而是「产物一字未变」**：
+      先把搬家前的 `state/staged/app.asar`（sha256 `E6A1EAD1EAAF9433…`）存好，用新路径重建到 `state/cmp/repro-check.asar`
+      → 两者 **sha256 完全相同**（121,416,081 B，11 条目按声明改动）。素材换位置不该改变产物。
+      `action: patch` 的三份**原版缓存**（`lib/main.js`、`lib/preload-app.cjs`、session-controller）**刻意不入库**：
+      它们是从安装包抽出来的上游原文，任何一份 `app.asar` 都能重抽（`node vendor/asar/list.mjs --get <归档内路径> <目标>`），
+      而构建时会逐字节校验它们与当前归档一致 —— 不一致直接报错，所以「不入库」不会变成静默风险。
+- [x] `bundle.mjs` 产出的 banner 不再硬编码来源路径（曾写死 `../../.probe/build/whale-animation.js`）：
+      改成按**相对项目根**生成（`GENERATED from vendor/whale/materials/whale-animation.js …`），
+      素材搬位置这句话自动跟着变。这也是暂存包从 121,416,081 变成 121,416,085 字节的**唯一**原因（+4 字节）。
 
 ## 验收
 
@@ -143,7 +152,7 @@
 - **根因**：**整个安装包里没有任何代码调用那座桥。** 全归档 + `app.asar.unpacked` 里搜
   `dshWhaleCharm` / `charm-state`，命中的只有 preload 的暴露处。于是 `userData/whale-charm.json`
   永远是默认的 `enabled: false`，`showCharm()` 永远不被调用 —— 「设计意图实现了、出口忘了接」。
-  设计意图的残留物还在仓库外：`.probe\build\client\whale-charm-settings.js`（一个 ESM 形态的
+  设计意图的残留物是 `vendor\whale\materials\client\whale-charm-settings.js`（一个 ESM 形态的
   Cordis 客户端插件，`settings.general.item` 里那一行开关），但它不在这 11 条声明里，从来没被打进安装包。
 - **修法（不碰安装包）**：把这一行加在**已有的 L1 插件** `plugins/dsh-up-t` 的客户端半侧
   （`settings.general.item`、`replaceRisk: none`），而不是新增 asar 声明。这样它随 profile 目录走，
@@ -179,9 +188,9 @@
   3. CSP 少了 `font-src 'self'` ⇒ 品牌字体被 `default-src 'none'` 拦掉。
 - **根因**：`action: replace` 的素材是**手写的**，和 `action: patch` 完全不同 —— patch 的素材是原版那份文件，
   构建时逐字节校验，锚点错一处就命中不了；而 replace 的素材只被检查「与原来不同」，
-  **从不检查「是不是少了什么」**。这一页应该是从离线预览页改来的（`.probe\build\preview.html`
-  就是同一批脚本的预览载体），改的时候把应用自己的启动脚本一起删掉了。
-- **修法**：改声明里的 `source`（`.probe\build\renderer\welcome.html`）—— 恢复 `font-src 'self'`、
+  **从不检查「是不是少了什么」**。这一页应该是从离线预览页改来的（`vendor\whale\materials\preview.html`
+  就是同一批脚本的预览载体，当时在 `.probe\build\`），改的时候把应用自己的启动脚本一起删掉了。
+- **修法**：改声明里的 `source`（`vendor\whale\materials\renderer\welcome.html`）—— 恢复 `font-src 'self'`、
   `../lib/welcome/welcome.css`、`../lib/welcome/welcome.js`，并把 splash 控制器指向同目录真实存在的
   `whale-splash.js`；页内注释写明这三样为什么必须留着。重新 `node vendor\whale\build.mjs` →
   11 个条目按声明改动（`renderer/welcome.html` 645→1510）。

@@ -1,0 +1,11 @@
+# 禁止一切行尾转换（`-text` 只关掉 EOL 归一化，不影响 diff 与合并）。
+#
+# 为什么整仓都要关：这个仓库里有文件是**逐字节**参与工作的，而不是「读进来看内容」——
+#   · `vendor/whale/materials/**` 会原样打进 `app.asar`（拿它们重建暂存包，产物应当逐字节可预期）；
+#   · `test/fixtures/welcome-html-broken-before-2026-10-06.html` 是**按 sha256 认证据**的反例
+#     （`test/assets.test.mjs` 断言前 16 位 = 5BC23F972FCC30A6）。
+#
+# 本机 `core.autocrlf=true`，没有这条规则时下次 checkout 会把上面这些 LF 文件写成 CRLF：
+# 构建产物随之变化、反例的 sha256 对不上，而两者**都不会让任何东西报错**——
+# 只会让「证据」和「产物哈希」这类断言开始说谎。属于最该被规则挡住的一类漂移。
+* -text

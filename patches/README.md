@@ -31,14 +31,14 @@ target:
   entries:
     - path: renderer/welcome.html
       action: replace               # replace | patch | insert
-      source: ../../.probe/build/renderer/welcome.html
+      source: ../vendor/whale/materials/renderer/welcome.html   # 相对本声明文件
     - path: lib/main.js
       action: patch                 # 锚点替换
-      source: ../../.probe/main.js
+      source: ../../.probe/main.js  # 原版缓存（从安装包抽出，不入库）
       patcher: vendor/whale/patch-main.mjs
     - path: lib/welcome/whale-animation.js
       action: insert
-      source: ../../.probe/build/whale-animation.js
+      source: ../vendor/whale/materials/whale-animation.js
       bundler: vendor/whale/bundle.mjs   # 插入前先过一遍打包器
 
 verify:
@@ -64,13 +64,20 @@ notes: |
 `patch` 的 `source` 指**原版缓存**（`.probe/main.js` 这类），不是生成物——
 生成物在 `--out` 的暂存位，是可丢弃的。
 
+`source` 一律相对**声明文件所在目录**解析。素材分两类，这决定了「一份全新 clone 能不能构建」：
+
+| 素材 | 放哪 | 为什么 |
+| --- | --- | --- |
+| **本项目手写的**（替换页、新增的脚本/CSS、动画模块源） | `vendor/whale/materials/`，**入库** | 手写的，丢了就没了 |
+| **`action: patch` 的原版缓存**（上游文件） | `../.probe/`，**不入库** | 可从任意一份 `app.asar` 原样重抽：`node vendor/asar/list.mjs --get <归档内路径> <目标>`；且构建时逐字节校验与当前归档一致，不一致就直接报错 |
+
 ## 规则
 
 1. **锚点必须唯一。** 锚点在归档中出现多次时，工具必须失败退出，不许「改第一个」。
 2. **必须写 `verify.expect_diff_entries`。** 应用的差异条目数必须**恰好**等于声明值——
    多一处少一处都说明改坏了。`install.mjs` 会拿实际差异集合与 `target.entries` 逐项比对。
 3. **必须写 `rollback`。** 回滚路径不加 `--yes` 确认，因为它是恢复通道。
-4. 源素材放 `../.probe/`（原版缓存）与 `../.probe/build/`（动画/客户端资产）；
+4. 手写素材放 `vendor/whale/materials/`（入库）；`action: patch` 的原版缓存放 `../.probe/`（不入库，可重抽）；
    构建的中间产物在 `state/staged/tree/`、整包在 `state/staged/app.asar`（均已 gitignore，可重建）。不要放这里。
 5. **声明读不到就报错，不要默认值。** 缺 `expect_diff_entries` 时宁可失败退出。
 

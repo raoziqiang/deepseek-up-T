@@ -1,7 +1,15 @@
 # patches/T1-whale-splash.yml
 #
 # T1（外观与体验）的第一次 L3 改造声明。
-# 状态：已构建（产物在 ../../.probe/dist），**尚未落盘** —— 落盘需要先退出 Harness。
+# 状态：已构建（产物在 deepseek-up-T/state/staged/app.asar），**尚未落盘** —— 落盘需要先退出 Harness。
+#
+# 素材分两类（这一点决定了「一份全新 clone 能不能构建」）：
+#   · **本项目手写的素材**在 `vendor/whale/materials/`（welcome/pendant 两页、动画模块源、挂件 preload），
+#     已入库 —— 它们是手写的，丢了就重新写吧。
+#   · **`action: patch` 的原版素材**（下面三条 `../../.probe/*`）是**从安装包里抽出来的上游原文**，
+#     不入库（体积大、且属于安装包内容）：它们可以从任何一份 app.asar 原样重抽
+#     （`node vendor/asar/list.mjs --get <归档内路径> <目标>`），而且构建时会逐字节校验
+#     它们与当前归档是否一致 —— 不一致就报错（见 build.mjs 里那句「原版素材与归档不一致」）。
 #
 # 执行器：vendor/whale/build.mjs（构建）+ vendor/whale/install.mjs（落盘/回滚）
 # 两者都从这个文件读 verify.expect_diff_entries 与 target.entries，
@@ -17,7 +25,7 @@ target:
     # ── 改动的既有条目（4 个）──
     - path: renderer/welcome.html
       action: replace              # 换成带画卷/鲸鱼容器的版本
-      source: ../../.probe/build/renderer/welcome.html
+      source: ../vendor/whale/materials/renderer/welcome.html
     - path: lib/main.js
       action: patch                # 锚点替换：挂件窗口的创建与生命周期
       source: ../../.probe/main.js
@@ -34,25 +42,25 @@ target:
     # ── 新增条目（7 个）──
     - path: renderer/whale.css
       action: insert
-      source: ../../.probe/build/renderer/whale.css
+      source: ../vendor/whale/materials/renderer/whale.css
     - path: renderer/whale-splash.js
       action: insert
-      source: ../../.probe/build/renderer/whale-splash.js
+      source: ../vendor/whale/materials/renderer/whale-splash.js
     - path: renderer/pendant.html
       action: insert
-      source: ../../.probe/build/renderer/pendant.html
+      source: ../vendor/whale/materials/renderer/pendant.html
     - path: renderer/pendant.css
       action: insert
-      source: ../../.probe/build/renderer/pendant.css
+      source: ../vendor/whale/materials/renderer/pendant.css
     - path: renderer/pendant.js
       action: insert
-      source: ../../.probe/build/renderer/pendant.js
+      source: ../vendor/whale/materials/renderer/pendant.js
     - path: lib/preload-charm.cjs
       action: insert
-      source: ../../.probe/build/lib/preload-charm.cjs
+      source: ../vendor/whale/materials/lib/preload-charm.cjs
     - path: lib/welcome/whale-animation.js
       action: insert
-      source: ../../.probe/build/whale-animation.js      # 经 bundle 成经典脚本（CSP 不允许 ESM）
+      source: ../vendor/whale/materials/whale-animation.js      # 经 bundle 成经典脚本（CSP 不允许 ESM）
       bundler: vendor/whale/bundle.mjs
 
 verify:
