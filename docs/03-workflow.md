@@ -97,9 +97,18 @@ node src/cli.mjs snapshot diff <id>
 | L0 配置 | profile 重载或重启 Harness | 设置页能看到新值；`doctor` 无异常 |
 | L1 插件 | 热重载（`dsh-hmr` 已挂载）或重启 | 界面上出现/消失对应能力；**`doctor` 的「运行时」段**读插件心跳，直接回答「重启到底有没有把它装进去」 |
 | L2 宿主 | 重启 | 启动日志无报错 |
-| L3 安装包 | **退出 Harness（含托盘）** 后落盘，再启动 | 启动窗口/界面实际表现 |
+| L3 安装包 | **退出 Harness（含托盘）** 后落盘，再启动 | 启动窗口/界面实际表现；重启后跑 `node src/cli.mjs accept` 把「声明有没有落、宿主路由活没活、渲染层握手到没到」一次问完 |
 
 L3 的落盘与 Harness 是否运行互斥。**当前会话本身就跑在 Harness 里，所以 L3 改造必须分两次会话完成：先构建好产物，再退出 Harness 落盘。**
+
+**落盘之前可以先演练**（不用退出 Harness，也不动在用安装包）：
+
+```powershell
+node vendor/whale/install.mjs --yes --to state/cmp/rehearsal-app.asar   # 或双击 install-whale.cmd /dry
+```
+
+它把暂存包**复制**到临时目标，并在临时目标上跑**同一段**声明核对。所以「产物是不是声明里那 11 条」
+这件事不必等到退出 Harness 那一刻才知道 —— 那是整个流程里唯一不可重来的时刻，不该同时用来做验证。
 
 ## ⑦ 收尾
 
@@ -131,10 +140,14 @@ L3 的落盘与 Harness 是否运行互斥。**当前会话本身就跑在 Harne
 2. L0/L1 改动通常自动幸存；若有条目因 base 的 row id 改名而失效，
    `doctor` 的「patch 引用的包可解析」与 `upgrade` 的 L0 漂移检查都会报出来。
 3. **L3 改动必然丢失**，按 `upgrade` 给出的重打步骤走：
-   `vendor/whale/build.mjs` → 退出 Harness → `install.mjs --yes`。
+   `vendor/whale/build.mjs` → **先演练**（`install.mjs --yes --to state/cmp/rehearsal-app.asar`，
+   Harness 开着也能跑）→ 退出 Harness → `install.mjs --yes` → 重启后 `node src/cli.mjs accept`。
    若 `upgrade` 报了「原版素材过期」，先用 `dsht asar cat <归档内路径> --out <source>`
    从**新版本**重新抽取素材 —— 拿旧素材打补丁会静默丢掉新版代码，构建守卫会拦下它。
 4. 重跑 `baseline write`，把新版本固化成新基线。
+   **顺序不能反**：`install.mjs --yes` → 重启 → `accept` → 确认没问题 → `baseline write`。
+   提前写基线会把「还没装上的状态」固化成基线，之后的 `upgrade` 就会把你自己刚做过的改动
+   报成「环境变了」。
 
 > `upgrade` **不自动落盘**。写安装包必须由人挑时间（Harness 一退出才能做），
 > 这是刻意的：一个在后台偷偷替换 `app.asar` 的工具比不做更危险。
@@ -153,5 +166,5 @@ node src/cli.mjs upgrade --stage        # 检测 + 真的构建到 state/staged/
 - **素材过期时它先不动手**：与其跑到一半被守卫拦下，不如当场说清「哪份 `action: patch`
   的 source 已经不是新版本那一段了」。重抽素材后再跑。
 - `--json` 下构建输出被**捕获**进 `staged.stdout`，不会混进 JSON 文档。
-- 落盘与写基线仍要人做（`install.mjs --yes` → `baseline write`，顺序不能反：
-  提前写基线会把「还没装上的状态」固化下来）。
+- 落盘与写基线仍要人做（**先演练** `install.mjs --yes --to …` → 退出 Harness → `install.mjs --yes`
+  → 重启 → `dsht accept` → `baseline write`，顺序不能反：提前写基线会把「还没装上的状态」固化下来）。

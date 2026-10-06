@@ -166,7 +166,11 @@ function verifyAgainst(target, decl, declFile, { rehearsal }) {
     `\n完成：${actual.size} 个条目按声明改动，其余全部逐字节一致。\n` +
     (rehearsal
       ? '这是演练：在用安装包一个字都没动。真要落盘请在退出 Harness 后跑同样的命令、去掉 --to。\n'
-      : '启动 DeepSeek Harness 即可看到新的启动界面与桌面挂件。\n'),
+      : '启动 DeepSeek Harness 即可看到新的启动界面与桌面挂件。\n' +
+        '\n接下来两步（顺序不能反）：\n' +
+        '  1. 重启 Harness，跑 `node src\\cli.mjs accept` 一次问完宿主路由/渲染层握手/声明与体检；\n' +
+        '  2. 确认没问题后再刷新基线：node src\\cli.mjs baseline write\n' +
+        '     （提前写基线会把「还没装上的状态」固化成基线，之后的 upgrade 就会误报）。\n'),
   );
 }
 
