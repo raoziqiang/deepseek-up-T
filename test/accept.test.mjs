@@ -13,6 +13,8 @@
 // 它不碰真实 Harness、不写盘：假宿主是由本测试起来的，端口 0 由系统分配。
 
 import http from 'node:http';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runAccept, printAccept } from '../src/accept.mjs';
@@ -47,6 +49,11 @@ const json = (res, obj, status = 200) => {
   res.end(JSON.stringify(obj));
 };
 
+const js = (res, body) => {
+  res.writeHead(200, { 'Content-Type': 'application/javascript' });
+  res.end(body);
+};
+
 const find = (r, id) => r.items.find((i) => i.id === id);
 const statusOf = (r, id) => find(r, id)?.status;
 /** 声明项在 items 里的 id 就是声明文件名。 */
@@ -74,7 +81,34 @@ console.log('── 新版宿主 + 两条通道都握手 ──');
     [...new Set(host.seen.map((s) => s.url))].every((u) => u.startsWith('/dsh-up-t/')),
     JSON.stringify([...new Set(host.seen.map((s) => s.url))]));
   check('观感类项存在，且标成 manual', r.items.filter((i) => i.status === 'manual').length >= 4);
+  check('观感类项里有挂件开关那一行（命令验不了，但清单不能漏）', Boolean(find(r, 'manual-charm')), find(r, 'manual-charm')?.detail);
   check('manual 不计入失败：summary.fail 里没有它们', r.summary.fail === r.items.filter((i) => i.status === 'fail').length);
+}
+
+// ── 1b. 挂件开关那一行：查的是**磁盘上那份客户端 bundle**，不是任何路由 ──
+// （`/dsh-up-t/client.js` 送的是左下角胶囊，设置的整页走 ModuleLoader，别把两者搞混。）
+console.log('── 挂件开关那一行（磁盘上的客户端 bundle）──');
+{
+  const repoClient = path.join(PROJECT_ROOT, 'plugins', 'dsh-up-t', 'lib', 'client.js');
+  const live = await runAccept({ hash: false, url: 'http://127.0.0.1:1', timeoutMs: 800 });
+  check('本仓库那份 client.js 被判为含挂件开关注册', statusOf(live, 'charm-row') === 'pass', find(live, 'charm-row')?.detail);
+  check('detail 里点名是哪个文件', /lib[\\/]client\.js/.test(find(live, 'charm-row')?.detail ?? ''), find(live, 'charm-row')?.detail);
+
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-up-t-accept-'));
+  const oldFile = path.join(tmp, 'client.js');
+  fs.writeFileSync(oldFile, 'var inject = ["slots"];\n', 'utf8');
+  const stale = await runAccept({ hash: false, url: 'http://127.0.0.1:1', timeoutMs: 800, clientBundle: oldFile });
+  const s = find(stale, 'charm-row');
+  check('旧 bundle → FAIL（不是 skip）', s?.status === 'fail', s?.detail);
+  check('措辞点明缺的是哪两个标记', /settings\.general\.item/.test(s?.detail ?? '') && /whale-charm/.test(s?.detail ?? ''), s?.detail);
+  check('修法指向硬刷新', /硬刷新/.test(s?.fix ?? ''), s?.fix);
+
+  const gone = await runAccept({ hash: false, url: 'http://127.0.0.1:1', timeoutMs: 800, clientBundle: path.join(tmp, 'nope.js') });
+  check('读不到 bundle → SKIP（不折成失败）', statusOf(gone, 'charm-row') === 'skip', find(gone, 'charm-row')?.detail);
+  check('SKIP 也说清了「试过哪些路径」', /试过/.test(find(gone, 'charm-row')?.detail ?? ''));
+  fs.rmSync(tmp, { recursive: true, force: true });
+  check('临时目录已清理', !fs.existsSync(tmp));
+  check('真仓库那份文件仍是新版（测试没有改动它）', /whale-charm/.test(fs.readFileSync(repoClient, 'utf8')));
 }
 
 // ── 2. 旧宿主（/action 404）+ 一次都没握手：必须说准是哪一种坏 ──
@@ -120,7 +154,8 @@ console.log('── 宿主没在跑 ──');
   // 端口挑一个几乎不可能被占的：连接立即 ECONNREFUSED。
   const r = await runAccept({ hash: false, url: 'http://127.0.0.1:1', timeoutMs: 1500 });
   check('连不上宿主 → FAIL（验收本来就需要它在跑）', statusOf(r, 'host-up') === 'fail', find(r, 'host-up')?.detail);
-  check('连不上导致的「测不了」标 SKIP，不折成 FAIL', statusOf(r, 'host-new') === 'skip' && statusOf(r, 'renderer') === 'skip');
+  check('连不上导致的「测不了」标 SKIP，不折成 FAIL',
+    statusOf(r, 'host-new') === 'skip' && statusOf(r, 'renderer') === 'skip');
   check('修法里给出「启动 Harness 后重跑」与 DSH_WEB_URL', /启动 Harness/.test(find(r, 'host-up')?.fix ?? ''));
   check('不崩：仍然给出完整报告', typeof printAccept(r) === 'string' && r.items.length > 8);
 }

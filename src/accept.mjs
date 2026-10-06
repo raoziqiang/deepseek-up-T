@@ -82,7 +82,7 @@ function declItem(r, { file, name, fixMissing, layer }) {
 /**
  * 验收清单。全部只读；`hash: false` 时逐字节结论退化为「无法判断」（并如实标 SKIP）。
  */
-export async function runAccept({ hash = true, url = process.env.DSH_WEB_URL || DEFAULT_URL, timeoutMs = 4000 } = {}) {
+export async function runAccept({ hash = true, url = process.env.DSH_WEB_URL || DEFAULT_URL, timeoutMs = 4000, clientBundle = null } = {}) {
   const P = resolvePaths();
   const r = await runUpgradeCheck({ hash });
   const items = [];
@@ -156,6 +156,36 @@ export async function runAccept({ hash = true, url = process.env.DSH_WEB_URL || 
       `GET /dsh-up-t/action → ${action.status}`, '这一条本该答 200 加一个 actions 列表。'));
   }
 
+  // ── 界面里那一行挂件开关：它住在设置页的客户端 bundle 里 ──────────
+  // 注意**不能**用 `/dsh-up-t/client.js` 去问：那条路由送的是 `assets/client.js`（左下角胶囊），
+  // 而设置页那一页来自 ModuleLoader 加载的 `lib/client.js`，它不走我们的路由。
+  // 好在这个 bundle 也是**按 mtime 从磁盘重读**的（模块系统用 mtime 派生 rev），
+  // 所以「磁盘上那一份是不是新版」就是要问的事实；剩下的一步（浏览器硬刷新）只有人能做。
+  const CHARM_MARKERS = ['settings.general.item', 'whale-charm'];
+  const installedClient = path.join(P.profileDir, 'node_modules', 'dsh-up-t', 'lib', 'client.js');
+  const sourceClient = path.join(P.projectRoot, 'plugins', 'dsh-up-t', 'lib', 'client.js');
+  const candidates = clientBundle ? [clientBundle] : [installedClient, sourceClient];
+  let bundleFile = null;
+  let bundleText = null;
+  for (const f of candidates) {
+    try { bundleText = readFileSync(f, 'utf8'); bundleFile = f; break; } catch { /* 试下一个 */ }
+  }
+  if (bundleText === null) {
+    items.push(item('charm-row', '挂件开关那一行已经在客户端 bundle 里', 'skip',
+      `读不到 lib/client.js（试过 ${candidates.join('、')}）`,
+      '插件没装进这个 profile？装法见 plugins/dsh-up-t/README.md。'));
+  } else {
+    const missing = CHARM_MARKERS.filter((m) => !bundleText.includes(m));
+    if (missing.length === 0) {
+      items.push(item('charm-row', '挂件开关那一行已经在客户端 bundle 里', 'pass',
+        `${bundleFile} 里有 ${CHARM_MARKERS.join(' / ')}（客户端 bundle 按 mtime 重读 ⇒ 硬刷新即生效）`));
+    } else {
+      items.push(item('charm-row', '挂件开关那一行已经在客户端 bundle 里', 'fail',
+        `${bundleFile} 里没有 ${missing.join(' / ')} —— 磁盘上这一份是旧版`,
+        '先确认改的是 plugins/dsh-up-t/lib/client.js；改完硬刷新一次（设置页 bundle 走缓存就会有这种表现）。'));
+    }
+  }
+
   // ── 渲染层：脚本到底跑起来没有（这是最后一个静默区）────────────
   const seen = await probe(url, '/dsh-up-t/seen', { timeoutMs });
   if (!seen.ok || seen.status !== 200) {
@@ -221,6 +251,8 @@ export async function runAccept({ hash = true, url = process.env.DSH_WEB_URL || 
     '按住左下角胶囊拖一下（位置存在 localStorage，右键可隐藏）。'));
   items.push(item('manual-settings', '等一下：设置里多出「deepseek-up-T」一整页', 'manual',
     '设置 → 左侧应多出一项 deepseek-up-T：里面有事实行、心跳行、以及一排操作按钮。'));
+  items.push(item('manual-charm', '等一下：设置 →「通用」里的挂件开关能开', 'manual',
+    '设置 →「通用」里那一行「桌面鲸鱼挂件」：打开后桌面上出现小鲸鱼（可拖动、右键有菜单），关掉即消失。'));
   items.push(item('manual-search', '等一下：会话全文搜索真的能搜到历史正文', 'manual',
     '搜一个只出现在历史正文里的词（例如 resolveBundleDir），看有没有命中。'));
   items.push(item('manual-ralph', '等一下：工具目录里有 ralph', 'manual',

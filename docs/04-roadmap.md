@@ -159,7 +159,7 @@
 **当前状态**
 - ✅ 本项目已交付：`env` / `doctor` / `snapshot create|list|diff|restore|prune` / `baseline write` / `precheck` / `asar ls|cat|grep` / `upgrade` / `accept`。
 - ✅ **升级检测已交付**（`dsht upgrade`）：把 `state/baseline.json` 与现场比对，一次回答「升级发生了没有 / 哪些 L3 声明需要重打 / 哪些只是从未落盘 / 重打前哪份原版素材已过期 / L0 声明有没有与现场漂移」。
-- ✅ **重启后验收已交付**（`dsht accept`）：把「改完重启之后到底成没成」这件事变成一条只读命令 —— L3 声明、L0 声明、宿主路由（`/dsh-up-t/status.json` 在不在、`/dsh-up-t/action` 是 200 还是 404）、渲染层握手（`/dsh-up-t/seen` 的 `bundle` / `capsule` 两条通道）各自判一次，每条失败都带一句修法。**三种结论分开**：`FAIL`（没成）/ `SKIP`（这次没拿到证据）/ `MANUAL`（只有人眼能判，不计入退出码）—— 把「没测到」折成「没过」会让人去修一个不存在的故障，把需要人眼的项算成失败则是教人忽略失败。设置页上也有这个按钮（`重启后验收`）。
+- ✅ **重启后验收已交付**（`dsht accept`）：把「改完重启之后到底成没成」这件事变成一条只读命令 —— L3 声明、L0 声明、宿主路由（`/dsh-up-t/status.json` 在不在、`/dsh-up-t/action` 是 200 还是 404）、**磁盘上那份客户端 bundle 是新版还是旧版**（挂件开关那一行的注册在不在 —— 查文件而不是查路由，因为 `/dsh-up-t/client.js` 送的是左下角胶囊，设置页那一页走 ModuleLoader）、渲染层握手（`/dsh-up-t/seen` 的 `bundle` / `capsule` 两条通道）各自判一次，每条失败都带一句修法。**三种结论分开**：`FAIL`（没成）/ `SKIP`（这次没拿到证据）/ `MANUAL`（只有人眼能判，不计入退出码）—— 把「没测到」折成「没过」会让人去修一个不存在的故障，把需要人眼的项算成失败则是教人忽略失败。设置页上也有这个按钮（`重启后验收`）。
 - ✅ L3 改动的声明式描述已落地：`patches/*.yml` + `vendor/whale/build.mjs`（构建到暂存位）+ `vendor/whale/install.mjs`（落盘 + 逐项核对）。
 - ✅ **落盘链路可以离线演练**（`install.mjs --yes --to <临时目标>` / `install-whale.cmd /dry`）：把暂存包复制到临时目标，在**不退出 Harness、不动在用安装包**的前提下跑同一段声明核对；`--to` 落在安装目录里一律拒绝，`--to` 指向在用 asar 时按真落盘处理（不给它开后门绕过守卫）。回归测试 `test/install.test.mjs`（26 条）钉住构建确定性、演练核对、三条拒绝路径，并用 sha256 证明全程在用安装包未变。
 - ✅ **渲染层脚本也有离线行为级单测**：`test/capsule.test.mjs`（16 条）用假 DOM + 假 `fetch` 把左下角胶囊（`plugins/dsh-up-t/assets/client.js`）真跑一遍 —— 挂载四条路径、幂等、握手、状态与数字、点击/拖动/右键隐藏、四种降级、存储被禁时仍可用，以及「所有运行里 `client failed` 一次都没响」。它当场抓到 `localStorage` 读取没包 `try`（存储被禁时胶囊在但点不动、无报错）。
