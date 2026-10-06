@@ -180,6 +180,11 @@
   「形状对」与「渲染过」之间的那类失败（白屏且无报错）照不到。全套 **10 套**测试。
 
 - ✅ `../tools/` 的 23 个脚本**已全部归拢**到 `vendor/`（asar 三件套、构建链 6 个、视觉验证 6 个、Provider 探针 8 个）；`../tools/` 保留为历史副本，等 T1 验收后再删。见 `vendor/README.md`。
+- ✅ **归拢后的说明书补齐**：新增 `vendor/visual/README.md`（6 个脚本的用法 / 依赖 / 副作用 / 回答不了什么），
+  `vendor/README.md` 的 `visual/` 一节改为指向它。同一轮修掉一条真缺陷：
+  `vendor/visual/check-whale-shape.mjs` 原本把产物写到**相对 cwd** 的 `.probe/frames/whale-silhouette.txt`
+  且不建目录，从项目目录运行必然 ENOENT；现改从 `vendor/lib/harness.mjs` 取 `WORKSPACE`、自动建目录、
+  新增 `--out <file>`，并在两个不同 cwd 下复验（写到同一绝对路径、指标一字未变）。
 
 **候选动作**
 1. ✅ **归拢 asar 工具链到 `vendor/`**（三批全部完成）。

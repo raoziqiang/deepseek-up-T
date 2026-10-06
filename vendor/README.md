@@ -32,7 +32,11 @@ vendor/
 `whale/materials/` 是**输入**，不是产物：一份全新 clone 靠它加一份 `app.asar` 就能重建暂存包
 （`action: patch` 的原版缓存例外，见下）。搬进来之后已重建验证：产物与搬家前 **sha256 完全相同**。
 
-### `vendor/visual/`（6 个，只读）
+### `vendor/visual/`（6 个，都不碰 DSH 安装目录）
+
+用法、依赖、副作用、以及「什么时候不该用它们」写在 **[`visual/README.md`](visual/README.md)**。
+（其中 `capture-frames.mjs` 需要真 Chrome + CDP、且要求页面暴露 `window.__splash`；
+`check-whale-shape.mjs` 会往 `.probe/frames/` 写一份 ASCII 轮廓。）
 
 | 脚本 | 作用 |
 | --- | --- |
@@ -170,6 +174,13 @@ node vendor/asar/verify.mjs <原版> <改动后> --expect 11
 | `route/verify-live-routes.mjs` | 无参 | exit 0，`llm/listProviders -> 200`，5 个 provider（4 个 opencode-go 分组 + deepseek-official / deepseek-account） |
 | `route/market-verify.mjs` | 无参 | exit 0，`boot rev: 2660d19acdb1`、dshmarket 在 `application` 批（15 条）、`GET .../client.js -> 200 724114 bytes` |
 | `route/fetch-go-docs.mjs` | 无参 | `status 200` + 文档正文 |
+
+**顺手修掉一条 cwd 依赖**：`visual/check-whale-shape.mjs` 原本把 ASCII 轮廓写到相对 cwd 的
+`.probe/frames/whale-silhouette.txt`，而且只 import 了 `writeFile`、**不建目录** ⇒ 从项目目录
+`deepseek-up-T\` 运行必然 ENOENT（`.probe\frames` 只存在于工作区根）。现改为
+`WORKSPACE/.probe/frames/whale-silhouette.txt`（`--out <file>` 可覆盖）、自动 `mkdir`、并打印落盘路径。
+复验：在项目目录与 `%TEMP%` 两处运行都 exit 0、stderr 0 字节、写到同一个绝对路径，指标一字未变
+（`VERDICT: tail notch present`、bbox aspect 1.59、左/右质量 59.8% / 40.2%）。
 
 **未实跑**（有真实副作用或需外部条件，只做了 `node --check`）：
 `route/e2e-opencode-go.mjs`（会发真实 prompt 并改默认模型）、

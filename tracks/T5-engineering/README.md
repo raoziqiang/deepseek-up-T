@@ -78,9 +78,11 @@ node vendor/whale/install.mjs --yes    # 需要先完全退出 Harness
       `state/staged/app.asar` **sha256 完全相同**（121,416,081 B / 11 条目）。
       `action: patch` 的原版缓存**不入库**（可从任意 `app.asar` 重抽，且构建时逐字节校验）。
       同一轮把 `bundle.mjs` 的 banner 从写死路径改成「相对项目根」，暂存包因此 +4 字节（121,416,085 B）。
-- [ ] `vendor/visual/` 那 6 个脚本没有 README，且其中 `capture-frames.mjs` 需要真 Chrome + CDP。
-      行为级验证已改由 `test/splash.test.mjs` 的假浏览器承担（更便宜、更精确）；
-      这 6 个脚本留给「画得像不像」这类只有像素能回答的问题，值得在 README 里写清各自的适用范围与依赖。
+- [x] **`vendor/visual/` 那 6 个脚本有了 README** —— 2026-10-06 完成：新增 `vendor/visual/README.md`，
+      逐个写清**用法 / 外部依赖 / 会写哪些盘 / 它回答什么 / 它回答不了什么**（`capture-frames.mjs` 需要真 Chrome +
+      CDP 且要求页面暴露 `window.__splash`，只能对 `materials/preview.html` 用；`serve-dir.mjs` 的 `/` 默认映射
+      `preview.html`），并写明分工：**行为对不对**交给 `test/splash.test.mjs` / `test/settings.test.mjs`（断言），
+      这 6 个是**取证的仪器**。同一轮修掉 `check-whale-shape.mjs` 的 cwd 依赖（见下）。
 
 ## 验收
 
@@ -857,6 +859,50 @@ catch 吞掉，而那一刻**事件监听与定时刷新都还没注册** ——
 2. **又是「期望值从推算来」这一类失败**（唯一一次失败 40/41）：断言里写『需要重启 Harness』，
    而代码里的文案是「要重启 Harness 才会重新加载」。凡是钉**界面文案**的断言，先量再写。
 3. 一条 `createRequire` 就能把「白屏且不报错」整类失败变成红色 —— 这类防线便宜得值得默认配上。
+
+### 2026-10-06 · 给仪器写说明书：`vendor/visual/README.md`（顺手修掉一条 cwd 依赖）
+
+**起因**：那 6 个脚本归拢进来时只做了「能不能跑」的冒烟，没有任何地方写清**各自的适用范围与依赖**。
+后果是下次想问「画得像不像」时会先踩两个坑：`capture-frames.mjs` 到底要不要真 Chrome、
+`check-whale-shape.mjs` 的落盘文件到底在哪。**仪器没有说明书，等于每次都要重新摸索一遍。**
+
+**做了什么**：新增 `vendor/visual/README.md`（`vendor/README.md` 的 `visual/` 一节改为指向它，
+并把原来那句不准确的「6 个，只读」改成「6 个，都不碰 DSH 安装目录」——其中两个确实会落盘）：
+
+| 脚本 | 用法 | 依赖 | 落盘 |
+| --- | --- | --- | --- |
+| `capture-frames.mjs` | `<previewUrl> <outDir> [--times …]` | 真 Chrome（路径硬编码）+ CDP 9333 | `<outDir>/frame-<t>.png` |
+| `trace-whale.mjs` | `<frame.png> [--cols 96] [--rows 40]` | 无 | 否 |
+| `analyze-frames.mjs` | `<dir>` | 无 | 否 |
+| `frame-colors.mjs` | `<frame.png>` | 无 | 否 |
+| `check-whale-shape.mjs` | `[--out <file>]` | 无（不需要 Chrome） | `.probe/frames/whale-silhouette.txt` |
+| `serve-dir.mjs` | `<dir> [port]`（默认 `preview.html`、8129） | 无 | 否 |
+
+**写清的两条边界**：① `capture-frames.mjs` 第 219-227 行先查 `window.__splash`，
+而这个钩子只由 `vendor/whale/materials/preview.html:93` 提供 ⇒ **它只能对着 `preview.html` 抓帧**，
+不能对着归档里的 `welcome.html`；② `check-whale-shape.mjs` 的贝塞尔控制点是**从
+`whale-animation.js` 手抄的**（文件注释写着 Keeping it in sync matters）⇒ 改了动画控制点必须同步改它，
+否则「形状对」是旧形状的结论。另外写明分工：**行为对不对**由 `test/splash.test.mjs` 与
+`test/settings.test.mjs` 断言（红了就是坏了）；这 6 个是**取证的仪器**（打印数字给人看）。
+
+**顺手抓到的真缺陷**：`vendor/visual/check-whale-shape.mjs` 末尾写的是**相对 cwd** 的
+`.probe/frames/whale-silhouette.txt`，且只 import 了 `writeFile`、**不建目录**。
+实测 `deepseek-up-T\.probe\frames` 不存在、只有工作区根 `D:\Z1848\harness-ds\.probe\frames` 存在
+⇒ **从项目目录运行必然 ENOENT**（当初冒烟 exit 0 是因为 cwd 恰好在有那个目录的地方）。
+这正是 `vendor/README.md` 明令避免的「路径靠 cwd 决定就静默写错位置」那一类。
+改为从 `vendor/lib/harness.mjs` 取 `WORKSPACE`（与其它 vendor 脚本同一个来源）+ `mkdir` 递归 +
+打印落盘路径，并新增 `--out <file>`。
+
+**怎么验的**：修完在**两个不同的 cwd**（项目目录、`%TEMP%`）各跑一次 —— 都 exit 0、stderr 0 字节、
+写到**同一个绝对路径**，指标一字未变（`VERDICT: tail notch present (reads as flukes)`、
+bbox aspect 1.59、`tail columns 2-run = 53`、左/右质量 59.8% / 40.2%）。
+
+**教训**：
+1. **「搬过来能跑」不等于「搬过来对」。** 归拢时冒烟用的是当时的 cwd，cwd 依赖被掩盖了；
+   凡是会写盘的脚本，都要问一句「路径从哪来」。
+2. **仪器也要写适用面。** 一个脚本的用法、依赖、副作用、以及**它回答不了什么**，
+   是它能不能被正确使用的一半。
+
 
 
 

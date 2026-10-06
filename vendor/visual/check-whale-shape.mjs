@@ -1,11 +1,15 @@
-// 归拢自 tools/check-whale-shape.mjs（与所在目录无关，直接搬）。
+// 归拢自 tools/check-whale-shape.mjs（逻辑一字未改）。
 // Render the whale silhouette alone and report shape metrics, so the drawing can
 // be validated without human eyes: aspect ratio, where the mass sits, and whether
 // the silhouette is convex-ish (a blob) or has the whale's notched tail.
 //
 // The metrics come from decoding the rendered PNG through analyze-frames' decoder.
-import { writeFile } from 'node:fs/promises'
+import { mkdir, writeFile } from 'node:fs/promises'
+import path from 'node:path'
 import { inflateSync } from 'node:zlib'
+// 输出路径来自 WORKSPACE，不靠 cwd：以前写的是 '.probe/frames/whale-silhouette.txt'，
+// 从项目目录运行时那个目录不存在（而脚本又不 mkdir），于是必然 ENOENT。
+import { WORKSPACE } from '../lib/harness.mjs'
 
 // A minimal Canvas2D stand-in is not feasible here, so this test renders the
 // whale path with a scanline fill of the same bezier outline used at runtime.
@@ -138,4 +142,11 @@ for (let py = 0; py < 32; py++) {
 }
 console.log('\n--- silhouette ---')
 console.log(art)
-await writeFile('.probe/frames/whale-silhouette.txt', art, 'utf8')
+
+const outArg = process.argv.indexOf('--out')
+const OUT = outArg >= 0
+  ? path.resolve(process.argv[outArg + 1])
+  : path.join(WORKSPACE, '.probe', 'frames', 'whale-silhouette.txt')
+await mkdir(path.dirname(OUT), { recursive: true })
+await writeFile(OUT, art, 'utf8')
+console.log(`wrote ${OUT}`)
