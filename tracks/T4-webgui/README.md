@@ -60,7 +60,7 @@
 - [x] 最小可用插件脚手架（host 入口 + client 入口 + `dsh` 声明）—— 2026-10-06 完成：`plugins/dsh-up-t`
 - [x] 挂一个自有面板到现有槽位 —— 2026-10-06 完成：`settings.section` 一整页「deepseek-up-T」，见下方第三步记录
 - [x] 让「插件到底加载了没有」变成可核对的事实 —— 2026-10-06 完成：`apply()` 落 `.runtime/heartbeat.json`，`doctor` 新增「运行时」段读它（见 `tracks/T5-engineering/README.md` 的记录）
-- [ ] 把高频操作做成按钮
+- [x] 把高频操作做成按钮 —— 2026-10-06 完成：`/dsh-up-t/action` 白名单通道 + 设置页按钮区，见下方最新记录
 - [ ] 重启 DSH 后确认胶囊与设置页真的出现
 
 ## 验收
@@ -70,6 +70,57 @@
 - Harness 升级后仍在（证明它确实活在 L1 而不是 L3）。
 
 ## 记录
+
+### 2026-10-06 · 第四步：把高频操作做成按钮（`/dsh-up-t/action`）
+
+**为什么难**：前面三步都是**只读**的（读状态、渲染、写心跳）。这一步第一次让**界面能改磁盘**，
+而上一步刚建立的教训正是「这个插件的失败路径全是静默的」—— 按钮点下去没反应，界面上只有转圈。
+所以这一整步的设计目标可以压成一句：**让「点了没反应」不可能发生**。
+
+**先读事实，不猜 API**（`cordis_inspect_query` host `Service/listService`）：
+`WebRoute = { kind: 'exact' | 'prefix', path, handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void> }`
+⇒ **handler 拿得到 `req.method` 与 `req.headers`，所以一条路由就能同时服务 GET 与 POST**，
+不需要注册两条（`register` 对重复的 `(kind, path)` 直接 throw）。
+宿主里跑 Node 脚本的现成做法在 `src/precheck.mjs:111-130`：`ELECTRON_RUN_AS_NODE=1` + `process.execPath`。
+
+**四条约束**
+1. **白名单，永不经过 shell**：操作在宿主侧 `ACTIONS` 表里写死 argv；用户输入只能填进「快照备注」
+   这一个占位（`cleanLabel()` 折单行、去首尾、封顶 120）；执行用 `spawn(exe, [cli, ...argv])` 数组形式。
+2. **客户端不复制这份清单**：按钮来自 `GET /dsh-up-t/action` 的 `specs`。硬编码的清单不会因为宿主
+   加了操作而变红，只会**静静少一个按钮** —— 这正是「能发现的东西就不要手写清单」那条教训的应用。
+3. **只允许本机界面触发**：必须 `POST` + `x-dsh-up-t: 1` 自定义头（跨源 `<form>`/`fetch` 不经预检带不上
+   自定义头，而我们不下发 CORS 允许头）。缺头 403 / 非 POST 405 / body 非 JSON 400 / 名字不在白名单 400。
+   `GET` 恒为只读的发现接口 —— 它能列动作，**永远不执行**。
+4. **一次只跑一个**：所有调用串在一条 promise 链上（`precheck` 会拉起 Electron-as-Node，并发既慢又互踩探针家目录）。
+
+**顺带修掉的一个静默陷阱**：插件是以 **junction** 装进 profile 的，`path.resolve(HERE,'..')` 拿到的是
+junction 那一侧的目录。所以 `PACKAGE_ROOT` 必须走 `fs.realpathSync.native()` —— 否则心跳写错地方、
+按钮找不到 `src/cli.mjs`，**两种情况都不报错**。
+
+**优雅降级**（这是「宿主半侧 vs 客户端半侧」的区别第一次变得要紧）：操作通道是宿主半侧的新路由，
+**必须重启 Harness 才存在**；而客户端脚本按 mtime 重读，硬刷新即可。所以在重启之前，
+`GET` 打不通 → 面板落到 `missing` 态显示「重启 Harness 后回到本页即可」，不是一直转圈。
+
+**怎么验的**（都是离线，没有 boot 实例）
+- `test/plugin.test.mjs` 从 24 条涨到 **35 条**，新增部分：路由数 2→3；`GET` 只列动作且不执行；
+  缺头 403；非 POST 405；非 JSON 400；白名单外 400 带 `actions`；**一次真 spawn**（`runAction('snapshotList')`
+  真的跑起来并返回 stdout）；客户端面板**按钮来自宿主清单**（并断言源码里没有硬编码的 `"体检"`）；
+  点只读按钮 → `POST` 且带 `x-dsh-up-t` 与备注；点写盘按钮 → **先 confirm，答「不」时一个请求都不发**；
+  取不到清单时落到 `missing` 态并渲染出「重启 Harness」。
+- 远端真跑一次（不经界面）：`runAction('doctor')` → `ok/code 0/560ms` 且 json 解析出 6 个键；
+  `runAction('upgrade')` → `ok/code 0/426ms` 且 json 解析出 17 个键。
+- 全套 `node test/run.mjs` **4/4 套通过**；`node src/cli.mjs doctor` **0 错误 2 警告**。
+
+**踩到的坑（都是测试侧，不是产品侧）**
+1. 元素树里 children **既可能是元素也可能是数组**（`h("div", {…}, [a, b])` 是常态），
+   只按 `el.children` 递归会一层都找不到 —— 面板已渲染却断言「找不到按钮」。
+2. bundle 里的 `fetch` 解析到的是 **vm 沙箱的全局**，不是宿主的 `globalThis`：
+   把宿主 `fetch` 换掉，被测代码根本看不见，症状是「点了按钮一个请求都没发」。
+   修法是从沙箱里换（给沙箱一个转发到可变引用的壳）。
+3. 外层组件（`UpTSection`）与面板**共用同一个 `useState` 队列**，必须先渲染外层拿到面板元素，
+   再改脚本化 state 渲染面板；顺序反了会让外层拿到面板的 state（症状是 `reading 'install'`）。
+
+**还没验的**：真在界面上点一下按钮 —— 和设置页一样，要**重启 Harness** 才会有这条路。
 
 ### 2026-10-06 · 第三步：用 Slot 系统挂一页设置（`lib/client.js`）
 
@@ -198,6 +249,9 @@
 **做了什么**：一个最小可用的自建插件，也是 T4 的样板。位于
 `D:\Z1848\harness-ds\deepseek-up-T\plugins\dsh-up-t\`：
 `package.json` / `cordis.patch.yml` / `lib/index.js` / `assets/client.js` / `README.md`。
+（注意这条线后来长出**两个**客户端脚本，别混：`assets/client.js` 是第二步的胶囊，
+走「宿主注册 HTTP 路由 + 推一行注入」的轻通道，由 `lib/index.js` 的 `CLIENT_FILE` 按 mtime 直出；
+`lib/client.js` 是第三步的设置页，走 Slot 系统，由 `exports["./client"]` 交给 ModuleLoader。）
 它在界面左下角放一个小胶囊显示 Harness 版本与安装包是否被改造过，点开有细节，可拖动、右键隐藏。
 
 **为什么不选 Slot 系统而选注入路线**：Slot 系统（`dsh-client-ui-slots`）要求客户端半身被打包进

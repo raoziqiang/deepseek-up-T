@@ -28,6 +28,7 @@ up-T · ?             ← 黄点：没有原版备份可比 / 宿主没回应
 | --- | --- |
 | `/dsh-up-t/client.js` | 客户端脚本。按 **mtime** 重读，所以改完**硬刷新页面即生效，不用重启 DSH** |
 | `/dsh-up-t/status.json` | 状态事实（只做 stat 级读取，不算 121MB 的 sha256；含磁盘上的心跳） |
+| `/dsh-up-t/action` | 操作通道。`GET` 列出可用操作（只读、无需请求头），`POST` 才真的执行 |
 
 `apply()` 的**第一条语句**就是 `writeHeartbeat()`，然后立刻注册 `webserver/index-inject` 的注入行；
 其余逻辑在 `root.inject(['webServer'], …)` 里。
@@ -54,6 +55,32 @@ up-T · ?             ← 黄点：没有原版备份可比 / 宿主没回应
   它写的就不是我们这份副本的目录 —— 而 `doctor` 看不到它，**这正是正确的结论**。
 
 `.runtime/` 已在 `.gitignore` 里（它含本机 pid 与绝对路径，是「这一刻」的证据，不是源码）。
+
+## ★ 操作通道：把 `dsht` 最常跑的命令挂成按钮
+
+设置页面上那一排按钮（体检 / 升级检测 / 组合预检 / 快照列表 / 留一份快照）走的是
+`/dsh-up-t/action`。它有四条约束，每一条都是为了让「点了没反应」不可能发生：
+
+1. **白名单，不接受任意命令。** 每个操作在宿主侧的 `ACTIONS` 表里写死 argv 形态；
+   用户能填的只有「快照备注」这一个占位（`cleanLabel()` 折成单行、去首尾、封顶 120 字符）。
+   执行用 `spawn(exe, [cli, ...argv])` **数组形式，永不经过 shell** ⇒ 没有拼接注入面。
+2. **客户端不复制这份清单。** 按钮来自 `GET /dsh-up-t/action` 返回的 `specs`。
+   硬编码一份在界面里的清单不会因为宿主加了操作而变红 —— 它只会静静少一个按钮。
+3. **只允许本机界面触发。** 必须带 `x-dsh-up-t: 1` 这个**自定义头**且必须是 `POST`：
+   跨源的 `<form>` / `fetch` 不经预检带不上自定义头，而我们从不下发 CORS 允许头。
+   缺头一律 **403**，非 POST 一律 **405**，body 不是 JSON 一律 **400**，名字不在白名单一律 **400**。
+4. **一次只跑一个。** 所有调用串在一条 promise 链上：`precheck` 会拉起一个 Electron-as-Node
+   进程去跑 `--dump-config`，两个并发既慢又容易互相踩探针家目录。
+
+怎么跑起来的：宿主可能是 Electron，所以用 `process.execPath` + `ELECTRON_RUN_AS_NODE=1`
+以纯 Node 身份跑 `src/cli.mjs`（`src/` 零依赖，只用了内置模块）。
+项目根由 `findProjectRoot()` 从插件目录往上找（≤5 层，要求有 `src/cli.mjs` 且包名对得上）；
+`PACKAGE_ROOT` 走 `fs.realpathSync.native()` —— 插件是以 **junction** 装进 profile 的，
+不解析真实路径就会去改 junction 那一侧的目录，而且**不报任何错**。
+
+**优雅降级**：操作通道是宿主半侧新增的，**必须重启 Harness 才会出现**。
+在那之前 `GET` 打不通，界面显示「操作通道由宿主半侧提供…重启后回到本页即可」，
+而不是一直转圈。客户端半侧改完仍然只需硬刷新。
 
 ## ★ 三条不能违反的约束（都是别人踩过的坑）
 
@@ -157,10 +184,11 @@ node src\cli.mjs precheck --profile-json state\candidate\package.json
 
 ```powershell
 cd D:\Z1848\harness-ds\deepseek-up-T
-node test\plugin.test.mjs          # 24 条断言：心跳、注入行、两条路由、客户端 bundle 形态、清理
-node src\cli.mjs doctor            # bundles 全部可解析
-node src\cli.mjs precheck          # 组合可用
+node test\plugin.test.mjs   # 35 条断言：心跳、注入行、三条路由、操作守卫与真 spawn、客户端 bundle 形态与按钮、清理
+node src\cli.mjs doctor     # bundles 全部可解析
+node src\cli.mjs precheck   # 组合可用
 ```
 
 **胶囊与设置页真的出现**只能在重启 DSH 之后看到 —— 组合层文件没有热重载。
-（客户端脚本本身按 mtime 重读，所以**改客户端代码之后硬刷新页面即生效**，不用再重启。）
+（客户端脚本本身按 mtime 重读，所以**改客户端代码之后硬刷新页面即生效**，不用再重启。
+但**操作通道是宿主半侧的新路由，必须重启**。）

@@ -26,14 +26,34 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const PACKAGE_ROOT = path.resolve(HERE, '..');
+
+/**
+ * 自己的包目录，**解析成真实路径**。
+ *
+ * 为什么必须 realpath：插件是以 junction 的形式装进 profile 的
+ * （`$DSH_HOME\profiles\<p>\node_modules\dsh-up-t` → 本项目目录）。
+ * 一旦宿主给我们的是 junction 那条路径，往上走两层得到的就不是项目根，
+ * 而是 `...\node_modules` —— 于是心跳会写错地方、操作按钮也会找不到 `src/cli.mjs`，
+ * 而且**两种情况都不报错**（只是「文件不在」）。
+ */
+function realdir(p) {
+  try { return fs.realpathSync.native(p); } catch { return p; }
+}
+const PACKAGE_ROOT = realdir(path.resolve(HERE, '..'));
 
 /** 客户端脚本的公开路径。注入行与路由必须用同一个常量，否则永远不会一致。 */
 const CLIENT_PATH = '/dsh-up-t/client.js';
 const STATUS_PATH = '/dsh-up-t/status.json';
+const ACTION_PATH = '/dsh-up-t/action';
+/**
+ * 自定义请求头。跨源 `<form>`/`fetch` 不经过预检就带不上自定义头，而我们从不下发
+ * CORS 允许头 —— 所以这一个字段就把「别的网页悄悄让本机跑命令」挡在外面。
+ */
+const ACTION_HEADER = 'x-dsh-up-t';
 
 const CLIENT_FILE = path.join(PACKAGE_ROOT, 'assets', 'client.js');
 
@@ -180,9 +200,228 @@ function collectStatus() {
   return out;
 }
 
-function sendJson(res, payload) {
+// ─────────────────────────── 操作：把项目里最常跑的命令挂到界面上 ───────────────────────────
+//
+// 这一段存在的理由：`dsht` 的日常工作流是「体检 → 留快照 → 改 → 预检 → 复验 → 收尾」，
+// 而这几步全都要离开界面去开终端。设置页已经能显示状态了，那就顺手把命令也放上来。
+//
+// 三条设计约束：
+// 1. **白名单，不接受任意命令**。每个操作在表里写死 argv 的形态；用户输入只能填进
+//    已经被约好的那一个占位（快照备注），并且**永不经过 shell**（`spawn` 数组形式），
+//    所以不存在拼接注入。
+// 2. **只允许本机界面触发**（自定义头 + POST，见 ACTION_HEADER）。
+// 3. **一次只跑一个**。`precheck` 会拉起一个 Electron-as-Node 进程，两个并发既慢又容易
+//    互相踩探针家目录，所以调用串成一条链。
+
+/** 找到项目根：从插件目录往上找带 `src/cli.mjs` 且包名对得上的那一层。 */
+export function findProjectRoot() {
+  let dir = PACKAGE_ROOT;
+  for (let i = 0; i < 5; i += 1) {
+    if (fs.existsSync(path.join(dir, 'src', 'cli.mjs'))) {
+      try {
+        const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
+        if (pkg.name === 'deepseek-up-t' || pkg.bin?.dsht) return dir;
+      } catch { /* 不是项目根，继续往上 */ }
+    }
+    const up = path.dirname(dir);
+    if (up === dir) break;
+    dir = up;
+  }
+  return null;
+}
+
+/** 快照备注：单行、去首尾空白、封顶，避免把奇怪的东西写进快照 id。 */
+function cleanLabel(s) {
+  return String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, 120);
+}
+
+/**
+ * 操作表。`argv` 只返回**参数**，`cli.mjs` 的路径由执行器补。
+ * `writes` 标记会不会改动磁盘 —— 界面据此决定要不要二次确认。
+ */
+export const ACTIONS = {
+  doctor: {
+    label: '体检',
+    hint: '读组合层与安装包，报告所有不变量',
+    writes: false,
+    argv: () => ['doctor', '--json'],
+    json: true,
+    timeoutMs: 180000,
+  },
+  upgrade: {
+    label: '升级检测',
+    hint: 'Harness 升级后：哪些补丁丢了、哪些要重打',
+    writes: false,
+    argv: () => ['upgrade', '--json'],
+    json: true,
+    timeoutMs: 180000,
+  },
+  precheck: {
+    label: '组合预检',
+    hint: '用隔离探针家跑一次权威 dump（会写 state/probe-home）',
+    writes: true,
+    argv: () => ['precheck'],
+    json: false,
+    timeoutMs: 600000,
+  },
+  snapshotList: {
+    label: '快照列表',
+    hint: '列出已有快照',
+    writes: false,
+    argv: () => ['snapshot', 'list'],
+    json: false,
+    timeoutMs: 30000,
+  },
+  snapshotCreate: {
+    label: '留一份快照',
+    hint: '改动之前先冻结 profile 控制面',
+    writes: true,
+    argv: (input) => ['snapshot', 'create', '-m', cleanLabel(input?.message) || '界面上留的快照'],
+    json: false,
+    timeoutMs: 60000,
+  },
+};
+
+const ACTION_NAMES = Object.keys(ACTIONS);
+
+/**
+ * 界面要用的那张表。客户端**不复制这份清单**，而是从这里取 ——
+ * 否则「宿主加了操作、按钮没跟上」这种漂移不会有任何症状。
+ */
+function actionSpecs() {
+  return ACTION_NAMES.map((name) => ({
+    name,
+    label: ACTIONS[name].label,
+    hint: ACTIONS[name].hint,
+    writes: ACTIONS[name].writes === true,
+  }));
+}
+const MAX_STREAM = 64 * 1024;
+const MAX_BODY = 8 * 1024;
+
+function readBody(req, limit = MAX_BODY) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks = [];
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > limit) { reject(new Error(`请求体超过 ${limit} 字节`)); req.destroy(); return; }
+      chunks.push(c);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    req.on('error', reject);
+  });
+}
+
+function parseJsonOrNull(text) {
+  try { return JSON.parse(text); } catch { return null; }
+}
+
+function tailAppend(acc, chunk) {
+  const next = acc + chunk;
+  return next.length > MAX_STREAM ? next.slice(-MAX_STREAM) : next;
+}
+
+let actionChain = Promise.resolve();
+
+/** 把操作串成一条链：同一个宿主进程里一次只跑一个。 */
+export function runAction(name, input) {
+  const start = () => executeAction(name, input);
+  const p = actionChain.then(start, start);
+  actionChain = p.then(() => {}, () => {});
+  return p;
+}
+
+async function executeAction(name, input) {
+  const spec = ACTIONS[name];
+  if (!spec) return { ok: false, action: name, error: `未知操作：${name}`, actions: ACTION_NAMES };
+
+  const root = findProjectRoot();
+  if (!root) {
+    return {
+      ok: false,
+      action: name,
+      error: '找不到项目根（这个按钮只在开发形态下可用：插件目录里要能找到 src/cli.mjs）',
+    };
+  }
+
+  const cli = path.join(root, 'src', 'cli.mjs');
+  const argv = spec.argv(input);
+  const started = Date.now();
+
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = spawn(process.execPath, [cli, ...argv], {
+        cwd: root,
+        // 宿主可能是 Electron：以 Node 身份跑它，任何纯 Node 脚本都能用。
+        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (err) {
+      resolve({ ok: false, action: name, label: spec.label, argv, error: String(err?.message ?? err) });
+      return;
+    }
+
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    const timer = setTimeout(() => {
+      try { child.kill(); } catch { /* 已经退出了 */ }
+    }, spec.timeoutMs ?? 120000);
+
+    const finish = (payload) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ action: name, label: spec.label, hint: spec.hint, writes: spec.writes, argv, root, ...payload });
+    };
+
+    child.stdout.on('data', (c) => { stdout = tailAppend(stdout, c.toString('utf8')); });
+    child.stderr.on('data', (c) => { stderr = tailAppend(stderr, c.toString('utf8')); });
+    child.on('error', (err) => finish({ ok: false, ms: Date.now() - started, error: String(err?.message ?? err), stdout, stderr }));
+    child.on('close', (code) => finish({
+      ok: code === 0,
+      code,
+      ms: Date.now() - started,
+      stdout,
+      stderr,
+      json: spec.json ? parseJsonOrNull(stdout) : null,
+    }));
+  });
+}
+
+function handleAction(req, res) {
+  const method = String(req.method ?? 'GET').toUpperCase();
+  if (req.headers?.[ACTION_HEADER] !== '1') {
+    sendJson(res, { ok: false, error: `缺少 ${ACTION_HEADER}: 1 请求头（只允许本机界面触发）` }, 403);
+    return;
+  }
+  if (method !== 'POST') {
+    sendJson(res, { ok: false, error: `只接受 POST，收到 ${method}` }, 405);
+    return;
+  }
+  readBody(req)
+    .then((raw) => {
+      let input = {};
+      if (raw && raw.trim()) {
+        input = parseJsonOrNull(raw);
+        if (input === null) { sendJson(res, { ok: false, error: '请求体不是合法 JSON' }, 400); return null; }
+      }
+      const name = String(input.action ?? '');
+      if (!ACTION_NAMES.includes(name)) {
+        sendJson(res, { ok: false, error: `未知操作：${name || '(空)'}`, actions: ACTION_NAMES }, 400);
+        return null;
+      }
+      return runAction(name, input).then((result) => sendJson(res, result));
+    })
+    .catch((err) => sendJson(res, { ok: false, error: String(err?.message ?? err) }, 400));
+}
+
+function sendJson(res, payload, status = 200) {
   const body = Buffer.from(JSON.stringify(payload, null, 2), 'utf8');
-  res.writeHead(200, {
+  res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
     'Content-Length': body.length,
     'Cache-Control': 'no-store',
@@ -245,6 +484,28 @@ export default {
         handler: (req, res) => {
           try { sendJson(res, collectStatus()); } catch (err) {
             sendJson(res, { ok: false, error: String(err?.message ?? err) });
+          }
+        },
+      }));
+
+      // 操作通道：设置页上的按钮打这里。GET 也答一句，好让人用浏览器确认路由活着。
+      disposers.push(ctx.webServer.register({
+        kind: 'exact',
+        path: ACTION_PATH,
+        handler: (req, res) => {
+          try {
+            if (String(req.method).toUpperCase() === 'GET') {
+              sendJson(res, {
+                ok: true,
+                actions: ACTION_NAMES,
+                specs: actionSpecs(),
+                note: '用 POST + ' + ACTION_HEADER + ': 1 触发',
+              });
+              return;
+            }
+            handleAction(req, res);
+          } catch (err) {
+            sendJson(res, { ok: false, error: String(err?.message ?? err) }, 500);
           }
         },
       }));

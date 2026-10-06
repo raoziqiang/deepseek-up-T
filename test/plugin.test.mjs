@@ -23,6 +23,7 @@ const PLUGIN = path.resolve(HERE, '..', 'plugins', 'dsh-up-t');
 
 const CLIENT_PATH = '/dsh-up-t/client.js';
 const STATUS_PATH = '/dsh-up-t/status.json';
+const ACTION_PATH = '/dsh-up-t/action';
 
 const results = [];
 function check(name, fn) {
@@ -32,6 +33,33 @@ function check(name, fn) {
   } catch (err) {
     results.push({ name, ok: false, err });
   }
+}
+
+/** 处理请求的那几条路径是异步的（读 body、跑子进程），所以要有异步版。 */
+async function checkAsync(name, fn) {
+  try {
+    await fn();
+    results.push({ name, ok: true });
+  } catch (err) {
+    results.push({ name, ok: false, err });
+  }
+}
+
+/** 假的 IncomingMessage：只实现路由真正用到的那几样。 */
+function makeReq({ method = 'POST', headers = {}, body = '' } = {}) {
+  const listeners = { data: [], end: [], error: [] };
+  const req = {
+    method,
+    headers,
+    destroy() {},
+    on(event, cb) { (listeners[event] ??= []).push(cb); return req; },
+  };
+  // 真实的 req 是流：注册完监听器之后才会推数据，且是异步的。
+  queueMicrotask(() => {
+    for (const cb of listeners.data) cb(Buffer.from(body, 'utf8'));
+    for (const cb of listeners.end) cb();
+  });
+  return req;
 }
 
 // ── 假的宿主侧服务 ────────────────────────────────────────────────
@@ -187,10 +215,10 @@ check('依赖就绪前就已经注册了注入行（这是桌面端能看到挂�
   settle();
 });
 
-check('依赖就绪后注册了 client.js 与 status.json 两条精确路由', () => {
-  assert.equal(state.routes.length, 2);
+check('依赖就绪后注册了 client.js / status.json / action 三条精确路由', () => {
+  assert.equal(state.routes.length, 3);
   const byPath = Object.fromEntries(state.routes.map((r) => [r.path, r]));
-  assert.deepEqual(Object.keys(byPath).sort(), [CLIENT_PATH, STATUS_PATH].sort());
+  assert.deepEqual(Object.keys(byPath).sort(), [CLIENT_PATH, STATUS_PATH, ACTION_PATH].sort());
   for (const r of state.routes) {
     assert.equal(r.kind, 'exact');
     assert.equal(typeof r.handler, 'function');
@@ -249,6 +277,96 @@ check('status.json 把磁盘上的心跳原样带出来，且写失败时显式�
   assert.equal(status.heartbeat?.pid, process.pid, 'status 里的心跳必须来自磁盘，而不是内存里的变量');
 });
 
+// ── 操作通道（/dsh-up-t/action）────────────────────────────────────
+//
+// 这一段守的是「按钮点了会发生什么」。它的失败模式同样是静默的：路由没注册、守卫漏了、
+// 或者 spawn 那一层根本跑不起来 —— 界面上只会看到一个转圈然后什么都没有。
+// 所以这里既断言守卫（403/405/400），也**真的 spawn 一次**。
+
+/** 打一次 action 路由并等它给出响应。 */
+async function driveAction(req) {
+  const route = state.routes.find((r) => r.path === ACTION_PATH);
+  assert.ok(route, 'action 路由必须已注册');
+  const res = makeRes();
+  route.handler(req, res);
+  for (let i = 0; i < 4000 && res.statusCode === null; i += 1) {
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  assert.notEqual(res.statusCode, null, '路由没有给出任何响应');
+  return res;
+}
+
+const actionJson = (res) => JSON.parse(res.body.toString('utf8'));
+
+await checkAsync('action 路由：GET 无头也答一句（好让人用浏览器确认路由活着）', async () => {
+  const res = await driveAction(makeReq({ method: 'GET' }));
+  assert.equal(res.statusCode, 200);
+  const j = actionJson(res);
+  assert.equal(j.ok, true);
+  assert.ok(Array.isArray(j.actions) && j.actions.length > 0);
+  assert.ok(j.actions.includes('doctor') && j.actions.includes('snapshotCreate'));
+});
+
+await checkAsync('action 路由：缺少 x-dsh-up-t 头一律 403（别的网页不能悄悄让本机跑命令）', async () => {
+  const res = await driveAction(makeReq({ method: 'POST', body: JSON.stringify({ action: 'doctor' }) }));
+  assert.equal(res.statusCode, 403);
+  assert.match(actionJson(res).error, /x-dsh-up-t/);
+});
+
+await checkAsync('action 路由：GET 永远只列动作、绝不执行（写盘操作不能靠 GET 触发）', async () => {
+  const res = await driveAction(makeReq({
+    method: 'GET',
+    headers: { 'x-dsh-up-t': '1' },
+    body: JSON.stringify({ action: 'snapshotCreate' }),
+  }));
+  assert.equal(res.statusCode, 200);
+  const j = actionJson(res);
+  assert.equal(j.ok, true);
+  assert.ok(Array.isArray(j.actions) && j.actions.length > 0);
+  assert.equal(j.stdout, undefined, 'GET 不得返回任何命令输出');
+  assert.equal(j.code, undefined);
+});
+
+await checkAsync('action 路由：GET/POST 之外的方法一律 405', async () => {
+  const res = await driveAction(makeReq({ method: 'PUT', headers: { 'x-dsh-up-t': '1' } }));
+  assert.equal(res.statusCode, 405);
+  assert.match(actionJson(res).error, /POST/);
+});
+
+await checkAsync('action 路由：头对了但 body 不是 JSON 时 400', async () => {
+  const res = await driveAction(makeReq({ method: 'POST', headers: { 'x-dsh-up-t': '1' }, body: '{oops' }));
+  assert.equal(res.statusCode, 400);
+  assert.match(actionJson(res).error, /JSON/);
+});
+
+await checkAsync('action 路由：不在白名单里的 action 返回 400 并附上白名单', async () => {
+  const res = await driveAction(makeReq({
+    method: 'POST',
+    headers: { 'x-dsh-up-t': '1' },
+    body: JSON.stringify({ action: 'rm -rf /' }),
+  }));
+  assert.equal(res.statusCode, 400);
+  const j = actionJson(res);
+  assert.equal(j.ok, false);
+  assert.ok(Array.isArray(j.actions) && j.actions.includes('doctor'));
+});
+
+await checkAsync('runAction 真能把命令跑起来（顺带钉住「spawn 这一路走得通」）', async () => {
+  if (!mod.findProjectRoot()) {
+    console.log('  （跳过：找不到项目根，操作按钮在这个形态下不可用）');
+    return;
+  }
+  const r = await mod.runAction('snapshotList');
+  assert.equal(r.ok, true, `命令应当成功：${r.stderr || r.error || ''}`);
+  assert.equal(r.code, 0);
+  assert.equal(r.writes, false);
+  assert.ok(r.ms >= 0);
+  assert.ok(typeof r.stdout === 'string' && r.stdout.length > 0, 'stdout 不该是空的');
+  assert.ok(r.root.endsWith('deepseek-up-T'));
+});
+
+
+
 // ── ③ 清理 ──────────────────────────────────────────────────────
 
 check('两条清理路径都可调用且不抛', () => {
@@ -280,10 +398,18 @@ function makeReactStub() {
   };
 }
 
-function runClientBundle({ withLoader = true } = {}) {
+/**
+ * bundle 里的 `fetch` 解析到的是 **vm 沙箱的全局**，不是宿主的 globalThis，
+ * 所以要换掉它必须从沙箱里换：给它一个转发到可变引用的壳。
+ */
+let clientFetch = () => Promise.reject(new Error('offline'));
+
+function runClientBundle({ withLoader = true, confirm } = {}) {
   let captured = null;
+  const win = withLoader ? { __ModuleLoader__: { load: (spec) => (captured = spec) } } : {};
+  if (confirm) win.confirm = confirm;
   const sandbox = {
-    window: withLoader ? { __ModuleLoader__: { load: (spec) => (captured = spec) } } : {},
+    window: win,
     Symbol,
     Object,
     Array,
@@ -292,7 +418,7 @@ function runClientBundle({ withLoader = true } = {}) {
     Error,
     setInterval: () => 0,
     clearInterval: () => {},
-    fetch: () => Promise.reject(new Error('offline')),
+    fetch: (...args) => clientFetch(...args),
     console,
   };
   vm.createContext(sandbox);
@@ -367,6 +493,183 @@ check('设置页组件能渲染出 loading 态（不抛、返回元素树）', (
   const el = component();
   assert.ok(el && typeof el === 'object', '组件必须返回元素');
   assert.equal(el.type, 'div');
+});
+
+// ── 客户端半侧的「操作」区 ─────────────────────────────────────────
+//
+// 这一段守的是「按钮按下之后到底发了什么」。界面上的失败是沉默的：请求打歪了、
+// 或者忘了带那个自定义头，表现只是一直转圈 —— 没有任何报错。
+
+const ACTION_SPECS = [
+  { name: 'doctor', label: '体检', hint: '只读', writes: false },
+  { name: 'snapshotCreate', label: '留一份快照', hint: '会写盘', writes: true },
+];
+
+/** 可编排的 React 假件：能指定 useState 的初值，并记录 effect 与 setter 调用。 */
+function makeScriptedReact() {
+  let i = 0;
+  let states = [];
+  const setCalls = [];
+  const effects = [];
+  const React = {
+    createElement: (type, props, ...children) => ({ type, props: props || {}, children }),
+    useState(initial) {
+      const idx = i++;
+      const value = idx < states.length && states[idx] !== undefined ? states[idx] : initial;
+      return [value, (next) => setCalls.push({ idx, next })];
+    },
+    useEffect(fn) { effects.push(fn); },
+  };
+  return {
+    React,
+    setCalls,
+    effects,
+    setStates(list) { states = list; i = 0; },
+    reset() { setCalls.length = 0; effects.length = 0; },
+  };
+}
+
+/** 用给定的 React 与 window.confirm 造一份客户端实例，并取到注册的设置页组件。 */
+function makeClient({ confirm } = {}) {
+  const scripted = makeScriptedReact();
+  const b = runClientBundle({ confirm });
+  const exp = b.factory((name) => {
+    if (name === 'react') return scripted.React;
+    throw new Error(`客户端 bundle 出现了未声明的 require：${name}`);
+  });
+  const registers = [];
+  exp.apply({
+    effect: (fn) => fn(),
+    slots: {
+      inject: (key, cb) => cb(),
+      register: (entry, component) => { registers.push({ entry, component }); return () => {}; },
+    },
+  });
+  return { scripted, component: registers[0].component };
+}
+
+/** 元素树的遍历：children 里既有元素、也有数组（h("div", …, [a, b]) 是常态）。 */
+function walk(node, visit) {
+  if (Array.isArray(node)) {
+    for (const n of node) walk(n, visit);
+    return;
+  }
+  if (!node || typeof node !== 'object') return;
+  visit(node);
+  for (const c of node.children || []) walk(c, visit);
+}
+
+/** 树里第一个「type 是函数」的节点就是操作面板。 */
+function findPanel(el) {
+  let found = null;
+  walk(el, (n) => {
+    if (!found && typeof n.type === 'function') found = n;
+  });
+  return found;
+}
+
+function collect(el, type) {
+  const out = [];
+  walk(el, (n) => {
+    if (n.type === type) out.push(n);
+  });
+  return out;
+}
+
+function withFetch(impl, fn) {
+  const previous = clientFetch;
+  clientFetch = impl;
+  try { return fn(); } finally { clientFetch = previous; }
+}
+
+const flush = () => new Promise((r) => setTimeout(r, 0));
+
+/**
+ * 取到操作面板元素。注意顺序：**必须在改 states 之前**把外层组件渲染一次 ——
+ * 外层组件（UpTSection）也会用 useState，共享同一个 state 队列。
+ */
+function panelOf(client) {
+  const panel = findPanel(client.component());
+  assert.ok(panel, '设置页里必须有操作面板');
+  return panel;
+}
+
+await checkAsync('操作面板：按钮来自宿主给的清单，而不是前端硬编码', async () => {
+  const client = makeClient();
+  const panel = panelOf(client);
+  client.scripted.reset();
+  client.scripted.setStates([{ phase: 'ready', specs: ACTION_SPECS, error: null }, '', null]);
+  const tree = panel.type(panel.props);
+  const buttons = collect(tree, 'button');
+  assert.deepEqual(buttons.map((b) => b.children[0]), ['体检', '留一份快照 ⚠'], '⚠ 必须只出现在会写盘的操作上');
+  assert.ok(CLIENT_SRC.includes('/dsh-up-t/action'), '面板必须打真实的操作路由');
+  assert.ok(!/label:\s*"体检"/.test(CLIENT_SRC), '清单必须在宿主侧，不得在前端复制一份');
+});
+
+await checkAsync('操作面板：点只读按钮 → POST 到操作路由并带上自定义头与备注', async () => {
+  const client = makeClient();
+  const panel = panelOf(client);
+  client.scripted.setStates([{ phase: 'ready', specs: ACTION_SPECS, error: null }, '我的备注', null]);
+  const tree = panel.type(panel.props);
+  const button = collect(tree, 'button')[0];
+  const calls = [];
+  withFetch((url, opts) => {
+    calls.push({ url, opts });
+    return Promise.resolve({ status: 200, text: () => Promise.resolve(JSON.stringify({ ok: true, code: 0 })) });
+  }, () => button.props.onClick());
+  await flush();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, '/dsh-up-t/action');
+  assert.equal(calls[0].opts.method, 'POST');
+  assert.equal(calls[0].opts.headers['x-dsh-up-t'], '1', '缺了这个头宿主会直接 403');
+  assert.deepEqual(JSON.parse(calls[0].opts.body), { action: 'doctor', message: '我的备注' });
+});
+
+await checkAsync('操作面板：会写盘的操作要先问；答「不」就一个请求都不发', async () => {
+  let asked = 0;
+  const client = makeClient({ confirm: () => { asked += 1; return false; } });
+  const panel = panelOf(client);
+  client.scripted.setStates([{ phase: 'ready', specs: ACTION_SPECS, error: null }, '', null]);
+  const writeBtn = collect(panel.type(panel.props), 'button')[1];
+  let calls = 0;
+  withFetch(() => { calls += 1; return Promise.resolve({ status: 200, text: () => Promise.resolve('{}') }); },
+    () => writeBtn.props.onClick());
+  await flush();
+  assert.equal(asked, 1, '写盘操作必须先确认');
+  assert.equal(calls, 0, '用户答「不」时不得发出任何请求');
+
+  // 答「是」才发，且发的是那个会写盘的 action。
+  let asked2 = 0;
+  const c2 = makeClient({ confirm: () => { asked2 += 1; return true; } });
+  const panel2 = panelOf(c2);
+  c2.scripted.setStates([{ phase: 'ready', specs: ACTION_SPECS, error: null }, '', null]);
+  const writeBtn2 = collect(panel2.type(panel2.props), 'button')[1];
+  const calls2 = [];
+  withFetch((url, opts) => {
+    calls2.push({ url, opts });
+    return Promise.resolve({ status: 200, text: () => Promise.resolve('{"ok":true}') });
+  }, () => writeBtn2.props.onClick());
+  await flush();
+  assert.equal(asked2, 1);
+  assert.equal(calls2.length, 1);
+  assert.equal(JSON.parse(calls2[0].opts.body).action, 'snapshotCreate');
+});
+
+await checkAsync('操作面板：宿主半侧还没重启（404）时降级成一句「重启后可用」', async () => {
+  const client = makeClient();
+  const panel = panelOf(client);
+  client.scripted.reset();
+  client.scripted.setStates([{ phase: 'loading', specs: [], error: null }, '', null]);
+  panel.type(panel.props);
+  assert.equal(client.scripted.effects.length, 1, '面板挂载时必须自己去取一次清单');
+  withFetch(() => Promise.resolve({ ok: false, status: 404, json: () => Promise.reject(new Error('not json')) }),
+    () => client.scripted.effects[0]());
+  await flush(); await flush();
+  const missing = client.scripted.setCalls.find((c) => c.next && c.next.phase === 'missing');
+  assert.ok(missing, '取不到清单时必须落到 missing 态，而不是一直转圈');
+  client.scripted.setStates([missing.next, '', null]);
+  const text = JSON.stringify(panel.type(panel.props));
+  assert.match(text, /重启 Harness/);
 });
 
 check('package.json 声明了 dsh.client.platform=web 且导出 ./client', () => {
