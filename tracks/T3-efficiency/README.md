@@ -12,7 +12,7 @@
 | 4 | 会话标题质量 | `session-title-llm` | ✅ 已调：`targetWords: 8` / `targetCjkCharacters: 16` / `maxOutputTokens: 96`（原 5 / 10 / 64），待重启验收 |
 | 5 | 交互习惯 | `ui-conversation.busyEnter` | 已设 `steer` |
 | 6 | 快捷键 / 斜杠命令 | `dsh-client-shortcuts`、`dsh-commands` | ✅ 已梳理：7 个斜杠命令；快捷键**可重绑**（`Ctrl+/` 开速查），见记录 |
-| 7 | 记忆策略 | `@furongjun1999/dsh-memory`、`billion-context` | 已装，写入/召回策略未梳理 |
+| 7 | 记忆策略 | `@furongjun1999/dsh-memory`（灵枢）、`billion-context`、`dsh-context` | ✅ 已梳理：三者**机制正交**（压缩 / 长期记忆 / 只读观测），**无需改配置**，见记录 |
 | 8 | 缓存经济学 | `acp_cache` | ✅ 已量：命中率 **98.3%**，压缩净 **+92.35M tok**；无问题可修（见记录） |
 
 ## 为什么先做第 1 项
@@ -39,7 +39,7 @@
 - [x] 梳理 `spill-policy` / `tool-result-pruner` 阈值对长会话成本的影响 —— 2026-10-06 完成：**结论是两个都维持不动**，见下方记录
 - [x] 梳理斜杠命令与快捷键 —— 2026-10-06 完成，见下方记录
 - [x] **让会话标题更长、更能区分** —— 2026-10-06 完成，见下方记录
-- [ ] 梳理记忆插件的写入与召回
+- [x] 梳理记忆插件的写入与召回 —— 2026-10-06 完成：三个插件机制正交，**结论是都不动**，见下方记录
 
 ## 验收
 
@@ -280,5 +280,87 @@
 **如果将来要动，判据是什么**：出现「长会话频繁触发压缩、且摘要调用明显变贵」的实测数据时，
 先考虑**调高** `maxInlineTokens`（减少 spill 往返）而不是动 pruner，并且要用 `acp_cache` 复测命中率。
 在此之前，这一项按「已核实、无需改动」归档。
+
+### 2026-10-06 · 记忆与上下文策略梳理：三个插件，三种正交机制
+
+**为什么梳理**：第 7 项是唯一还没搞清「到底谁在管我的上下文」的抓手。三个插件都装着，
+而它们都会改变进入模型的内容——不搞清边界就调参等于蒙眼开刀。
+
+**三个插件分别是什么**（读各自 README）
+
+| 插件 | 版本 | 干什么 | 介质 |
+| --- | --- | --- | --- |
+| `billion-context` | 0.1.182（运行面报 0.1.186） | 上下文**压缩代理**（acp-kernel 改写模型流） | `%USERPROFILE%\.local\share\billion-context\`（JSON + zstd） |
+| `@furongjun1999/dsh-memory`（灵枢） | 0.7.1 | 跨会话**长期记忆** | 纯文本 md 认知图 `~/.dsh/.dsh-memory/data/mdcg` |
+| `dsh-context` | 0.62.3 | **只读观测**（`/context`、Context 面板） | 无（只存 UI 偏好） |
+
+三者 README **互相零提及**（grep 过），机制正交 ⇒ 是**叠加**关系，不是替代。
+
+**① billion-context = 压缩，不是记忆**
+
+- 「何时压缩、压缩什么——**由模型决定**，而非硬截断」。工具就是本会话在用的那四个：
+  `compress` / `decompress` / `search_context` / `acp_status`。
+- **它是本项目上下文策略的主角**。它自带的 `dsh.bundle.patch.yml` 全文只做两件事：
+  `- insert:` → `- id: bili-native` / `name: billion-context`，以及
+  **`- id: compaction-basic` / `config: auto: false`** ——
+  ⇒ **宿主原生压缩被它关掉了**，折叠改由 billion-context 的增量模型接管。
+  这一条解释了第 2/3 项为什么只能在边缘动：**真正的折叠决策不落在那两个阈值上。**
+- 它自述「增量、可逆、对前缀缓存友好」，并给出 `GRAND LEDGER`（miss 拆解成
+  new content / compress re-pay / upstream-ttl-or-client-rewrite）与 `FOLD ECONOMICS`
+  （每次折叠净省多少、是否回本）——第 8 项量到的 98.3% / 净 +92.35M 就是它的账本。
+- 关键旋钮（配置 `~/.config/billion-context/billion-context.json`，优先级 CLI > env > 文件 > 默认）：
+  `compress.nudgeGrowthTokens`（≈50K，决定何时折叠）、`compress`（阈值/保留规则/tiers）、
+  `providers`（模型窗口与 compaction opt-in）、`sessions.gc.maxAgeDays`（默认 14）。
+- 锐边原文：与进程内扩展**互斥**（同时生效＝双重压缩）；「**没有任何鉴权**：只应在可信局域网或
+  防火墙内使用」；自述**早期**（真实模型集成测试是下一里程碑）；MIT 之上有一条额外署名条款。
+
+**② 灵枢（`dsh-memory`）= 长期记忆**
+
+- 真源是**纯 md 认知图**，本机就在
+  `C:\Users\Z1848\.dsh\.dsh-memory\data\mdcg\`：分层目录
+  `anchor/ structural/ knowledge/ contextual/ goals/ self/ hippocampus/ unresolved/ rejected/ trash/`，
+  外加 `_index.json`、`_access.log`、`_audit.jsonl`、`_consistency.jsonl`、`_forgetting.jsonl`、
+  `_sustain.jsonl`、`_writelimit.json`、`policy.json`。
+- 写入＝显式工具（`cg(op=write)` / `mdcg_remember` / `cg(op=link)`），架构里另有自动钩子
+  `session/event`（自动记忆 + 自动召回注入）。
+- **最容易踩的一条分辨**：`ok: true` **不等于**写成功——**是否落盘只看 `committed`**；
+  策略文件不可用或形状非法时写入 **fail-closed**（`policy_unavailable` / `policy_bad_shape`）；
+  未配 `MDCG_TOKEN` 就是只读 `guest`。
+- 召回＝词法（char-bigram + 四路 RRF + 同义扩展）+ 因果/时间图路（半衰期 30 天）；
+  README 明说**当前明确不做语义向量检索**。
+- 配置：`tools: 'core'` 默认只暴露 **2** 个工具（`cg` 36 op 与 `stg` 4 op）——正好就是本会话可见的
+  `lingshu_cg` / `lingshu_stg`。这是「**工具数量直接变成每轮的 tool schema 成本**」的活证据。
+  `'brain'|'all'` 会暴露 30 个；`mdcg.root` 留空＝用户级默认；`capability.enabled` 默认 false；
+  `MDCG_SEMANTIC`、`MDCG_UNIFY_QUERY`、`MDCG_HOTCACHE`、`MDCG_RETRIEVAL_PIPELINE` 全部默认关。
+- 锐边原文：**别把包内相对路径写进 `mdcg.root`**（如 `data/mdcg`）——pnpm 更新该包会把记忆连目录一起删掉；
+  升级后必须重启长驻 MCP 进程（症状 `ImportError: cannot import name 'mint_auto_id' from 'md_cg.mdcg'`）；
+  `mdcg_forget` / `mdcg_restore` / `mdcg_review_decide` 需 `can_admin`，`tools: 'all'` 也不自动暴露；
+  「遗忘只能由显式 `cg(op=forget)` 发起、不做静默淘汰」。
+
+**③ `dsh-context` = 只读仪表盘**：只投影官方 token-meter（`contextPressure` / `contextBreakdown`），
+在时间轴上标出 compaction / prune 发生的位置（`✂`），展示 cache-hit rate。
+**它自己不写记忆、不影响缓存、也没有 token 预算配置项。**
+
+**结论：三个都不动，理由**
+
+1. 三者**分工正交**，没有互相打架的配置。唯一的互斥是 billion-context 与「进程内扩展」
+   （`billion-context-pi` / `opencode-acp`），而本机没装后者。
+2. 第 8 项的实测账本正是 billion-context 的：98.3% 命中、净 +92.35M、14/17 次折叠回本
+   ⇒ **压缩层正在赚钱，没有病灶。**
+3. 灵枢已经跑在最省的档（`core`，2 个工具）。升到 `brain`/`all` 会把 30 个工具 schema 每轮塞进上下文
+   ——**在没有明确需求之前那是纯成本**，而且会改变 system prompt 前缀。
+4. 真正影响「进入上下文多少内容」的仍是已经在管的那三个旋钮：`maxInlineTokens`、pruner 阈值、
+   以及压缩触发节奏。前两个第 2/3 项已核实**维持不动**。
+
+**将来要动时的判据**
+
+- 「想不起历史」⇒ 先看 `~/.dsh/.dsh-memory/data/mdcg/_access.log` 与 `_index.json` 里是否真有内容，
+  再考虑 `tools: 'brain'`——**代价会立即体现在每轮 tool schema 上**。
+- 「压缩太频繁/太贵」⇒ 看 `acp_cache` 的 `FOLD ECONOMICS`，再动 `nudgeGrowthTokens`。
+- 动任何一项之前先读 billion-context 的 `GRAND LEDGER`，不要凭感觉调。
+
+**还没验的（如实标注，没有猜测补齐）**：灵枢的 30+ 项完整配置清单只在其自带的
+「README 详细版」（`docs/mdcg/README详细版_v0.4.10.md`）里，本次**未读**；
+`@furongjun1999/dsh-memory/dsh/cordis.patch.yml` 与 `dsh-context/package.json` 内容**未读**。
 
 
