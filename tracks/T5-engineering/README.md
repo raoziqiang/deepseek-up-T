@@ -497,5 +497,42 @@ L3 状态在这种情况下仍能靠 `insert` 条目的存在性判定，所以�
 前一步（构建/校验）完全可以自动化，而前一步恰恰是最容易漏的。另一种说法：
 「必须先退出应用」这个约束属于**写安装目录**，不属于**算出一份安装目录的替代品**。
 
+### 2026-10-06 · 心跳两步走：把「加载了」和「能用」分开
+
+**起因**：上一节那条心跳只回答了一个问题 ——「这个插件被加载了吗」。但 L1 插件最安静的坏法
+落在另一个位置上：**被加载了，然后卡在等 `webServer` 上**。那时 `apply()` 跑完了、注入行也进了表，
+而路由一条都没注册 ⇒ 界面里既没有胶囊也没有设置页，**而且没有任何报错**。这枚心跳当时只会说
+「加载过」，于是这一种和「一切正常」在 `doctor` 里长得一模一样。
+
+**做成了什么**
+- `plugins/dsh-up-t/lib/index.js`：`writeHeartbeat(stage = 'apply', extra = {})`，模块级 `heartbeatTrail`
+  记录本次生命周期走过的那几步；`apply()` 开头写 `apply`，`root.inject(['webServer'])` 的回调末尾
+  写 `ready` + `routes: [CLIENT_PATH, STATUS_PATH, ACTION_PATH]`。文件里多出 `stage` / `loadedAt` / `trail`
+  三个字段。同一个进程里插件被重新加载时，`trail` 从新的 `apply` 重新开始（旧 trail 属于上一次生命周期）。
+- `src/doctor.mjs` 的心跳检查从三分支变四分支：多出一条 **`stage: "apply"` 且进程活着 → WARN**，
+  正文直说「路由没注册，界面里既不会有胶囊也不会有设置页，而且不会有任何报错」；`ready` → OK
+  并报出路由条数；**心跳没有 `stage` 字段时一律按「未知」**（显示「心跳没有 stage 字段（旧版本写的）」），
+  绝不当作「没就绪」—— 把「我手里没有这条信息」说成「你坏了」是最糟的一种诊断错误。
+- 设置页新增「心跳」一行（`服务已就绪（路由 3 条）` / `只走到 apply()` / `还没有心跳`）：
+  设置页恰恰是「什么都没出现」时人会去看的地方，让它自己说出卡在哪一步，比让人去猜「是不是没重启」有用。
+- `test/plugin.test.mjs` 加 **3 条断言**（36 → **39/39**）：`ready` 时 stage/routes/trail/`loadedAt` 都对、
+  只写 `apply` 时的形状（无 `routes`、trail 只有一步、`loadedAt === at`）、设置页把两种 stage 渲染成人话。
+
+**怎么验的**
+- `node test/plugin.test.mjs` **39/39**；`node test/run.mjs` **4/4 套通过**；`node --check` 三个改动文件；
+- **四个分支都用手写的真心跳文件喂给 `dsht doctor` 跑过**（不是只读代码）：
+  `stage: apply` + 活 pid → `WARN … 只走到 apply()` + 那条 hint；
+  `stage: ready` + 3 条 routes → `OK … 服务已就绪（路由 3 条）`；
+  无 `stage` 字段 → `OK … 心跳没有 stage 字段（旧版本写的）`；
+  `pid: 999999` → `WARN … ← 该进程已经不在了`；删掉文件 → 回到 `INFO 还没有心跳文件`；
+- 顺带确认一件对界面有影响的事：`stage: apply` 这种 WARN **不影响 `doctor` 的退出码（仍是 0）** ——
+  所以设置页上「体检」按钮不会因为一枚卡住的心跳显示成失败（文案里的 WARN 仍然醒目）。
+  注意 Powershell 5.1 的 `Set-Content -Encoding utf8NoBOM` 不存在，写测试文件要用
+  `[System.IO.File]::WriteAllText(..., UTF8Encoding($false))`，否则带 BOM 的 JSON 在 `JSON.parse` 上直接炸；
+- 收尾删掉 `plugins/dsh-up-t/.runtime/`（测试与手验都不许给真实环境留状态，`git status` 干净）。
+
+**教训**：「加载了」和「能用」是两个不同的事实，中间隔着的正是所有**静默失败**。凡是问「有没有生效」的
+诊断设施，都该问清楚自己回答的是哪一半 —— 只答前面一半的探针，会在最需要它的时候和「一切正常」无法区分。
+
 
 

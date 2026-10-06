@@ -59,6 +59,22 @@
         return "无法判断（缺少原版备份）";
       }
 
+      // 「加载了」和「能用」是两件事，这个页面恰恰是「什么都没出现」时人会来看的地方，
+      // 所以把心跳走到哪一步也显示出来：只走到 apply() 就说明 webServer 依赖没就绪。
+      function heartbeatText(data) {
+        var beat = data && data.heartbeat;
+        if (!beat) return "还没有心跳（插件没被加载，或还没重启 Harness）";
+        var stage = typeof beat.stage === "string" ? beat.stage : null;
+        if (stage === "ready") {
+          var n = beat.routes && beat.routes.length;
+          return "服务已就绪" + (typeof n === "number" ? "（路由 " + n + " 条）" : "") + " · pid " + beat.pid;
+        }
+        if (stage === "apply") {
+          return "只走到 apply() · webServer 依赖没就绪 —— 界面里不会出现胶囊与设置页 · pid " + beat.pid;
+        }
+        return "心跳没有 stage 字段（旧版本写的） · pid " + beat.pid;
+      }
+
       function row(label, value) {
         return h(
           "div",
@@ -366,6 +382,7 @@
               row("app.asar", fmtBytes(install.asarBytes)),
               row("原版备份", fmtBytes(install.backupBytes)),
               row("判定", verdictText(data)),
+              row("心跳", heartbeatText(data)),
               row("读取时间", data.time),
             ),
           );

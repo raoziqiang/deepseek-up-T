@@ -225,6 +225,27 @@ check('依赖就绪后注册了 client.js / status.json / action 三条精确路
   }
 });
 
+check('依赖就绪后心跳推进到 ready，并记下路由与完整的 trail', () => {
+  const beat = JSON.parse(readFileSync(mod.heartbeatPath, 'utf8'));
+  assert.equal(beat.stage, 'ready');
+  assert.deepEqual(beat.routes, [CLIENT_PATH, STATUS_PATH, ACTION_PATH]);
+  assert.deepEqual(beat.trail.map((s) => s.stage), ['apply', 'ready'], 'trail 要能看出它走过哪两步');
+  assert.equal(beat.loadedAt, beat.trail[0].at, 'loadedAt 必须钉在第一枚心跳的时刻，不能随 ready 一起被改写');
+  assert.ok(beat.at >= beat.loadedAt, `at(${beat.at}) 不该早于 loadedAt(${beat.loadedAt})`);
+});
+
+// 「加载了」和「能用」是两件事。只写 apply 的那种形状，正是「界面里什么都没有、也没有报错」的
+// 静默失败 —— doctor 与设置页靠 stage 把这一种和「压根没加载」分开。
+check('只走到 apply 的心跳形状 = 加载了但依赖没就绪（doctor / 设置页据此报警）', () => {
+  mod.writeHeartbeat('apply');
+  const beat = JSON.parse(readFileSync(mod.heartbeatPath, 'utf8'));
+  assert.equal(beat.stage, 'apply');
+  assert.equal(beat.routes, undefined, '没走到 ready 就不该声称注册了路由');
+  assert.deepEqual(beat.trail.map((s) => s.stage), ['apply'], '新的 apply 要丢掉上一次生命周期的 trail');
+  assert.equal(beat.loadedAt, beat.at, '只有一步时 loadedAt 就是它自己');
+  mod.writeHeartbeat('ready', { routes: [CLIENT_PATH, STATUS_PATH, ACTION_PATH] }); // 还原，后面还要用
+});
+
 check('注册了 tapIndex（Web 形态用；桌面端靠注入行）', () => {
   assert.equal(state.tapIndexFns.length, 1);
   const html = state.tapIndexFns[0]('<html><body>hi</body></html>');
@@ -692,6 +713,28 @@ await checkAsync('操作面板：宿主半侧还没重启（404）时降级成�
   client.scripted.setStates([missing.next, '', null]);
   const text = JSON.stringify(panel.type(panel.props));
   assert.match(text, /重启 Harness/);
+});
+
+check('设置页：把心跳走到哪一步也显示出来（「加载了」≠「能用」）', () => {
+  const render = (heartbeat) => {
+    const client = makeClient();
+    client.component(); // 先渲染一次让 useState 队列就位（外层自己的 state 在 idx 0）
+    client.scripted.setStates([{
+      phase: 'ready',
+      data: {
+        plugin: { name: 'dsh-up-t', version: '0.1.0' },
+        install: {},
+        time: 't',
+        heartbeat,
+      },
+    }]);
+    return JSON.stringify(client.component());
+  };
+  assert.match(render({ stage: 'ready', pid: 1, routes: ['a', 'b', 'c'] }), /服务已就绪（路由 3 条）/);
+  // 这一种正是「界面里什么都没有、也没有报错」：必须自己说出它卡在哪一步，
+  // 否则人只会看到一片空白，然后去猜是不是自己没重启。
+  assert.match(render({ stage: 'apply', pid: 1 }), /只走到 apply/);
+  assert.match(render(null), /还没有心跳/);
 });
 
 check('package.json 声明了 dsh.client.platform=web 且导出 ./client', () => {

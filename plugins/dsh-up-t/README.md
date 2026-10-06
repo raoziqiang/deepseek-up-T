@@ -42,15 +42,34 @@ up-T · ?             ← 黄点：没有原版备份可比 / 宿主没回应
 `apply()` 每次执行都会写 `plugins/dsh-up-t/.runtime/heartbeat.json`：
 
 ```json
-{ "plugin": "dsh-up-t", "version": "0.1.0", "at": "…", "pid": 12345,
-  "execPath": "…", "electron": "44.0.0", "node": "24.x", "installDir": "…",
-  "clientPath": "/dsh-up-t/client.js", "statusPath": "/dsh-up-t/status.json" }
+{ "plugin": "dsh-up-t", "version": "0.1.0", "stage": "ready", "at": "…",
+  "loadedAt": "…", "trail": [{ "stage": "apply", "at": "…" }, { "stage": "ready", "at": "…" }],
+  "pid": 12345, "execPath": "…", "electron": "44.0.0", "node": "24.x", "installDir": "…",
+  "clientPath": "/dsh-up-t/client.js", "statusPath": "/dsh-up-t/status.json",
+  "actionPath": "/dsh-up-t/action", "routes": ["/dsh-up-t/client.js", "…"] }
 ```
 
+**两枚心跳，不是一个。**「加载了」和「能用」是两件事，而最安静的坏法正好落在两者之间：
+插件被加载、注入行也进了表，然后**卡在等 `webServer` 上** —— 路由没注册，界面里既没有胶囊也
+没有设置页，而且没有任何一条报错。所以心跳分两步写：
+
+| `stage` | 什么时候 | 结论 |
+| --- | --- | --- |
+| `apply` | `apply()` 的第一件事（不依赖任何服务） | 插件确实被加载并执行了 |
+| `ready` | `webServer` 就绪、三条路由都注册完之后 | **能用**：界面里该出现的东西确实有地方可取 |
+
+- `trail` 是这两步的路径（出问题时最想知道的就是「它停在哪一步」），`loadedAt` 钉在第一步。
+  同一个进程里插件被重新加载时，`trail` 从新的 `apply` 重新开始 —— 旧的那条属于上一次生命周期。
 - **绝不抛异常**：写失败只记进 `lastHeartbeatResult`，并通过 `status.json` 的 `heartbeatWriteError` 暴露。
 - **返回值被忽略** —— 磁盘上的文件才是证据。
-- `dsht doctor` 读它并给三条结论：**没有文件 → INFO**（还没重启，预期）、
-  **不是合法 JSON → WARN**、**合法 → 按 `pid` 现在是否还活着给 OK / WARN**。
+- `dsht doctor` 读它并给四种结论：**没有文件 → INFO**（还没重启，预期）、
+  **不是合法 JSON → WARN**、**`stage: "apply"` 且进程活着 → WARN**（加载了但依赖没就绪，
+  即上面那种静默失败，提示里直接说「界面里既不会有胶囊也不会有设置页」）、
+  **`stage: "ready"` → OK 并报出路由条数**；`pid` 已经不在了 → WARN（来自上一个进程）。
+  心跳**没有** `stage` 字段时按「未知」处理并明说是旧版本写的 —— 把「我手里没有这条信息」
+  说成「你坏了」是最糟的一种诊断错误。
+- 设置页的「心跳」一行显示同一件事（`服务已就绪（路由 3 条）` / `只走到 apply()`）。
+  设置页恰恰是「什么都没出现」时人会来看的地方，让它自己说出卡在哪一步，比让人去猜「是不是没重启」有用。
 - 所以它写在**包自己的 `.runtime/`**，不写项目的 `state/`：插件若以非 junction 方式安装，
   它写的就不是我们这份副本的目录 —— 而 `doctor` 看不到它，**这正是正确的结论**。
 
@@ -190,7 +209,7 @@ node src\cli.mjs precheck --profile-json state\candidate\package.json
 
 ```powershell
 cd D:\Z1848\harness-ds\deepseek-up-T
-node test\plugin.test.mjs   # 36 条断言：心跳、注入行、三条路由、操作守卫与真 spawn、specs 的 writes 标记、客户端 bundle 形态与按钮、清理
+node test\plugin.test.mjs   # 39 条断言：心跳（apply + ready 两枚、trail、route 清单）、注入行、三条路由、操作守卫与真 spawn、specs 的 writes 标记、客户端 bundle 形态与按钮、设置页的心跳行、清理
 node src\cli.mjs doctor     # bundles 全部可解析
 node src\cli.mjs precheck   # 组合可用
 ```

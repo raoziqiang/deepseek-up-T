@@ -73,13 +73,36 @@ const HEARTBEAT_FILE = path.join(RUNTIME_DIR, 'heartbeat.json');
 /** 最近一次心跳写的返回值。写失败不该静默 —— 但也不该抛异常，所以留在这里给状态路由。 */
 let lastHeartbeatResult = null;
 
-export function writeHeartbeat() {
+/**
+ * 本次生命周期走过的那几步。
+ *
+ * 心跳原本只有一枚，只能回答「加载了吗」。而**「加载了」和「能用」是两件事**：插件完全可能
+ * `apply()` 跑完、注入行也进了表，却在等 `webServer` 时就再没有下文 —— 那正是「界面里既没有
+ * 胶囊也没有设置页」最安静的坏法（没有任何报错，只是什么都没发生）。多记一步 `ready`，
+ * 这两种情况就分开了：`apply` 之后没有 `ready` = 加载了、依赖没就绪。
+ */
+let heartbeatTrail = [];
+
+export function writeHeartbeat(stage = 'apply', extra = {}) {
   const pkg = readOwnPackage();
   const inst = findInstall();
+  const now = new Date().toISOString();
+
+  // 同一个进程里 apply 可能再来一次（插件被重新加载）。那时的旧 trail 属于上一次生命周期，
+  // 留下来会把「这一次走到哪一步」说成「上一次走到哪一步」。
+  if (stage === 'apply') heartbeatTrail = [];
+  const last = heartbeatTrail[heartbeatTrail.length - 1];
+  if (last && last.stage === stage) last.at = now;
+  else heartbeatTrail.push({ stage, at: now });
+
   const payload = {
     plugin: pkg.name,
     version: pkg.version,
-    at: new Date().toISOString(),
+    // `stage` 是给机器看的当前结论；`trail` 是给人看的路径（出问题时最想知道的就是它在哪一步停的）。
+    stage,
+    at: now,
+    loadedAt: heartbeatTrail[0].at,
+    trail: heartbeatTrail.map((s) => ({ ...s })),
     pid: process.pid,
     execPath: process.execPath ?? null,
     electron: process.versions?.electron ?? null,
@@ -87,6 +110,8 @@ export function writeHeartbeat() {
     installDir: inst?.installDir ?? null,
     clientPath: CLIENT_PATH,
     statusPath: STATUS_PATH,
+    actionPath: ACTION_PATH,
+    ...extra,
   };
   try {
     fs.mkdirSync(RUNTIME_DIR, { recursive: true });
@@ -528,6 +553,11 @@ export default {
       ctx.effect(() => () => {
         for (const d of disposers) { try { d(); } catch { /* 同上 */ } }
       });
+
+      // ③ 走到这里才是真的「能用」：webServer 就绪、三条路由都注册上了。再落一枚心跳，
+      //    把 stage 推到 ready。这一步本身不依赖任何服务，失败也不该影响插件工作，
+      //    所以 writeHeartbeat 永远不抛。
+      writeHeartbeat('ready', { routes: [CLIENT_PATH, STATUS_PATH, ACTION_PATH] });
     });
   },
 };

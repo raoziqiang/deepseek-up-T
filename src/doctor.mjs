@@ -148,13 +148,30 @@ export async function runDoctor({ hash = true } = {}) {
       const alive = beat.pid ? pidAlive(beat.pid) : null;
       const ageMs = beat.at ? Date.now() - Date.parse(beat.at) : null;
       const age = Number.isFinite(ageMs) ? `（${humanAge(ageMs)}前）` : '';
-      add('运行时', 'T4 插件 dsh-up-t 心跳', 'warn', alive !== false,
-        `${beat.plugin ?? '?'} ${beat.version ?? '?'} · ${beat.at ?? '时间未知'}${age} · pid ${beat.pid ?? '?'}`
-        + (alive === false ? '  ← 该进程已经不在了' : ''),
-        alive === false
-          ? '这枚心跳来自一个**已经退出**的进程：说明插件当时确实加载过，但当前 Harness 进程是另一个（心跳没被刷新）。'
-            + '如果你刚重启完还是这种状态，说明插件这次没被加载 —— 去 .plugin-manager/logs 找报错。'
-          : null);
+      // `stage` 是这次加载「走到哪一步」的结论。**「加载了」和「能用」是两件事**：插件可以
+      // 加载成功、apply() 跑完、然后卡在等 webServer 上 —— 那时界面里什么都没有，却没有一条报错。
+      // 旧版本的心跳没有 stage 字段，那时一律当「未知」，绝不当作「没就绪」：
+      // 把「我手里没有这条信息」说成「你坏了」是最糟的一种诊断错误。
+      const stage = typeof beat.stage === 'string' ? beat.stage : null;
+      const routeCount = Array.isArray(beat.routes) ? beat.routes.length : null;
+      const head = `${beat.plugin ?? '?'} ${beat.version ?? '?'} · ${beat.at ?? '时间未知'}${age} · pid ${beat.pid ?? '?'}`;
+      const step = stage === 'ready'
+        ? ` · 服务已就绪${routeCount !== null ? `（路由 ${routeCount} 条）` : ''}`
+        : stage === 'apply' ? ' · 只走到 apply()' : ' · 心跳没有 stage 字段（旧版本写的）';
+      if (alive === false) {
+        add('运行时', 'T4 插件 dsh-up-t 心跳', 'warn', false,
+          `${head}  ← 该进程已经不在了`,
+          '这枚心跳来自一个**已经退出**的进程：说明插件当时确实加载过，但当前 Harness 进程是另一个（心跳没被刷新）。'
+          + '如果你刚重启完还是这种状态，说明插件这次没被加载 —— 去 .plugin-manager/logs 找报错。');
+      } else if (stage === 'apply') {
+        add('运行时', 'T4 插件 dsh-up-t 心跳', 'warn', false,
+          `${head}${step}`,
+          '插件被加载了、`apply()` 也跑完了，但之后**没有走到 ready** —— 也就是 `webServer` 这个依赖一直没就绪：'
+          + '路由没注册，界面里既不会有胶囊也不会有设置页，而且不会有任何报错。'
+          + `去看 .plugin-manager/logs 里有没有加载错误；心跳本身在 ${P.pluginHeartbeat}。`);
+      } else {
+        add('运行时', 'T4 插件 dsh-up-t 心跳', 'warn', true, `${head}${step}`, null);
+      }
     }
   }
 
