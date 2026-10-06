@@ -70,6 +70,8 @@ deepseek-up-T/
 │   ├── 05-conventions.md   约定与红线
 │   └── 06-precheck.md      权威组合预检：为什么 CLI 做不到、怎么绕、边界在哪
 ├── patches/                L0/L3 改动的声明式副本（可审计、可重放）
+├── plugins/                自建 DSH 插件（L1 层，升级幸存）
+│   └── dsh-up-t/           T4 样板：界面左下角显示改造状态的小胶囊
 ├── test/                   回归测试（`npm test`）
 ├── tracks/                 五条工作线的落地目录
 │   ├── T1-appearance/      外观与体验
@@ -95,23 +97,28 @@ deepseek-up-T/
 
 ## 状态
 
-当前为 **M2：构建链闭环，升级检测就位**。
+当前为 **M3：构建链闭环、升级检测就位、T4 脚手架落地**。
 
 - **M0 已完成**：`env` / `doctor` / `snapshot` / `baseline` 四个命令，基线固化，git 初始化。
 - **M1 已完成**：`dsht precheck`（权威组合预检）、`dsht asar ls|cat|grep`（只读读安装包里**真正在跑的那份代码**）、
   T3 第一件落地：**开启会话全文搜索**（`session-query-sqlite` 改 `path` + `openAt: first-search`）。
-- **M2 进行中**：
+- **M2 已完成**：
   - ✅ `vendor/` 工具链：asar 三件套（list/verify/write）+ `whale/build.mjs`（按声明构建暂存包）
-    + `whale/install.mjs`（三道保险落盘）；已归拢 9 个脚本，剩余 14 个。
+    + `whale/install.mjs`（三道保险落盘）；`../tools/` 的 23 个脚本**已全部归拢**（另有
+    `vendor/visual/` 6 个视觉验证、`vendor/route/` 8 个 Provider 探针）。
   - ✅ `patches/T1-whale-splash.yml`：11 条目（4 改 7 增）声明驱动构建通过，
     `state/staged/app.asar` 已就绪，**只差退出 Harness 后落盘**。
-  - ✅ `dsht upgrade` —— 升级检测：区分「被升级覆盖」与「从未落盘」，报素材过期与 L0 漂移。
   - ✅ 旧 `app.asar.tmp` 已确认是**坏构建**并删除（重复 import 会让主进程起不来）。
+- **M3 已完成**：
+  - ✅ `dsht upgrade` —— 升级检测：区分「被升级覆盖」与「从未落盘」，报素材过期与 L0 漂移。
+  - ✅ `precheck --profile-json <文件>` —— 用**候选** profile 清单预检，改动前就能知道会不会炸。
+  - ✅ T3 缓存经济学结案：命中率 98.3%、17 次折叠净 **+92.35M tok** ⇒ 缓存层没有问题可修。
+  - 🚧 T4 脚手架 `plugins/dsh-up-t` 已落盘（离线单测 14 条断言 + 候选预检 + doctor 全过），
+    **只差重启 DSH 后确认胶囊真的出现**。
 
-> ⚠️ `cordis.patch.yml` 的改动**不会热重载**，必须重启 DSH 才生效；`app.asar` 的改动必须
-> **连托盘一起退出 Harness** 才能落盘。重启后请按
-> [tracks/T3-efficiency/README.md](tracks/T3-efficiency/README.md) 的验收项确认搜索真的能用了。
-
-五条工作线的具体改造见 [docs/04-roadmap.md](docs/04-roadmap.md)，预检机制见 [docs/06-precheck.md](docs/06-precheck.md)。
+> ⚠️ `cordis.patch.yml` 与 profile `package.json` 的改动**不会热重载**，必须重启 DSH 才生效；
+> `app.asar` 的改动必须**连托盘一起退出 Harness** 才能落盘。重启后请按
+> [tracks/T3-efficiency/README.md](tracks/T3-efficiency/README.md) 的验收项确认搜索真的能用了，
+> 并看一眼左下角有没有出现 `up-T` 胶囊。
 
 五条工作线的具体改造见 [docs/04-roadmap.md](docs/04-roadmap.md)，预检机制见 [docs/06-precheck.md](docs/06-precheck.md)。

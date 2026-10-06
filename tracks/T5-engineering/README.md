@@ -14,6 +14,7 @@
 | `node src/cli.mjs snapshot restore <id>` | 回滚（需 `--yes`，回滚前自动再留一份） |
 | `node src/cli.mjs baseline write` | 固化 `state/baseline.json` |
 | `node src/cli.mjs precheck` | **权威组合预检**：隔离探针家里 dump 出运行中应用真正会看到的清单（真实 profile 只读、`$DSH_HOME` 不被写入） |
+| `node src/cli.mjs precheck --profile-json <文件>` | 同上，但用**候选** package.json 顶替真实 profile 的那一份 —— 用来在落盘前试「再加一个 bundle 会不会炸」 |
 | `node src/cli.mjs asar ls [正则]` | 列安装包条目；无正则时按顶层目录汇总 |
 | `node src/cli.mjs asar cat <路径>` | 读出安装包里单个条目的**原文**（`--out` 落盘） |
 | `node src/cli.mjs asar grep <正则>` | 在安装包内容里检索（只扫文本类条目） |
@@ -74,6 +75,7 @@ node vendor/whale/install.mjs --yes    # 需要先完全退出 Harness
 - [x] **归拢第二批（构建链）** —— `vendor/whale/build.mjs` + 三个 patcher + `bundle.mjs`，2026-10-06 完成
 - [x] **归拢第三批** —— 视觉验证 6 个（`vendor/visual/`）+ T2 探针 8 个（`vendor/route/`），2026-10-06 完成，见下方记录
 - [x] **升级检测** —— `dsht upgrade`，2026-10-06 完成，见下方记录
+- [x] **候选清单预检** —— `precheck --profile-json <文件>`，2026-10-06 完成，见下方记录
 - [ ] 自动重打：`upgrade` 目前只报告 + 给命令，不自动落盘（写安装包必须由人挑时间）
 - [ ] 快照保留策略：自动保留最近 N 份 + 所有带标签的
 - [ ] `doctor` 扩展：接入 profile 重载后的运行时探测
@@ -308,5 +310,34 @@ L3 状态在这种情况下仍能靠 `insert` 条目的存在性判定，所以�
 23/23 已归拢，但**没有删除 `../tools/`**。理由：T1 还没真正落盘、没验收，
 在 T1 通过之前保留一份能独立跑通的旧副本是回退手段；素材（`.probe/`、`whale-motion/`）
 和历史说明（`README-whale-splash.md`）也还引用得到它们。删除单独作为一步，放在 T1 验收之后。
+
+### 2026-10-06 · `precheck --profile-json`：候选清单预检
+
+**为什么必须补**：`dsh.profile.bundles` 只存在于 profile 的 `package.json`，而
+`prepareProbeHome()` 每次都从**真实 profile** 复制那一份。于是「再加一个 bundle 会不会炸」
+这件事**无法在落盘前预检** —— 只能先改真实 profile 再祈祷。这个缺口正好被 T4 的插件安装撞上。
+
+**改法**（三处，都很小）
+- `src/precheck.mjs`：`prepareProbeHome({ fresh, profilePackageJson })` 多一个覆盖项，
+  指向候选文件时用它当 `package.json` 的来源（其余文件仍从真实 profile 复制）；
+  返回体多 `sources` 与 `override` 两个字段，好让调用方与报告知道用的是哪一份；
+  文件不存在直接抛错（不许静默回退到真实 profile —— 那会让预检结果失去意义）。
+- `runPrecheck({ ..., profilePackageJson })` 透传。
+- `src/cli.mjs`：`VALUE_OPTS` 加 `['--profile-json','profileJson']`；人类可读输出里多一行
+  `⚠ 候选清单 package.json 来自 …（不是真实 profile 的那一份）`；`--json` 多
+  `profilePackageJson` 字段；usage 补两行。`state/candidate/` 已进 `.gitignore`
+  （候选文件源自本机真实 profile，不可跨机复现）。
+
+**怎么验的（T4 插件安装就是它的第一个真实用例）**
+- 生成候选 `state/candidate/package.json`（12 → 13 个 bundle，新增 `dsh-up-t`）
+  → `node src/cli.mjs precheck --profile-json state/candidate/package.json`
+  → **退出码 0、问题 0**、`与上一次预检相比：1 新增 / 0 移除 / 0 修改 → + 条目 dsh-up-t`，
+  且**没有** `skipping profile bundle`（说明 junction 解析成功、patch 里的 `insert` 命中了）。
+- 落盘后 `precheck`（用真实 profile）→ 退出码 0、问题 0、与候选预检**完全一致**
+  ⇒ 这条预检是忠实的，而不是「预检通过、真实启动却不同」。
+
+**教训**：这套工具的每一条命令都得能被用在「改动**之前**」。只能事后验证的诊断，
+价值只有一半 —— 因为它拦不住任何事。
+
 
 

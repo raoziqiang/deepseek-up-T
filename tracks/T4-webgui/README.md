@@ -57,9 +57,10 @@
 ## 待办
 
 - [x] 用 `cordis_inspect_query` 把可用槽位树读出来并记录 —— 2026-10-06 完成，见下方记录
-- [ ] 最小可用插件脚手架（host 入口 + client 入口 + `dsh` 声明）
-- [ ] 挂一个自有面板到现有槽位
+- [x] 最小可用插件脚手架（host 入口 + client 入口 + `dsh` 声明）—— 2026-10-06 完成：`plugins/dsh-up-t`
+- [ ] 挂一个自有面板到现有槽位（脚手架走的是注入路线，还没用 Slot 系统）
 - [ ] 把高频操作做成按钮
+- [ ] 重启 DSH 后确认胶囊真的出现
 
 ## 验收
 
@@ -148,4 +149,53 @@
 
 **下一步（不要跳步）**：先用 host `Service/listService` 的紧凑目录确认数据从哪来，
 再写脚手架；脚手架第一版只做「静态文本渲染」，先证明**能挂上去**，再接数据。
+
+### 2026-10-06 · 第二步：脚手架落地（`plugins/dsh-up-t`）
+
+**做了什么**：一个最小可用的自建插件，也是 T4 的样板。位于
+`D:\Z1848\harness-ds\deepseek-up-T\plugins\dsh-up-t\`：
+`package.json` / `cordis.patch.yml` / `lib/index.js` / `assets/client.js` / `README.md`。
+它在界面左下角放一个小胶囊显示 Harness 版本与安装包是否被改造过，点开有细节，可拖动、右键隐藏。
+
+**为什么不选 Slot 系统而选注入路线**：Slot 系统（`dsh-client-ui-slots`）要求客户端半身被打包进
+Web 前端，也就是 `dsh.client.inject` 那一类（`dsh-better-sidebar` 的形态：`lib/client.js` 1.1MB、
+还有 `lib/client-mermaid.js` 7MB）。那需要构建链。而 `dsh-whale-widget` 证明还有一条轻得多的路：
+宿主注册一个 HTTP 路由 + 推一行注入，客户端就是一段普通 JS。**先用重的路证明「能挂上去」，
+再接数据** —— 这条最轻的路能走通，后面所有面板都走同一条。
+
+**三条硬约束（照抄 `dsh-whale-widget` 被 issue #152/#153/#154 打磨过的版本）**
+1. 注入行必须是**内联 `script`**，绝不能是 `script-src`：渲染层对 `script` 行只做
+   `createElement + textContent + append`（没有 await，不可能失败），对 `script-src` 行却是
+   `await loadScript(src)` —— 404 就 reject 掉 `__DSH_BOOT_READY__`，**整个应用起不来**。
+   而注入表是宿主**启动时一次性收集**的、没有刷新路径，所以插件被关掉后那行还在、路由已注销，
+   404 是必然会发生的。内联行由它自己建 `<script src=…>` 并吞掉 `onerror`，最坏只是胶囊不出现。
+2. **不能用对象级 `inject: ['webServer', …]`**：它把整个 `apply()` 推迟到服务就绪之后，
+   行就赶不上那次一次性收集 —— 表现是「插件装好了但什么都不出现」，**且不报任何错**。
+   正确做法：`apply()` 立刻注册注入行，其余逻辑放 `root.inject([...], cb)`。
+3. 桌面端 `tapIndex` **永远不生效**（桌面壳 index.html 从安装包静态 dist 直出，不经过 `renderIndex()`），
+   只为 Web 形态保留。
+
+**怎么验的（三层，缺一层都不算数）**
+- **离线单测** `test/plugin.test.mjs`（**14 条断言全过**）：钉住上面三条约束 —— 注册的是内联
+  `script` 行、行文本含 `s.onerror=function(){}` 与幂等标记、不含 `await`；重复触发注入表不重复推；
+  `root.inject` 只依赖 `webServer`；依赖就绪前已注册注入行（这是桌面端能看到胶囊的唯一原因）；
+  两条精确路由的 kind/path/handler；handler 真的产出 200 + 非空 JS / 可解析 JSON；
+  两个清理路径可调用不抛。**为什么必须离线钉**：这类失败是静默的，真机上很难复现。
+- **组合预检**：先给 `precheck` 补了 `--profile-json <文件>` 覆盖项（见
+  `tracks/T5-engineering/README.md`），用候选 package.json 预检
+  → `退出码 0 / 问题 0 / 与上一次相比 1 新增：条目 dsh-up-t`，且没有 `skipping profile bundle`。
+- **落盘后**：`doctor` → 0 错误 2 警告、**13 个 bundle 全部可解析**；`precheck`（用真实 profile）
+  → 退出码 0、问题 0、与候选预检**完全一致** ⇒ 证明候选预检是忠实的。
+
+**怎么装的**：junction `$DSH_HOME\profiles\desktop\node_modules\dsh-up-t` → `plugins\dsh-up-t`，
+再在 profile package.json 的 `dsh.profile.bundles` 末尾加 `dsh-up-t`。
+落盘前留了快照 `20261006-080136-T4-插件-dsh-up-t-落盘前`，原样副本在
+`profiles\desktop\package.json.up-t-backup`（812B / 12 个 bundle）。
+
+**还没验的**：胶囊真的出现在界面上 —— 组合层文件没有热重载，只能重启 DSH 后看。
+
+**教训（一次误操作）**：`dsh --profile _probe web --help` **不是干跑**。
+它打印了 web 的帮助，然后**照样启动**了那个 profile，且它按组合配置去绑 19387 —— 与用户正在跑的
+实例撞端口，于是进程就那么挂着。已终止，确认 19387 始终由原实例（PID 30488）持有、未抢走端口，
+残留子进程也已消失。**结论：验证要靠离线单测与 `--dump-config`，不要为了「看效果」去 boot 一个实例。**
 

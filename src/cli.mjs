@@ -31,6 +31,7 @@ const TAG = { error: 'FAIL', warn: 'WARN', info: 'INFO', ok: 'OK  ' };
 const VALUE_OPTS = new Map([
   ['-m', 'message'], ['--message', 'message'],
   ['--out', 'out'], ['--limit', 'limit'], ['--file', 'file'],
+  ['--profile-json', 'profileJson'],
 ]);
 
 function parseArgs(argv) {
@@ -332,10 +333,11 @@ function cmdPrecheck({ flags, opts }) {
   const json = flags.has('--json');
   const mode = flags.has('--default-only') ? 'dump-default-config' : 'dump-config';
   const patches = opts.patch ?? [];
+  const profilePackageJson = opts.profileJson ?? null;
 
   let r;
   try {
-    r = runPrecheck({ patches, mode, fresh: flags.has('--fresh') });
+    r = runPrecheck({ patches, mode, fresh: flags.has('--fresh'), profilePackageJson });
   } catch (err) {
     console.error(`预检无法执行：${err?.message ?? err}`);
     return 2;
@@ -346,6 +348,7 @@ function cmdPrecheck({ flags, opts }) {
       ok: r.ok,
       mode,
       patches,
+      profilePackageJson: r.probe.override,
       status: r.run.status,
       problems: r.problems,
       notes: r.notes,
@@ -361,6 +364,9 @@ function cmdPrecheck({ flags, opts }) {
   console.log(`  探针家    ${r.probe.probeHome}`);
   console.log(`  模式      ${mode}${patches.length ? `  + ${patches.length} 个 --patch 覆盖层` : ''}`);
   console.log(`  复制      ${r.probe.copied.join(' / ')}`);
+  if (r.probe.override) {
+    console.log(`  ⚠ 候选清单 package.json 来自 ${r.probe.override}（不是真实 profile 的那一份）`);
+  }
   for (const l of r.probe.links) console.log(`  junction  ${pad(l.name, 22)} ${l.result}`);
   console.log(`  退出码    ${r.run.status}`);
   console.log(`  问题      ${r.problems.length}`);
@@ -546,6 +552,8 @@ function usage() {
   --out 文件              asar cat 落盘目标
   --file <asar>           覆盖要读的归档路径
   --patch <文件>          预检：叠加一个额外 patch 层（可重复）
+  --profile-json <文件>   预检：用候选 package.json 顶替真实 profile 的那一份
+                          （用来在落盘前试「再加一个 bundle 会不会炸」）
   --default-only          预检：只 dump bundle 层（--dump-default-config）
   --fresh                 预检：先删掉重建探针家
 

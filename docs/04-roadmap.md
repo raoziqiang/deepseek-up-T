@@ -112,8 +112,14 @@
 2. 客户端插件改动可以**热重载**（`dsh-client-hmr` 已挂载）——比改 asar 快几个数量级。
 
 **候选动作**
-1. 最小可用插件脚手架（host 侧 + client 侧各一个入口）。
-2. 挂一个自有面板到现有槽位。
+1. ✅ **最小可用插件脚手架** —— 2026-10-06 落地：`plugins/dsh-up-t`（`package.json` +
+   `cordis.patch.yml` + `lib/index.js` + `assets/client.js`），界面左下角一个显示改造状态的小胶囊。
+   走的是**最轻的那条路**（宿主注册 HTTP 路由 + 推一行注入），不是 Slot 系统 ——
+   后者要求客户端半身被打包进前端（`dsh.client.inject` 那一类），需要构建链。
+   离线单测 14 条断言钉住三条硬约束（注入行必须是内联 `script` 而非 `script-src`；
+   不能用对象级 `inject`；桌面端 `tapIndex` 不生效）；`precheck --profile-json` 候选清单预检通过；
+   落盘后 `doctor` 13 个 bundle 全部可解析。**只差重启 DSH 后确认胶囊真的出现。**
+2. 挂一个自有面板到现有槽位（还没有真正用上 Slot 系统）。
 3. 把高频操作做成按钮，减少手动输入。
 
 **验收**：界面上出现自建面板；刷新/热重载后仍在；Harness 升级后仍在。

@@ -1,0 +1,27 @@
+# ============================================================================
+# dsh-up-t —— DSH bundle patch
+# ============================================================================
+# 这是插件的「挂载声明」。DSH 启动时按 bundle 层栈叠加各插件 patch，
+# 本文件把 dsh-up-t 这一个插件条目插入 profile 的配置树。
+#
+# 为什么只需要 `insert` 而不用改别的东西：
+#   `name` 就是包名，DSH 会去 profile 的 node_modules 里解析它，
+#   然后加载该包的 `main`（lib/index.js）并调用它的 `apply(root)`。
+#   插件自己负责注册注入行与 HTTP 路由——不需要任何其它配置。
+#
+# 安装方式：
+#   本地开发（推荐，改完代码不用重新安装）：
+#     cmd_ 里建一个 junction，让 DSH 能按包名解析到本目录：
+#       New-Item -ItemType Junction `
+#         -Path "$env:DSH_HOME\profiles\desktop\node_modules\dsh-up-t" `
+#         -Target "<本项目>\plugins\dsh-up-t"
+#     然后在 profile 的 package.json 的 dsh.profile.bundles 里加上 "dsh-up-t"。
+#   官方 CLI 方式：dsh plugin --profile web add link:<本目录绝对路径>
+#
+# 卸载：把 bundles 里的 "dsh-up-t" 去掉、删掉那个 junction 即可。
+#   profile 的 package.json 是组合层文件，改之前先 `node src/cli.mjs snapshot create`。
+# ============================================================================
+
+- insert:
+    - id: dsh-up-t
+      name: dsh-up-t

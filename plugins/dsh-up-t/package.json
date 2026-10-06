@@ -1,0 +1,26 @@
+{
+  "name": "dsh-up-t",
+  "version": "0.1.0",
+  "description": "deepseek-up-T 的状态挂件：在 DSH Web 界面左下角显示 Harness 版本与安装包是否被改造过，点开有细节",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "deepseek-up-t"
+  ],
+  "type": "module",
+  "main": "lib/index.js",
+  "files": [
+    "lib",
+    "assets",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "license": "MIT",
+  "private": true,
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

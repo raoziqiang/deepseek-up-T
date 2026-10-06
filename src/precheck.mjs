@@ -70,8 +70,13 @@ function ensureJunction(linkPath, target) {
 /**
  * 搭好隔离探针家。返回路径与 junction 结果。
  * `fresh: true` 会先整个删掉重建（junction 会连同链接一起删，不会删到真实目录内容）。
+ *
+ * `profilePackageJson`：用**候选** package.json 顶替真实 profile 的那一份。
+ * 为什么需要：`dsh.profile.bundles` 只存在于 package.json，所以「再加一个 bundle 会不会炸」
+ * 这件事，如果只能复制真实文件，就永远无法在落盘前预检 —— 只能先改真实 profile 再祈祷。
+ * 给了这个覆盖项之后，预检可以跑「候选清单 + 真实 cordis.patch.yml」的组合。
  */
-export function prepareProbeHome({ fresh = false } = {}) {
+export function prepareProbeHome({ fresh = false, profilePackageJson = null } = {}) {
   const P = resolvePaths();
   const probeHome = path.join(P.stateDir, 'probe-home');
   const probeDir = path.join(probeHome, 'profiles', PROBE_PROFILE);
@@ -79,12 +84,19 @@ export function prepareProbeHome({ fresh = false } = {}) {
   if (fresh && exists(probeHome)) fs.rmSync(probeHome, { recursive: true, force: true });
   fs.mkdirSync(probeDir, { recursive: true });
 
+  const override = profilePackageJson ? path.resolve(profilePackageJson) : null;
+  if (override && !exists(override)) {
+    throw new Error(`--profile-json 指向的文件不存在：${override}`);
+  }
+
   const copied = [];
+  const sources = [];
   for (const f of COPY_FILES) {
-    const src = path.join(P.profileDir, f);
+    const src = (f === 'package.json' && override) ? override : path.join(P.profileDir, f);
     if (!exists(src)) continue;
     fs.copyFileSync(src, path.join(probeDir, f));
     copied.push(f);
+    sources.push({ file: f, from: src });
   }
 
   const links = [
@@ -92,7 +104,7 @@ export function prepareProbeHome({ fresh = false } = {}) {
     { name: 'profiles/node_modules', link: path.join(probeHome, 'profiles', 'node_modules'), target: P.hostModules },
   ].map((l) => ({ ...l, result: ensureJunction(l.link, l.target) }));
 
-  return { P, probeHome, probeDir, copied, links };
+  return { P, probeHome, probeDir, copied, sources, override, links };
 }
 
 /** 用安装版 Electron 以 Node 身份跑 asar 内的 dsh CLI。 */
@@ -180,9 +192,11 @@ export function diffDumps(beforeText, afterText) {
  * 端到端预检：搭探针 → 跑 dump → 分类问题 → 与上一次 dump 比对。
  * 不抛业务错误；调用方按 `ok` 决定退出码。
  */
-export function runPrecheck({ patches = [], mode = 'dump-config', fresh = false, timeoutMs } = {}) {
+export function runPrecheck({
+  patches = [], mode = 'dump-config', fresh = false, timeoutMs, profilePackageJson = null,
+} = {}) {
   const P = resolvePaths();
-  const probe = prepareProbeHome({ fresh });
+  const probe = prepareProbeHome({ fresh, profilePackageJson });
   const run = dumpWithElectron({ mode, patches, probeHome: probe.probeHome, installDir: P.installDir, timeoutMs });
   const { problems, notes } = analyzeStderr(run.stderr);
 

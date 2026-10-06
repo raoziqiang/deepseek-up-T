@@ -1,12 +1,12 @@
 {
-  "capturedAt": "2026-10-06T14:33:40.641Z",
+  "capturedAt": "2026-10-06T15:05:33.021Z",
   "project": "deepseek-up-T",
   "home": "C:\\Users\\Z1848\\.dsh",
   "profile": "desktop",
   "profileDir": "C:\\Users\\Z1848\\.dsh\\profiles\\desktop",
   "installDir": "D:\\Program Files (x86)\\deepseekharness",
   "dshVersion": "44.0.0",
-  "nodeVersion": "v24.21.0",
+  "nodeVersion": "v24.19.0",
   "bundles": [
     "@deepseek-ai/dsh-base",
     "@deepseek-ai/dsh-web-app",
@@ -19,7 +19,8 @@
     "@deepseek-ai/dsh-experimental-agent-team-profile",
     "@deepseek-ai/dsh-experimental-auto-review",
     "@deepseek-ai/dsh-experimental-schedule-bundle",
-    "@deepseek-ai/dsh-experimental-voice-input-bundle"
+    "@deepseek-ai/dsh-experimental-voice-input-bundle",
+    "dsh-up-t"
   ],
   "facts": {
     "asarBytes": 121348951,
@@ -31,7 +32,7 @@
   },
   "summary": {
     "error": 0,
-    "warn": 3,
+    "warn": 2,
     "info": 6,
     "total": 20
   },
@@ -138,8 +139,8 @@
       "group": "安装包",
       "id": "无残留 app.asar.tmp",
       "level": "warn",
-      "ok": false,
-      "detail": "残留 115.8MB（D:\\Program Files (x86)\\deepseekharness\\resources\\app.asar.tmp）"
+      "ok": true,
+      "detail": "无残留"
     },
     {
       "group": "安装包",
@@ -153,7 +154,7 @@
       "id": "bundles 全部可解析",
       "level": "error",
       "ok": true,
-      "detail": "12 个 bundle 全部可解析"
+      "detail": "13 个 bundle 全部可解析"
     },
     {
       "group": "解析",

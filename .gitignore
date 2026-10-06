@@ -33,3 +33,6 @@ build/
 # 暂存构建（构建链的中间产物 + 待落盘的整包，可随时用 vendor/whale/build.mjs 重建）
 state/staged/
 state/cmp/
+
+# 候选组合层文件（precheck --profile-json 的输入，源自本机真实 profile，不可跨机复现）
+state/candidate/
