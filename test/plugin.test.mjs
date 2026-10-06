@@ -14,7 +14,7 @@
 
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync, rmSync } from 'node:fs';
 import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 
@@ -95,6 +95,33 @@ check('默认导出带 name 与 apply', () => {
 
 const { state, root, ctx, settle } = makeHarness();
 plugin.apply(root);
+
+// ── ⓪ 心跳 ──────────────────────────────────────────────────────
+//
+// 心跳是「这个插件到底被加载并执行了没有」的**唯一文件级证据**：宿主侧的失败路径
+// 全都是静默的（没重启 → 什么都没发生；客户端脚本 404 → 开关里少一页），
+// 所以 doctor 只能靠这枚文件回答「重启有没有把我的插件装进去」。
+// 它必须真的落盘、是合法 JSON、且 pid 就是加载它的那个进程。
+
+check('apply() 第一件事就是写心跳（不依赖任何服务，所以不会被后续失败吞掉）', () => {
+  assert.equal(mod.heartbeatPath, path.join(PLUGIN, '.runtime', 'heartbeat.json'));
+  assert.ok(existsSync(mod.heartbeatPath), `心跳文件不存在：${mod.heartbeatPath}`);
+});
+
+check('心跳是合法 JSON，且带 plugin / version / pid / at', () => {
+  const beat = JSON.parse(readFileSync(mod.heartbeatPath, 'utf8'));
+  assert.equal(beat.plugin, 'dsh-up-t');
+  assert.equal(beat.version, JSON.parse(readFileSync(path.join(PLUGIN, 'package.json'), 'utf8')).version);
+  assert.equal(beat.pid, process.pid, 'pid 必须是写它的那个进程，否则 doctor 的存活判断没有意义');
+  assert.ok(Number.isFinite(Date.parse(beat.at)), `at 不是可解析的时间：${beat.at}`);
+});
+
+check('心跳绝不抛异常：写不进去也要返回 ok=false 而不是让 apply() 炸掉', () => {
+  const res = mod.writeHeartbeat();
+  assert.equal(typeof res, 'object');
+  assert.equal(res.ok, true);
+  assert.equal(res.file, mod.heartbeatPath);
+});
 
 // ── ① 注入行 ────────────────────────────────────────────────────
 
@@ -208,6 +235,18 @@ check('status.json 路由返回可解析的 JSON，且字段齐备', () => {
     assert.equal(typeof j.install.dir, 'string');
     assert.ok([true, false, null].includes(j.install.sameSizeAsBackup));
   }
+});
+
+// 心跳的对外面：status.json 必须把**磁盘上**的心跳原样带出来。
+// 这一条必须放在服务就绪之后 —— 它走的是真实路由，不是直接调 collectStatus。
+check('status.json 把磁盘上的心跳原样带出来，且写失败时显式暴露', () => {
+  const route = state.routes.find((r) => r.path === STATUS_PATH);
+  const res = makeRes();
+  route.handler({ url: STATUS_PATH }, res);
+  const status = JSON.parse(res.body.toString('utf8'));
+  assert.equal(status.heartbeatWriteError, null, '心跳写失败必须显式暴露，不能静默');
+  assert.equal(status.heartbeatFile, mod.heartbeatPath);
+  assert.equal(status.heartbeat?.pid, process.pid, 'status 里的心跳必须来自磁盘，而不是内存里的变量');
 });
 
 // ── ③ 清理 ──────────────────────────────────────────────────────
@@ -338,6 +377,10 @@ check('package.json 声明了 dsh.client.platform=web 且导出 ./client', () =>
 });
 
 // ── 汇总 ────────────────────────────────────────────────────────
+
+// 必须清理：这枚心跳的 pid 是测试进程，测试一退出它就变成「来自已退出进程」，
+// 留着会让下一次 `dsht doctor` 报 WARN。测试不许给真实环境留状态。
+try { rmSync(path.dirname(mod.heartbeatPath), { recursive: true, force: true }); } catch { /* 忽略 */ }
 
 const failed = results.filter((r) => !r.ok);
 for (const r of results) {

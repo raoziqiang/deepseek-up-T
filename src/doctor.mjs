@@ -12,7 +12,26 @@ import {
 import { scanPatch, isEmptyArray, looksLikePackage } from './cordis.mjs';
 import { readAsarHeader, asarPackageIndex, asarStats } from './asar.mjs';
 
-export const GROUPS = ['环境', '组合层', '解析', '安装包'];
+export const GROUPS = ['环境', '组合层', '运行时', '解析', '安装包'];
+
+/** 进程还在不在。`kill(pid, 0)` 不发信号，只做存在性/权限检查；EPERM 也算「在」。 */
+function pidAlive(pid) {
+  const n = Number(pid);
+  if (!Number.isInteger(n) || n <= 0) return null;
+  try { process.kill(n, 0); return true; } catch (err) { return err?.code === 'EPERM'; }
+}
+
+/** 粗粒度时长，只为人类可读，不参与任何判断。 */
+function humanAge(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return '?';
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s} 秒`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m} 分钟`;
+  const h = Math.floor(m / 60);
+  if (h < 48) return `${h} 小时 ${m % 60} 分钟`;
+  return `${Math.floor(h / 24)} 天`;
+}
 
 function probeProcess() {
   if (process.platform !== 'win32') return { supported: false };
@@ -104,6 +123,39 @@ export async function runDoctor({ hash = true } = {}) {
     add('组合层', '每个条目都有 id', 'warn', missingId.length === 0,
       missingId.length === 0 ? '全部有条目 id' : `${missingId.length} 个条目缺 id（行 ${missingId.map((e) => e.line).join(', ')}）`,
       '没有 id 的条目无法被后续层按 id 覆盖，也难以维护。');
+  }
+
+  // ───────────────────────── 运行时（我们自己写的 L1 插件） ─────────────────────────
+  //
+  // 这一段存在的理由：`doctor` 原本只能回答「文件在不在、配置合不合法」，全都是**静态**事实。
+  // 而 L1 插件最容易出的问题恰恰在运行时——插件装好了但 profile 没重启、重启了但插件抛错、
+  // 或者加载了但客户端脚本 404（那条路径被刻意设计成静默失败）。心跳文件把「加载了吗」
+  // 从「肉眼看界面」变成一条可核对的文件事实。
+  const beatText = readText(P.pluginHeartbeat);
+  if (beatText === null) {
+    add('运行时', 'T4 插件 dsh-up-t 心跳', 'info', true,
+      '还没有心跳文件',
+      `预期行为：dsh-up-t 装好后必须**重启 Harness** 才会加载；加载时它会在 ${P.pluginHeartbeat} 落一枚心跳。`
+      + '重启后这里会变成 OK 并显示加载时间与进程号。');
+  } else {
+    let beat = null;
+    try { beat = JSON.parse(beatText); } catch { beat = null; }
+    if (!beat || typeof beat !== 'object') {
+      add('运行时', 'T4 插件 dsh-up-t 心跳', 'warn', false,
+        `${P.pluginHeartbeat} 存在但内容不是合法 JSON`,
+        '删掉这个文件并重启 Harness，让插件重写它。');
+    } else {
+      const alive = beat.pid ? pidAlive(beat.pid) : null;
+      const ageMs = beat.at ? Date.now() - Date.parse(beat.at) : null;
+      const age = Number.isFinite(ageMs) ? `（${humanAge(ageMs)}前）` : '';
+      add('运行时', 'T4 插件 dsh-up-t 心跳', 'warn', alive !== false,
+        `${beat.plugin ?? '?'} ${beat.version ?? '?'} · ${beat.at ?? '时间未知'}${age} · pid ${beat.pid ?? '?'}`
+        + (alive === false ? '  ← 该进程已经不在了' : ''),
+        alive === false
+          ? '这枚心跳来自一个**已经退出**的进程：说明插件当时确实加载过，但当前 Harness 进程是另一个（心跳没被刷新）。'
+            + '如果你刚重启完还是这种状态，说明插件这次没被加载 —— 去 .plugin-manager/logs 找报错。'
+          : null);
+    }
   }
 
   // ───────────────────────── 安装包（先读头，解析检查要用） ─────────────────────────

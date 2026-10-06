@@ -74,6 +74,10 @@ export function resolvePaths() {
     stateDir: path.join(PROJECT_ROOT, 'state'),
     snapshotsDir: path.join(PROJECT_ROOT, 'state', 'snapshots'),
     baselineFile: path.join(PROJECT_ROOT, 'state', 'baseline.json'),
+    // 我们自己写的 L1 插件在 apply() 里落一枚心跳。它是「重启到底有没有把我的插件装进去」
+    // 的唯一**文件级**证据 —— 否则只能靠肉眼看界面。
+    pluginRuntimeDir: path.join(PROJECT_ROOT, 'plugins', 'dsh-up-t', '.runtime'),
+    pluginHeartbeat: path.join(PROJECT_ROOT, 'plugins', 'dsh-up-t', '.runtime', 'heartbeat.json'),
   };
 }
 

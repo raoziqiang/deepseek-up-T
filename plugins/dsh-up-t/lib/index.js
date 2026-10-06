@@ -37,6 +37,49 @@ const STATUS_PATH = '/dsh-up-t/status.json';
 
 const CLIENT_FILE = path.join(PACKAGE_ROOT, 'assets', 'client.js');
 
+/**
+ * 心跳文件：`apply()` 一被执行就落一枚，内容是「谁、什么时候、在哪个进程里加载了我」。
+ *
+ * 为什么需要它：插件装好之后，「到底加载成功了没有」原本只能靠**肉眼看界面**——
+ * 徽标没出现可能是没加载、可能是加载了但注入行没进表、也可能是客户端脚本 404（而那条路径
+ * 被刻意设计成**静默失败**，就为了不拖垮启动）。这样一旦出问题，你无法区分这几种情况。
+ * 落一枚带 pid 与时间戳的文件，就把「加载了吗」变成一条可核对的事实：
+ * `dsht doctor` 读这个文件 —— 文件在、pid 活着、时间戳在本次 Harness 启动之后 ⇒ 确实加载了。
+ *
+ * 写成幂等的（每次 apply 覆盖），并且**绝不抛异常**：诊断设施不能成为新的故障点。
+ */
+const RUNTIME_DIR = path.join(PACKAGE_ROOT, '.runtime');
+const HEARTBEAT_FILE = path.join(RUNTIME_DIR, 'heartbeat.json');
+/** 最近一次心跳写的返回值。写失败不该静默 —— 但也不该抛异常，所以留在这里给状态路由。 */
+let lastHeartbeatResult = null;
+
+export function writeHeartbeat() {
+  const pkg = readOwnPackage();
+  const inst = findInstall();
+  const payload = {
+    plugin: pkg.name,
+    version: pkg.version,
+    at: new Date().toISOString(),
+    pid: process.pid,
+    execPath: process.execPath ?? null,
+    electron: process.versions?.electron ?? null,
+    node: process.versions?.node ?? null,
+    installDir: inst?.installDir ?? null,
+    clientPath: CLIENT_PATH,
+    statusPath: STATUS_PATH,
+  };
+  try {
+    fs.mkdirSync(RUNTIME_DIR, { recursive: true });
+    fs.writeFileSync(HEARTBEAT_FILE, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+    lastHeartbeatResult = { ok: true, file: HEARTBEAT_FILE, payload };
+  } catch (err) {
+    lastHeartbeatResult = { ok: false, file: HEARTBEAT_FILE, error: String(err?.message ?? err) };
+  }
+  return lastHeartbeatResult;
+}
+
+export const heartbeatPath = HEARTBEAT_FILE;
+
 function readOwnPackage() {
   try {
     return JSON.parse(fs.readFileSync(path.join(PACKAGE_ROOT, 'package.json'), 'utf8'));
@@ -112,7 +155,12 @@ function collectStatus() {
     plugin: { name: pkg.name, version: pkg.version },
     time: new Date().toISOString(),
     install: null,
+    // 心跳是**磁盘真相**（不是内存里的变量）：读文件，读不到就是 null。
+    heartbeat: null,
+    heartbeatFile: HEARTBEAT_FILE,
+    heartbeatWriteError: lastHeartbeatResult && !lastHeartbeatResult.ok ? lastHeartbeatResult.error : null,
   };
+  try { out.heartbeat = JSON.parse(fs.readFileSync(HEARTBEAT_FILE, 'utf8')); } catch { /* 还没落过 */ }
   if (!inst) return out;
 
   const asarBytes = sizeOrNull(inst.asar);
@@ -163,6 +211,10 @@ export default {
   // 注意：这里**故意不写**对象级 `inject`。理由见文件头第 2 条。
   apply(root) {
     const rowDisposers = [];
+
+    // ⓪ 心跳：证明「这个插件真的被加载并执行了」。不依赖任何服务，所以放在最前面，
+    //    和注入行同一个理由 —— 越早做，越不可能因为后面的依赖不满足而漏掉。
+    writeHeartbeat();
 
     // ① 第一件事：注册桌面端注入行。不依赖任何服务，所以不能放进 root.inject 里。
     rowDisposers.push(root.on('webserver/index-inject', (table) => {

@@ -27,9 +27,33 @@ up-T · ?             ← 黄点：没有原版备份可比 / 宿主没回应
 | 路由 | 作用 |
 | --- | --- |
 | `/dsh-up-t/client.js` | 客户端脚本。按 **mtime** 重读，所以改完**硬刷新页面即生效，不用重启 DSH** |
-| `/dsh-up-t/status.json` | 状态事实（只做 stat 级读取，不算 121MB 的 sha256） |
+| `/dsh-up-t/status.json` | 状态事实（只做 stat 级读取，不算 121MB 的 sha256；含磁盘上的心跳） |
 
-`apply()` 一开头就注册 `webserver/index-inject` 的注入行；其余逻辑在 `root.inject(['webServer'], …)` 里。
+`apply()` 的**第一条语句**就是 `writeHeartbeat()`，然后立刻注册 `webserver/index-inject` 的注入行；
+其余逻辑在 `root.inject(['webServer'], …)` 里。
+
+## ★ 心跳：回答「重启到底有没有把我装进去」
+
+这个插件的失败路径**全都是静默的** —— 没重启就什么都没发生；`apply()` 抛错宿主照常跑；
+客户端脚本 404 只是少一页（注入行刻意吞掉 `onerror`，为了不拖垮启动）。
+所以「加载成功了吗」以前只能靠**肉眼看界面**。
+
+`apply()` 每次执行都会写 `plugins/dsh-up-t/.runtime/heartbeat.json`：
+
+```json
+{ "plugin": "dsh-up-t", "version": "0.1.0", "at": "…", "pid": 12345,
+  "execPath": "…", "electron": "44.0.0", "node": "24.x", "installDir": "…",
+  "clientPath": "/dsh-up-t/client.js", "statusPath": "/dsh-up-t/status.json" }
+```
+
+- **绝不抛异常**：写失败只记进 `lastHeartbeatResult`，并通过 `status.json` 的 `heartbeatWriteError` 暴露。
+- **返回值被忽略** —— 磁盘上的文件才是证据。
+- `dsht doctor` 读它并给三条结论：**没有文件 → INFO**（还没重启，预期）、
+  **不是合法 JSON → WARN**、**合法 → 按 `pid` 现在是否还活着给 OK / WARN**。
+- 所以它写在**包自己的 `.runtime/`**，不写项目的 `state/`：插件若以非 junction 方式安装，
+  它写的就不是我们这份副本的目录 —— 而 `doctor` 看不到它，**这正是正确的结论**。
+
+`.runtime/` 已在 `.gitignore` 里（它含本机 pid 与绝对路径，是「这一刻」的证据，不是源码）。
 
 ## ★ 三条不能违反的约束（都是别人踩过的坑）
 
@@ -133,7 +157,7 @@ node src\cli.mjs precheck --profile-json state\candidate\package.json
 
 ```powershell
 cd D:\Z1848\harness-ds\deepseek-up-T
-node test\plugin.test.mjs          # 20 条断言：注入行、两条路由、客户端 bundle 形态、清理
+node test\plugin.test.mjs          # 24 条断言：心跳、注入行、两条路由、客户端 bundle 形态、清理
 node src\cli.mjs doctor            # bundles 全部可解析
 node src\cli.mjs precheck          # 组合可用
 ```

@@ -7,7 +7,7 @@
 | 命令 | 作用 |
 | --- | --- |
 | `node src/cli.mjs env` | 打印全部关键路径与存在性；`--json` 机器可读 |
-| `node src/cli.mjs doctor` | 体检：组合层不变量 / 包解析三条根 / 安装包完整性 / 进程占用。退出码 1 = 有 error |
+| `node src/cli.mjs doctor` | 体检：组合层不变量 / **运行时心跳** / 包解析三条根 / 安装包完整性 / 进程占用。退出码 1 = 有 error |
 | `node src/cli.mjs snapshot create -m "..."` | 给 profile 控制面留快照（含 `app.asar` 指纹） |
 | `node src/cli.mjs snapshot list` | 列出快照 |
 | `node src/cli.mjs snapshot diff <id>` | 快照与当前现场对比（文件级 sha256） |
@@ -70,7 +70,7 @@ node vendor/whale/install.mjs --yes    # 需要先完全退出 Harness
 - [ ] 自动重打：`upgrade` 目前只报告 + 给命令，不自动落盘（写安装包必须由人挑时间）
 - [x] 快照保留策略：`snapshot prune`（默认预演）+ 三层拒绝守卫，2026-10-06 完成，见下方记录
 - [x] 测试总入口 `test/run.mjs`（发现式），2026-10-06 完成，见下方记录
-- [ ] `doctor` 扩展：接入 profile 重载后的运行时探测
+- [x] `doctor` 扩展：运行时心跳探测（回答「重启到底有没有把我的插件装进去」），2026-10-06 完成，见下方记录
 - [x] 处置 `app.asar.tmp` 残留（115.8MB）—— 确认是坏构建，已删除
 
 ## 验收
@@ -403,6 +403,58 @@ L3 状态在这种情况下仍能靠 `insert` 条目的存在性判定，所以�
 **教训**：**能发现的东西就不要手写清单**。凡是「新增一项时要记得回来改」的地方，
 都要问一句「忘了改会怎样」——如果答案是「静默地少测一块」，那就把它改成发现式；
 实在必须手写，就让「清单为空」变成错误而不是成功。
+
+### 2026-10-06 · `doctor` 扩展：运行时心跳探测
+
+**为什么**
+`doctor` 到这时为止只会回答**静态**事实：文件在不在、配置合不合法、归档头能不能解析。
+而 L1 插件最容易出的问题恰恰在**运行时**，且三条失败路径**全都是静默的**：
+
+| 情况 | 表现 |
+| --- | --- |
+| 插件装好了，但 profile 没重启 | 什么都没发生（配置文件一切正常） |
+| 重启了，但插件 `apply()` 抛错 | 宿主继续跑，只是少一个挂件 |
+| 加载了，但客户端脚本 404 | 设置里少一页（注入行刻意 `s.onerror = function () {}`，为了不拖垮启动） |
+
+于是「到底加载成功了没有」此前只能靠**肉眼看界面**。心跳文件把这个问题变成一条可核对的文件事实。
+
+**做成了什么**
+- `plugins/dsh-up-t/lib/index.js`：`writeHeartbeat()` 在 `apply(root)` 的**第一条语句**执行
+  （和注入行同一个理由：越早做，越不可能因为后面的依赖不满足而漏掉），写
+  `plugins/dsh-up-t/.runtime/heartbeat.json` = `{ plugin, version, at, pid, execPath, electron, node, installDir, clientPath, statusPath }`。
+  **它绝不抛异常**（写失败记进 `lastHeartbeatResult`），返回值也**被忽略** —— 磁盘上的文件才是证据。
+  `collectStatus()` 新增 `heartbeat`（**从磁盘读**，不是内存变量）、`heartbeatFile`、`heartbeatWriteError`，
+  所以 `/dsh-up-t/status.json` 也带心跳。
+- `src/paths.mjs`：新增 `pluginRuntimeDir` / `pluginHeartbeat`。
+- `src/doctor.mjs`：`GROUPS` 加 `'运行时'`（渲染按 push 顺序分段，新段落在「组合层」之后、「安装包」之前）；
+  新增 `pidAlive(pid)`（`kill(pid, 0)` 只做存在性检查，**EPERM 也算「在」**）与 `humanAge(ms)`；
+  检查项 `T4 插件 dsh-up-t 心跳` 三分支：**没有文件 → INFO**（重启前这是预期，不是故障，hint 明说）、
+  **不是合法 JSON → WARN**、**合法 → 按 pid 存活给 OK/WARN**。
+
+**两个值得记住的取舍**
+1. 心跳写在**插件包自己的 `.runtime/`**，不写项目的 `state/`。因为插件可能以非 junction 的方式安装，
+   那时往 `../../state` 写会造垃圾；写在包内最坏只是写进它自己那份安装副本，而 `doctor` 看不到它 ——
+   **这恰恰是正确的结论**（「那不是我们这份插件副本」）。
+2. OK 态用 `level: 'warn'` + `ok: true`。渲染规则是从 `level` 和 `ok` 两个字段**共同**推出标签
+   （`c.ok === false ? TAG[c.level] : (c.level === 'info' ? TAG.info : TAG.ok)`），而 `LEVELS` 白名单
+   只有 `error|warn|info` —— 想让失败显示 `WARN`、成功显示 `OK`，只能这么写。
+
+**怎么验的（四个分支都用真进程跑过，不是只读代码）**
+- 短命 `node -e` 写心跳（写完就退出）→ `WARN … ← 该进程已经不在了` + 正确 hint；
+- 手改 `pid: 999999` → 同上（**过期心跳与「写完就退出的进程」不可区分，这是对的** ——
+  判据只能是「写过它的那个 pid 现在还活着没有」）；
+- 写烂 JSON → `WARN … 存在但内容不是合法 JSON`；
+- `Start-Process node -ArgumentList '-e','setTimeout(()=>{},9000)'`（pid 42032，`HasExited=False`）代写 →
+  **`OK  T4 插件 dsh-up-t 心跳  dsh-up-t 0.1.0 · …（0 秒前） · pid 42032`** ——
+  这一条是必需的，否则「pid 存活」这一路可能恒判 WARN 也没人发现。
+- 收尾删掉心跳回到 `INFO`；`.gitignore` 加 `plugins/dsh-up-t/.runtime/`；
+  `test/plugin.test.mjs` 加 4 条断言（20 → **24/24**）：文件真的落盘、合法 JSON 且 `pid === process.pid`、
+  `writeHeartbeat()` 返回值诚实、`status.json` 把**磁盘上**的心跳原样带出来且 `heartbeatWriteError === null`；
+  **测试跑完必须清理**（那枚心跳的 pid 是测试进程，留着会让下一次 `doctor` 报 WARN —— 测试不许给真实环境留状态）。
+
+**教训**：一个「加载成功了吗」这种只能靠肉眼回答的问题，通常不是因为没有答案，而是因为**没有把答案写下来**。
+把每次加载写成一行带 pid 与时间的文件，问题就从「看界面」变成「读一行字」，
+而且**顺带解释了为什么它是静默的** —— 因为静默正是它当初的设计目标。
 
 
 

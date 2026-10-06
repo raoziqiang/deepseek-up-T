@@ -59,6 +59,7 @@
 - [x] 用 `cordis_inspect_query` 把可用槽位树读出来并记录 —— 2026-10-06 完成，见下方记录
 - [x] 最小可用插件脚手架（host 入口 + client 入口 + `dsh` 声明）—— 2026-10-06 完成：`plugins/dsh-up-t`
 - [x] 挂一个自有面板到现有槽位 —— 2026-10-06 完成：`settings.section` 一整页「deepseek-up-T」，见下方第三步记录
+- [x] 让「插件到底加载了没有」变成可核对的事实 —— 2026-10-06 完成：`apply()` 落 `.runtime/heartbeat.json`，`doctor` 新增「运行时」段读它（见 `tracks/T5-engineering/README.md` 的记录）
 - [ ] 把高频操作做成按钮
 - [ ] 重启 DSH 后确认胶囊与设置页真的出现
 

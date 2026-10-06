@@ -13,7 +13,7 @@ T3 使用效率、T4 Web GUI 扩展、T5 工程化。
 
 ```powershell
 cd D:\Z1848\harness-ds\deepseek-up-T
-node src/cli.mjs doctor          # 体检：环境 / 组合层 / 安装包 / 解析
+node src/cli.mjs doctor          # 体检：环境 / 组合层 / 运行时心跳 / 安装包 / 解析
 node src/cli.mjs upgrade         # 安装包被动过没有？哪些补丁需要重打？哪些只是从未落盘？
 node src/cli.mjs snapshot create -m "<本次改动一句话>"
 ```
@@ -50,7 +50,7 @@ DSH 的组合，报告退出码、问题数与逐条 diff。**差异行数要恰
 
 | 命令 | 用途 |
 | --- | --- |
-| `node src/cli.mjs doctor` | 体检。0 错误才算干净，警告要读 |
+| `node src/cli.mjs doctor` | 体检。0 错误才算干净，警告要读。含「运行时」段：读插件心跳回答「重启到底有没有把我装进去」 |
 | `node src/cli.mjs precheck [--patch 文件] [--profile-json 文件]` | 权威组合预检（探针家，真实 `$DSH_HOME` 只读） |
 | `node src/cli.mjs snapshot create\|list\|diff\|restore` | 改动前后的配置快照与回滚 |
 | `node src/cli.mjs snapshot prune [--keep N] [--keep-match GLOB] [--yes]` | 快照清理。**默认只预演**；不加 `--yes` 绝不动磁盘 |

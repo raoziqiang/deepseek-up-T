@@ -36,3 +36,6 @@ state/cmp/
 
 # 候选组合层文件（precheck --profile-json 的输入，源自本机真实 profile，不可跨机复现）
 state/candidate/
+
+# 插件运行时心跳：每次加载重写，含本机 pid 与绝对路径，是「这一刻」的证据而不是源码
+plugins/dsh-up-t/.runtime/
