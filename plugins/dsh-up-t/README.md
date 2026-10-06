@@ -222,6 +222,9 @@ dsh-up-t 已经装好了，它的客户端 bundle 由宿主**按 mtime 重读**�
 
 这三条连同 `apply()` 的行为，全部被 `test/plugin.test.mjs` 的断言钉住 ——
 因为「行没赶上收集」这类失败是静默的，在真机上很难复现，只能在离线把行为钉死。
+（`test/plugin.test.mjs` 验的是**形状**：槽位注册签名、`inject` 声明、条目 id/order。
+设置页那一页与开关那一行**真的渲染一遍**由 `test/settings.test.mjs` 负责 ——
+显示层用外壳真实提供的 React 渲染成 HTML，行为层用迷你 hook 主机跑 `useEffect` 里的数据流。）
 
 ## ★ 客户端半侧（`lib/client.js`）与它的第四条约束
 
