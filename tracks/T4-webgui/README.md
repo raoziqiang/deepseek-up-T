@@ -60,7 +60,7 @@
 - [x] 最小可用插件脚手架（host 入口 + client 入口 + `dsh` 声明）—— 2026-10-06 完成：`plugins/dsh-up-t`
 - [x] 挂一个自有面板到现有槽位 —— 2026-10-06 完成：`settings.section` 一整页「deepseek-up-T」，见下方第三步记录
 - [x] 让「插件到底加载了没有」变成可核对的事实 —— 2026-10-06 完成：`apply()` 落 `.runtime/heartbeat.json`，`doctor` 新增「运行时」段读它（见 `tracks/T5-engineering/README.md` 的记录）
-- [x] 把高频操作做成按钮 —— 2026-10-06 完成：`/dsh-up-t/action` 白名单通道 + 设置页按钮区，见下方最新记录
+- [x] 把高频操作做成按钮 —— 2026-10-06 完成：`/dsh-up-t/action` 白名单通道 + 设置页按钮区（体检 / 升级检测 / 重打到暂存包 / 组合预检 / 快照列表 / 留一份快照），见下方记录
 - [ ] 重启 DSH 后确认胶囊与设置页真的出现
 
 ## 验收
@@ -70,6 +70,28 @@
 - Harness 升级后仍在（证明它确实活在 L1 而不是 L3）。
 
 ## 记录
+
+### 2026-10-06 · 第五步：把「重打到暂存包」也挂成按钮（顺带把 `writes` 语义钉死）
+
+**为什么加这一个**：第四步挂的五个按钮里，升级之后最该被点的那一个还不存在。T5 刚交付
+`upgrade --stage`（半自动重打），它**只写 `state/staged/`、不碰安装目录，所以可以随便点** ——
+「随便点也不怕」正是它适合做成按钮的理由；真正危险的那一步（覆盖在用 `app.asar`）仍然留给人挑时间。
+
+**做成了什么**
+- `plugins/dsh-up-t/lib/index.js`：`ACTIONS` 加 `upgradeStage`（label「重打到暂存包」，
+  `argv: ['upgrade','--stage','--json','--no-hash']`，`json: true`、`writes: true`、`timeoutMs: 600000`）。
+  **客户端一行没改** —— 按钮来自 `GET /dsh-up-t/action` 的 `specs`，这正是第四步约束 ②的回报。
+- `test/plugin.test.mjs` 加一条断言（35 → **36**），钉的不是「多了一个按钮」，而是**整张 specs 表**：
+  每个 spec 必须有非空 `name` / `label` / `hint`（界面把 `hint` 当按钮 `title`），
+  且 `writes` 必须是布尔；然后逐个核对
+  `doctor` / `upgrade` / `snapshotList` = `false`，`precheck` / `snapshotCreate` / `upgradeStage` = `true`。
+  **为什么这条值得单独立一条**：`writes: false` 会让界面**跳过二次确认**，所以少标一个 flag
+  等于少一次确认，而界面上看不出任何异常 —— 它只会安静地变得更容易误点。
+
+**怎么验的**：`node test/plugin.test.mjs` **36/36**；`node test/run.mjs` **4/4 套通过**；
+`node --check` 两个改动文件；`upgrade --stage` 本身的行为在 `ce7f202` 里已单独验过。
+
+**还没验的**：和第四步同一条 —— 这条路由**必须重启 Harness 才存在**。点下去会真的构建一次（约 1.2s）。
 
 ### 2026-10-06 · 第四步：把高频操作做成按钮（`/dsh-up-t/action`）
 

@@ -307,6 +307,28 @@ await checkAsync('action 路由：GET 无头也答一句（好让人用浏览器
   assert.ok(j.actions.includes('doctor') && j.actions.includes('snapshotCreate'));
 });
 
+await checkAsync('action 路由：specs 表完整，且写盘类操作都标了 writes（界面据此二次确认）', async () => {
+  const res = await driveAction(makeReq({ method: 'GET' }));
+  const specs = actionJson(res).specs;
+  assert.ok(Array.isArray(specs) && specs.length > 0, 'GET 必须带上界面要用的 specs');
+  for (const s of specs) {
+    assert.ok(typeof s.name === 'string' && s.name.length > 0, '每个 spec 都要有 name');
+    assert.ok(typeof s.label === 'string' && s.label.length > 0, `${s.name} 缺 label`);
+    assert.ok(typeof s.hint === 'string' && s.hint.length > 0, `${s.name} 缺 hint（界面拿它当按钮 title）`);
+    assert.equal(typeof s.writes, 'boolean', `${s.name} 的 writes 必须是布尔`);
+  }
+  const byName = Object.fromEntries(specs.map((s) => [s.name, s]));
+  for (const name of ['doctor', 'upgrade', 'precheck', 'snapshotList', 'snapshotCreate', 'upgradeStage']) {
+    assert.ok(byName[name], `specs 里缺 ${name}`);
+  }
+  assert.equal(byName.doctor.writes, false);
+  assert.equal(byName.upgrade.writes, false);
+  assert.equal(byName.snapshotList.writes, false);
+  assert.equal(byName.precheck.writes, true, 'precheck 会写探针家，必须二次确认');
+  assert.equal(byName.snapshotCreate.writes, true);
+  assert.equal(byName.upgradeStage.writes, true, '重打会写 state/staged/，必须二次确认');
+});
+
 await checkAsync('action 路由：缺少 x-dsh-up-t 头一律 403（别的网页不能悄悄让本机跑命令）', async () => {
   const res = await driveAction(makeReq({ method: 'POST', body: JSON.stringify({ action: 'doctor' }) }));
   assert.equal(res.statusCode, 403);

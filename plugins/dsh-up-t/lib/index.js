@@ -256,6 +256,14 @@ export const ACTIONS = {
     json: true,
     timeoutMs: 180000,
   },
+  upgradeStage: {
+    label: '重打到暂存包',
+    hint: '按声明重新构建到 state/staged/app.asar（只写 state/，不碰安装目录 —— 落盘仍要人挑时间）',
+    writes: true,
+    argv: () => ['upgrade', '--stage', '--json', '--no-hash'],
+    json: true,
+    timeoutMs: 600000,
+  },
   precheck: {
     label: '组合预检',
     hint: '用隔离探针家跑一次权威 dump（会写 state/probe-home）',

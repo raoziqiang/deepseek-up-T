@@ -58,7 +58,7 @@ up-T · ?             ← 黄点：没有原版备份可比 / 宿主没回应
 
 ## ★ 操作通道：把 `dsht` 最常跑的命令挂成按钮
 
-设置页面上那一排按钮（体检 / 升级检测 / 组合预检 / 快照列表 / 留一份快照）走的是
+设置页面上那一排按钮（体检 / 升级检测 / 重打到暂存包 / 组合预检 / 快照列表 / 留一份快照）走的是
 `/dsh-up-t/action`。它有四条约束，每一条都是为了让「点了没反应」不可能发生：
 
 1. **白名单，不接受任意命令。** 每个操作在宿主侧的 `ACTIONS` 表里写死 argv 形态；
@@ -71,6 +71,12 @@ up-T · ?             ← 黄点：没有原版备份可比 / 宿主没回应
    缺头一律 **403**，非 POST 一律 **405**，body 不是 JSON 一律 **400**，名字不在白名单一律 **400**。
 4. **一次只跑一个。** 所有调用串在一条 promise 链上：`precheck` 会拉起一个 Electron-as-Node
    进程去跑 `--dump-config`，两个并发既慢又容易互相踩探针家目录。
+
+**`writes` 决定要不要二次确认**，而它划的正是「有没有动磁盘」：
+`体检` / `升级检测` / `快照列表` 是 `false`，`组合预检`（写探针家）、`留一份快照`（写快照）、
+`重打到暂存包`（写 `state/staged/`）是 `true`。这张表被断言钉住 —— 少标一个就等于少一次确认。
+「重打到暂存包」跑的是 `upgrade --stage --json --no-hash`：它**只写 `state/staged/`，不碰安装目录**，
+所以可以随便点；真正落盘（`vendor/whale/install.mjs --yes`）永远由人在 Harness 退出后做。
 
 怎么跑起来的：宿主可能是 Electron，所以用 `process.execPath` + `ELECTRON_RUN_AS_NODE=1`
 以纯 Node 身份跑 `src/cli.mjs`（`src/` 零依赖，只用了内置模块）。
@@ -184,7 +190,7 @@ node src\cli.mjs precheck --profile-json state\candidate\package.json
 
 ```powershell
 cd D:\Z1848\harness-ds\deepseek-up-T
-node test\plugin.test.mjs   # 35 条断言：心跳、注入行、三条路由、操作守卫与真 spawn、客户端 bundle 形态与按钮、清理
+node test\plugin.test.mjs   # 36 条断言：心跳、注入行、三条路由、操作守卫与真 spawn、specs 的 writes 标记、客户端 bundle 形态与按钮、清理
 node src\cli.mjs doctor     # bundles 全部可解析
 node src\cli.mjs precheck   # 组合可用
 ```
