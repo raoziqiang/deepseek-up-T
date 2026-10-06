@@ -74,7 +74,22 @@ notes: |
    构建的中间产物在 `state/staged/tree/`、整包在 `state/staged/app.asar`（均已 gitignore，可重建）。不要放这里。
 5. **声明读不到就报错，不要默认值。** 缺 `expect_diff_entries` 时宁可失败退出。
 
+## 两类声明：L3 与 L0
+
+这个目录下的 `*.yml` 有两种，靠**有没有 `target.archive`** 区分（`dsht upgrade` 也是这么判的）：
+
+| | 写在哪 | 例子 | 升级后 |
+| --- | --- | --- | --- |
+| **L3** | `resources/app.asar` | `T1-whale-splash.yml` | **被覆盖，需要重打** |
+| **L0** | `profiles/<p>/cordis.patch.yml` | `T3-session-search.yml` | **幸存，无需重打** |
+
+- L3 声明用 `target.archive` + `entries:`，由 `vendor/whale/build.mjs` 与 `install.mjs` 执行。
+- L0 声明就是一**片段**（`- id:` / `name:` / `config:`），它记录的是「往 profile patch 里加了什么」，
+  由人手写进 `cordis.patch.yml`。`dsht upgrade` 会拿它与现场逐行比对，不一致就是**漂移**。
+- 判据：能在 L0 表达的，**不要**写成 L3。L0 改完重启就生效，且升级不会丢。
+
 > 状态：**已闭环**。`T1-whale-splash.yml` 的构建链与校验链路都已实现并实跑通过。
 > `node vendor/whale/build.mjs` 产出 `state/staged/app.asar`（11 条目按声明改动，其余 11,466 条目逐字节一致），
 > 再 `node vendor/whale/install.mjs --yes` 落盘（需先退出 Harness）。
-> 当前只有这一个声明文件；新增声明时按同样的格式写，执行器无需改代码。
+> 跑之前/之后都用 `node src/cli.mjs upgrade` 看状态——它会区分「被升级覆盖」与「从未落盘」。
+> 当前只有这两个声明文件；新增声明时按同样的格式写，执行器无需改代码。

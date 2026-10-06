@@ -23,6 +23,7 @@ import {
   readAsarHeader, walkAsar, listAsarPaths, readAsarEntry, grepAsarContent,
 } from './asar.mjs';
 import { runPrecheck, PROBE_PROFILE } from './precheck.mjs';
+import { runUpgradeCheck, reapplyPlan } from './upgrade.mjs';
 
 const TAG = { error: 'FAIL', warn: 'WARN', info: 'INFO', ok: 'OK  ' };
 
@@ -391,6 +392,131 @@ function cmdPrecheck({ flags, opts }) {
   return r.ok ? 0 : 1;
 }
 
+// ─────────────────────────── upgrade ───────────────────────────
+//
+// Harness 升级会整体替换 app.asar，L3 改动随之消失。这个命令回答三个问题：
+// 升级发生了没有 / 哪些声明需要重打 / 重打前还有什么必须先修。
+
+const STATE_LABEL = {
+  applied: '已应用',
+  absent: '未应用（或已被覆盖）',
+  partial: '只应用了一半（异常）',
+  unknown: '无法判断',
+  error: '声明解析失败',
+};
+
+const L0_LABEL = {
+  applied: '声明与现场一致（升级幸存，无需重打）',
+  drift: '声明与现场不一致（漂移）',
+  absent: '现场 cordis.patch.yml 里没有这一条',
+  error: '声明解析失败',
+};
+
+async function cmdUpgrade({ flags }) {
+  const r = await runUpgradeCheck({ hash: !flags.has('--no-hash') });
+
+  if (flags.has('--json')) {
+    const { patches, ...rest } = r;
+    process.stdout.write(`${JSON.stringify({
+      ...rest,
+      patches: patches.map((p) => ({ ...p, staleSources: p.staleSources })),
+      plan: reapplyPlan([...r.needsReapply, ...(r.neverApplied ?? [])]),
+    }, null, 2)}\n`);
+    return r.ok ? 0 : 1;
+  }
+
+  console.log(`deepseek-up-T · 升级检测   profile=${r.current.profile}`);
+  console.log(`  安装目录  ${r.current.installDir}`);
+  console.log(`  DSH_HOME  ${r.current.home}`);
+  if (r.hasBaseline) {
+    console.log(`  基线      ${r.baselineFile}`);
+    console.log(`            采集于 ${r.baselineCapturedAt?.replace('T', ' ').slice(0, 19) ?? '?'}`);
+  } else {
+    console.log(`  基线      还没有。先跑 \`node src/cli.mjs baseline write\`，之后才谈得上「变了没有」。`);
+  }
+
+  const c = r.changes;
+  const mark = (changed) => (changed === null ? '(无法判断)' : changed ? '★ 变了' : '未变');
+  console.log('\n── 变更 ──');
+  console.log(`  Harness 版本     ${pad(c.version.from ?? '?', 14)} → ${pad(c.version.to ?? '?', 14)} ${mark(c.version.changed)}`);
+  console.log(`  app.asar 大小    ${pad(human(c.asar.fromBytes), 14)} → ${pad(human(c.asar.toBytes), 14)} ${mark(c.asar.changed)}`);
+  console.log(`  app.asar sha256  ${pad(c.asar.fromHash?.slice(0, 16) ?? '?', 14)} → ${pad(c.asar.toHash?.slice(0, 16) ?? '?', 14)}`);
+  console.log(`  profile bundles  ${pad(c.bundles.from.length, 14)} → ${pad(c.bundles.to.length, 14)} ${mark(Boolean(c.bundles.added.length || c.bundles.removed.length))}`);
+  for (const b of c.bundles.added) console.log(`        + ${b}`);
+  for (const b of c.bundles.removed) console.log(`        - ${b}`);
+  console.log(`  当前是未改造原版？ ${r.pristine === null ? '无法判断' : r.pristine ? '是（app.asar 与原版备份逐字节相同）' : '否（安装包已被改造过）'}`);
+
+  const l3 = r.patches.filter((p) => p.layer === 'L3');
+  const l0 = r.patches.filter((p) => p.layer === 'L0');
+
+  console.log('\n── L3 补丁声明（写在安装包层，升级会被覆盖）──');
+  if (!l3.length) console.log('  （没有 L3 声明）');
+  for (const p of l3) {
+    if (p.error) { console.log(`  ${TAG.error} ${p.id}  ${p.error}`); continue; }
+    const kinds = `${p.replaceCount} 换 / ${p.patchCount} 补 / ${p.insertCount} 增`;
+    const label = STATE_LABEL[p.state] ?? p.state;
+    const tag = p.state === 'applied' ? TAG.ok : p.state === 'unknown' ? TAG.info : TAG.warn;
+    console.log(`  ${tag} ${pad(p.id, 22)} ${pad(p.name, 26)} ${pad(kinds, 20)} ${label}`);
+    if (p.missingInserts?.length) {
+      console.log(`         ${' '.repeat(22)}↳ 归档里缺少：${p.missingInserts.join(', ')}`);
+    }
+    for (const s of p.staleSources ?? []) {
+      console.log(`         ${' '.repeat(22)}⚠ 原版素材过期：${s.path} —— ${s.why}`);
+    }
+  }
+
+  console.log('\n── L0 补丁声明（写在 profile 层，升级幸存）──');
+  if (!l0.length) console.log('  （没有 L0 声明）');
+  for (const p of l0) {
+    const tag = p.state === 'applied' ? TAG.ok : p.state === 'error' ? TAG.error : TAG.warn;
+    console.log(`  ${tag} ${pad(p.id, 22)} ${pad(p.name, 26)} ${L0_LABEL[p.state] ?? p.state}`);
+    if (p.state === 'drift') {
+      console.log('         ↳ 声明与现场不一致，说明有人直接改了 cordis.patch.yml 而没回头改声明：');
+      for (const l of p.declConfig ?? []) console.log(`             声明  ${l}`);
+      for (const l of p.liveConfig ?? []) console.log(`             现场  ${l}`);
+    }
+    if (p.error) console.log(`         ↳ ${p.error}`);
+  }
+  if (l0.length) {
+    console.log('  这些不需要重打：它们随 profile 目录走，Harness 升级不覆盖它们。');
+  }
+
+  const VERDICT = {
+    unchanged: '没有检测到 Harness 升级，也没有检测到安装包被改动。',
+    upgraded: `**Harness 版本变了**（${c.version.from} → ${c.version.to}）：安装包被整体替换，L3 改动需要重打。`,
+    'asar-changed': '版本号没变，但 app.asar 内容变了：要么升级被热修过，要么有人直接改过安装包。',
+    'profile-changed': 'profile 的 bundle 组合变了（不是安装包升级）。',
+    'profile-drift': '安装包没变，但 profile 层的声明与现场对不上了（见上）。',
+    'no-baseline': '还没有基线，无从比较。',
+  };
+  console.log(`\n结论：${VERDICT[r.verdict] ?? r.verdict}`);
+
+  if (r.needsReapply.length) {
+    console.log(`\n已被升级覆盖、需要重打的声明（${r.needsReapply.length}）：${r.needsReapply.join(', ')}`);
+  }
+  if (r.neverApplied?.length) {
+    console.log(`\n尚未落盘（不是被升级覆盖，而是从来没做过）（${r.neverApplied.length}）：${r.neverApplied.join(', ')}`);
+    console.log('  安装包没变，所以这些不是「重打」，是「可以开始做」：');
+    console.log('  node vendor/whale/build.mjs 然后 node vendor/whale/install.mjs --yes（需先完全退出 Harness）。');
+  }
+  if (r.stale.length) {
+    console.log(`\n重打前必须先修素材（${r.stale.length} 条声明）：`);
+    console.log('  `action: patch` 的 source 必须与升级后归档里的那一份逐字节相同，');
+    console.log('  否则构建会被守卫拦下（这是故意的：拿旧素材打补丁会静默丢掉新版本代码）。');
+    console.log('  重新抽取：node src/cli.mjs asar cat <归档内路径> --out <source>');
+  }
+  if (r.needsReapply.length || r.stale.length) {
+    console.log('\n重打步骤：');
+    for (const l of reapplyPlan(r.needsReapply)) console.log(`  ${l}`);
+  }
+  if (r.l0Drift?.length) {
+    console.log(`\nL0 声明需要对齐（${r.l0Drift.length}）：${r.l0Drift.join(', ')}`);
+    console.log('  把 patches/*.yml 的 config 块改成与现场一致，或把现场改回声明。');
+    console.log('  两者不一致时，声明就不再是「权威描述」——这正是要靠升级检测发现的漂移。');
+  }
+  return r.ok ? 0 : 1;
+}
+
 // ───────────────────────────── help ─────────────────────────────
 
 function usage() {
@@ -406,6 +532,7 @@ function usage() {
   snapshot diff <id>      快照与当前现场对比
   snapshot restore <id>   回滚（需 --yes；回滚前自动留一份）
   baseline write          把当前事实固化为 state/baseline.json
+  upgrade                 升级检测：Harness 升级后哪些 L3 改动需要重打、素材是否过期
   precheck                组合预检：隔离探针家里 dump 出权威组合结果（真实 profile 只读）
   asar ls [正则]          列安装包条目（无正则时按顶层目录汇总）
   asar cat <路径>         读出安装包里单个条目的内容（--out 落盘）
@@ -442,6 +569,7 @@ async function main() {
     case 'doctor': return cmdDoctor(parsed);
     case 'snapshot': case 'snap': return cmdSnapshot(parsed);
     case 'baseline': return cmdBaseline(parsed);
+    case 'upgrade': case 'up': return cmdUpgrade(parsed);
     case 'precheck': case 'pre': return cmdPrecheck(parsed);
     case 'asar': return cmdAsar(parsed);
     case 'help': case '--help': case '-h': usage(); return 0;

@@ -17,6 +17,7 @@
 | `node src/cli.mjs asar ls [正则]` | 列安装包条目；无正则时按顶层目录汇总 |
 | `node src/cli.mjs asar cat <路径>` | 读出安装包里单个条目的**原文**（`--out` 落盘） |
 | `node src/cli.mjs asar grep <正则>` | 在安装包内容里检索（只扫文本类条目） |
+| `node src/cli.mjs upgrade` | **升级检测**：安装包/版本/profile 变了没有、哪些 L3 声明需要重打、哪些只是从未落盘、原版素材是否过期、L0 声明有没有漂移 |
 
 代码在 `src/`，**零依赖**——`doctor` 必须在「DSH 装坏了」的时候还能跑。
 
@@ -67,7 +68,8 @@ node vendor/whale/install.mjs --yes    # 需要先完全退出 Harness
 - [x] **归拢第一批** —— `vendor/lib/harness.mjs` + `asar` 三件套 + `whale/install.mjs`，2026-10-06 完成
 - [x] **归拢第二批（构建链）** —— `vendor/whale/build.mjs` + 三个 patcher + `bundle.mjs`，2026-10-06 完成
 - [ ] **归拢第三批** —— 视觉验证 6 个 + T2 探针 8 个
-- [ ] **升级检测**：把 `state/baseline.json` 里的 `app.asar` sha256 与当前比对，版本变了就提示哪些 L3 改动需要重打
+- [x] **升级检测** —— `dsht upgrade`，2026-10-06 完成，见下方记录
+- [ ] 自动重打：`upgrade` 目前只报告 + 给命令，不自动落盘（写安装包必须由人挑时间）
 - [ ] 快照保留策略：自动保留最近 N 份 + 所有带标签的
 - [ ] `doctor` 扩展：接入 profile 重载后的运行时探测
 - [x] 处置 `app.asar.tmp` 残留（115.8MB）—— 确认是坏构建，已删除
@@ -202,4 +204,52 @@ in-box bundle) always comes from the same installation as the running dsh, never
   → `OK：恰好 2 个预期条目不同，其余逐字节一致`，差异恰好是
   `lib/main.js 497450 -> 497395` 与 `lib/welcome/whale-animation.js 23820 -> 23828`
   ⇒ **确定性构建**：同样的声明每次产出同样的包。
+
+### 2026-10-06 · `dsht upgrade`：升级检测
+
+**为什么**
+Harness 升级会整体替换 `resources/app.asar`，L3 改动随之消失。不检测的表现是「昨天还好好的
+动画今天没了」，而人只会去猜。这个命令要一次性回答四件事：升级发生了没有；哪些 L3 声明需要
+重打；重打前还有哪份原版素材必须先重新抽取；L0 声明有没有与现场漂移。
+
+**三条判据（从强到弱）**
+1. `app.asar` 的 sha256 与基线不同 ⇒ 安装包被动过（升级，或被改造过）。
+2. `app.asar` 与其原版备份 sha256 相同 ⇒ 当前是**未改造原版**，任何 L3 补丁都没生效。
+3. 声明里 `action: insert` 的条目在不在归档里 ⇒ 最可靠的存在性信号。
+   （只做 replace/patch 的声明没有这条证据，就报 `unknown`，**不猜**。）
+
+**分成两层报，是这个命令最有用的地方**
+- **L3**（`patches/*.yml`，写在安装包层）：升级会被覆盖。
+- **L0**（`patches/T3-session-search.yml` 这种 `- id:` 片段，写在 profile 层）：
+  升级**不会**被覆盖，所以永远不进「需要重打」名单。对 L0 检查的是另一件事——
+  声明文件与现场 `cordis.patch.yml` 的 `config` 块是否还逐行一致，不一致就是**漂移**
+  （有人直接改了现场而没回头改声明，于是声明不再是权威描述）。
+
+**把「被升级覆盖」与「从未落盘」分开报（否则会白忙一场）**
+最初把两者混在一起，输出 `需要重打的声明（1）：T1-whale-splash` —— 可那补丁**从来没落盘过**。
+这不是重打，是还没做。现在：安装包变了 ⇒ `已被升级覆盖、需要重打的声明`；安装包没变 ⇒
+`尚未落盘（不是被升级覆盖，而是从来没做过）`。**把「没做过的事」说成「做过的被冲掉了」，
+会让人去查一个根本不存在的故障。**
+
+**修掉的两个 bug**
+1. `TypeError: c.asar.toHash?.slice is not a function` —— `paths.mjs` 的 `sha256()` 是 **async**
+   的（`fs.createReadStream` 流式），忘了 `await`，于是 `toHash` 是个 Promise，`changed` 被误报
+   成「★ 变了」。修法：`currentFacts` / `runUpgradeCheck` 改 `async`。
+2. `listAsarPaths(header)` 返回的路径**带前导斜杠**（`/lib/main.js`），而声明、暂存树、
+   `asar-verify` 的问题串全都用 `lib/main.js`。于是 `pathSet.has('lib/main.js')` 恒为 false，
+   「归档里缺少」把 7 个条目全部误报，3 份 patch 素材也全报「归档里找不到对应条目」。
+   修法：`src/asar.mjs` 里 `.map((e) => e.path.replace(/^\//, ''))`，并把这个约定写进注释。
+3. 追加修：`livePatchEntries()` 一开始把 `config` 里嵌套的 `- id:`（`permission` 的三档 preset）
+   也当成顶层条目，11 个被解析成 41 个。修法：只认缩进最浅的那一批。
+
+**怎么验**
+- `node src/cli.mjs upgrade` → exit 0：判定未升级；L3 `T1-whale-splash` 未应用；
+  L0 `session-query-sqlite` 声明与现场一致。
+- `state/cmp/test-upgrade.mjs`（一次性，gitignore）13 项分支断言全通过：applied / drift /
+  absent / error / 素材过期 / pristine⇒absent / 全缺⇒absent / 全在⇒applied。
+- `state/cmp/test-upgrade-branch.mjs`：把 `state/baseline.json` 的版本号临时改成
+  `44.9.9-fake-upgrade` 再跑，输出正确的「已被升级覆盖、需要重打」分支与重打步骤，
+  exit 1，**跑完基线 sha256 原样还原**。
+
+**教训**：诊断命令的措辞就是它的功能。判据算错顶多显示错，措辞错会让人去做错事。
 

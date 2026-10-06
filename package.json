@@ -15,6 +15,10 @@
     "doctor": "node src/cli.mjs doctor",
     "snap": "node src/cli.mjs snapshot create",
     "snaps": "node src/cli.mjs snapshot list",
-    "baseline": "node src/cli.mjs baseline write"
+    "baseline": "node src/cli.mjs baseline write",
+    "upgrade": "node src/cli.mjs upgrade",
+    "test": "node test/upgrade.test.mjs",
+    "build:whale": "node vendor/whale/build.mjs",
+    "install:whale": "node vendor/whale/install.mjs"
   }
 }

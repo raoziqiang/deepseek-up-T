@@ -112,13 +112,24 @@ L3 的落盘与 Harness 是否运行互斥。**当前会话本身就跑在 Harne
 | --- | --- | --- |
 | 直接改 `profiles/node_modules/@deepseek-ai/*` | 升级/重装即丢失，且 diff 里看不出来 | 用 `cordis.patch.yml` 覆盖对应 row |
 | 手改 `cordis.yml` | 协议要求它是空数组，写了也会被组合层覆盖 | 写进 `cordis.patch.yml` |
-| 用通用打包器重建 `app.asar` | 会让一万多个条目字节变化，无法审计也无法回滚 | 用 `../tools/asar-write.mjs` 单条目重写 + `asar-verify.mjs` 校验 |
-| 改完不 diff 就提交 | 误改会静默进入基线 | 提交前必跑 `snapshot diff` |
+| 用通用打包器重建 `app.asar` | 会让一万多个条目字节变化，无法审计也无法回滚 | 用 `vendor/asar/write.mjs` 单条目重写 + `verify.mjs` 校验 |
+| 改完不 diff 就提交 | 误改会静默进入基线 | 提交前必跑 `snapshot diff` 或 `patchdecl` 比对 |
 | Harness 运行中尝试落盘 asar | Windows 会拒绝替换被内存映射的文件 | 连托盘一起退出再落盘 |
+| 只改现场 `cordis.patch.yml` 而不回头改 `patches/*.yml` | 声明不再是权威描述，下次升级重打会退回旧配置 | 改完现场立刻同步声明，用 `dsht upgrade` 查漂移 |
 
 ## 升级 Harness 之后
 
-1. 跑 `doctor`，看 `app.asar` sha256 变化与「仅安装包提供」清单是否变动。
-2. L0/L1 改动通常自动幸存；若有条目因 base 的 row id 改名而失效，`doctor` 的「patch 引用的包可解析」会报出来。
-3. L3 改动必然丢失，需要重打 —— 这是 T5 要自动化的事。
+**先跑 `node src/cli.mjs upgrade`**，它会一次给出四件事：变了没有、哪些 L3 声明需要重打、
+哪些只是从未落盘、哪份原版素材已经过期（以及 L0 声明有没有漂移）。然后：
+
+1. `doctor` —— 看 `app.asar` sha256 变化与「仅安装包提供」清单是否变动。
+2. L0/L1 改动通常自动幸存；若有条目因 base 的 row id 改名而失效，
+   `doctor` 的「patch 引用的包可解析」与 `upgrade` 的 L0 漂移检查都会报出来。
+3. **L3 改动必然丢失**，按 `upgrade` 给出的重打步骤走：
+   `vendor/whale/build.mjs` → 退出 Harness → `install.mjs --yes`。
+   若 `upgrade` 报了「原版素材过期」，先用 `dsht asar cat <归档内路径> --out <source>`
+   从**新版本**重新抽取素材 —— 拿旧素材打补丁会静默丢掉新版代码，构建守卫会拦下它。
 4. 重跑 `baseline write`，把新版本固化成新基线。
+
+> `upgrade` 只**报告**，不自动落盘。写安装包必须由人挑时间（Harness 一退出才能做），
+> 这是刻意的：一个在后台偷偷替换 `app.asar` 的工具比不做更危险。

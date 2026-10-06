@@ -37,10 +37,12 @@ node src/cli.mjs snapshot list                 # 列出快照
 node src/cli.mjs snapshot restore <id>         # 回滚（回滚前会自动再留一份）
 node src/cli.mjs precheck                      # 改完 cordis.patch.yml 后、重启前，预检组合
 node src/cli.mjs baseline write                # 把当前事实固化为基线
+node src/cli.mjs upgrade                       # Harness 升级后：哪些 L3 改动要重打、素材过期没
 ```
 
 `doctor` 退出码：`0` = 无错误（警告不算），`1` = 存在 error 级问题。可直接接进任何 CI / 钩子。
 `precheck` 退出码：`0` = 组合可用，`1` = 有问题，`2` = 预检自身跑不起来。
+`upgrade` 退出码：`0` = 安装包没变且没有漂移，`1` = 有要重打或要修的东西。
 
 ---
 
@@ -55,6 +57,8 @@ deepseek-up-T/
 │   ├── cordis.mjs          cordis.patch.yml 结构扫描
 │   ├── asar.mjs            安装包只读读取（条目定位 / 读取 / 内容检索）
 │   ├── precheck.mjs        权威组合预检（隔离探针家 + Electron-as-Node）
+│   ├── patchdecl.mjs       patches/*.yml 声明解析（src 与 vendor 共用同一份）
+│   ├── upgrade.mjs         升级检测：L3 重打 / L0 漂移 / 素材过期
 │   ├── doctor.mjs          体检
 │   ├── snapshot.mjs        快照 / 回滚
 │   └── cli.mjs             命令入口
@@ -66,14 +70,15 @@ deepseek-up-T/
 │   ├── 05-conventions.md   约定与红线
 │   └── 06-precheck.md      权威组合预检：为什么 CLI 做不到、怎么绕、边界在哪
 ├── patches/                L0/L3 改动的声明式副本（可审计、可重放）
+├── test/                   回归测试（`npm test`）
 ├── tracks/                 五条工作线的落地目录
 │   ├── T1-appearance/      外观与体验
 │   ├── T2-capability/      能力扩展
 │   ├── T3-efficiency/      使用效率
 │   ├── T4-webgui/          Web GUI 扩展
 │   └── T5-engineering/     工程化
-├── vendor/                 预留：从 ../tools 逐步归拢 asar 工具链
-└── state/                  运行时状态（快照载荷与探针家已 gitignore）
+├── vendor/                 会写安装包的工具链（asar 三件套 + whale 构建/落盘 + 声明解析）
+└── state/                  运行时状态（快照载荷、探针家、暂存包均已 gitignore）
 ```
 
 ---
@@ -90,15 +95,23 @@ deepseek-up-T/
 
 ## 状态
 
-当前为 **M1：工具链与第一批落地**。
+当前为 **M2：构建链闭环，升级检测就位**。
 
 - **M0 已完成**：`env` / `doctor` / `snapshot` / `baseline` 四个命令，基线固化，git 初始化。
-- **M1 进行中**：
-  - ✅ `dsht precheck` —— 权威组合预检（`desktop` 被 Electron 独占，CLI 拒绝 dump，所以自建隔离探针家）
-  - ✅ `dsht asar ls|cat|grep` —— 只读读安装包里**真正在跑的那份代码**
-  - ✅ T3 第一件落地：**开启会话全文搜索**（`session-query-sqlite` 改 `path` + `openAt: first-search`），**等重启验收**
+- **M1 已完成**：`dsht precheck`（权威组合预检）、`dsht asar ls|cat|grep`（只读读安装包里**真正在跑的那份代码**）、
+  T3 第一件落地：**开启会话全文搜索**（`session-query-sqlite` 改 `path` + `openAt: first-search`）。
+- **M2 进行中**：
+  - ✅ `vendor/` 工具链：asar 三件套（list/verify/write）+ `whale/build.mjs`（按声明构建暂存包）
+    + `whale/install.mjs`（三道保险落盘）；已归拢 9 个脚本，剩余 14 个。
+  - ✅ `patches/T1-whale-splash.yml`：11 条目（4 改 7 增）声明驱动构建通过，
+    `state/staged/app.asar` 已就绪，**只差退出 Harness 后落盘**。
+  - ✅ `dsht upgrade` —— 升级检测：区分「被升级覆盖」与「从未落盘」，报素材过期与 L0 漂移。
+  - ✅ 旧 `app.asar.tmp` 已确认是**坏构建**并删除（重复 import 会让主进程起不来）。
 
-> ⚠️ 本机 `cordis.patch.yml` 的改动**不会热重载**，必须重启 DSH 才生效。重启后请按
+> ⚠️ `cordis.patch.yml` 的改动**不会热重载**，必须重启 DSH 才生效；`app.asar` 的改动必须
+> **连托盘一起退出 Harness** 才能落盘。重启后请按
 > [tracks/T3-efficiency/README.md](tracks/T3-efficiency/README.md) 的验收项确认搜索真的能用了。
+
+五条工作线的具体改造见 [docs/04-roadmap.md](docs/04-roadmap.md)，预检机制见 [docs/06-precheck.md](docs/06-precheck.md)。
 
 五条工作线的具体改造见 [docs/04-roadmap.md](docs/04-roadmap.md)，预检机制见 [docs/06-precheck.md](docs/06-precheck.md)。

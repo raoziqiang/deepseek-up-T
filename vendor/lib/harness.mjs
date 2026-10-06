@@ -95,88 +95,12 @@ export function assertHarnessStopped(action) {
 }
 
 // ————————————————————————— 补丁声明的机器可读读取 —————————————————————————
+//
+// 实现搬到了 `src/patchdecl.mjs`：升级检测（src/upgrade.mjs）与构建器（vendor/whale/build.mjs）
+// 必须用**同一份**解析，否则「构建时按 A 理解、检测时按 B 理解」会静默错位。
+// 这里只做转发，保持既有 import 路径不变。
 
-/**
- * 从 `patches/*.yml` 声明里读出执行器需要的两个事实：预期差异条目数与条目路径清单。
- *
- * 这里刻意不做通用 YAML 解析，只认 patches/README.md 里那个受控子集：
- *
- *   target:
- *     archive: resources/app.asar
- *     entries:
- *       - path: renderer/welcome.html
- *         action: replace
- *   verify:
- *     expect_diff_entries: 11
- *
- * 读不到就**报错退出**，绝不静默用默认值——声明与执行器脱钩正是这类改造最容易
- * 变坏的地方。
- */
-export function readPatchDecl(file) {
-  const text = readText(file);
-  if (text === null) throw new Error(`读不到补丁声明：${file}`);
-
-  const idMatch = /^id:\s*(\S+)\s*$/m.exec(text);
-  const expectMatch = /^\s*expect_diff_entries:\s*(\d+)\s*$/m.exec(text);
-  if (!expectMatch) throw new Error(`${file} 缺少 verify.expect_diff_entries`);
-
-  const lines = text.split(/\r?\n/);
-  const indentOf = (line) => (line.match(/^\s*/) ?? [''])[0].length;
-  const heads = lines.map((l, i) => (/^\s*entries:\s*$/.test(l) ? i : -1)).filter((i) => i >= 0);
-  if (heads.length !== 1) {
-    throw new Error(`${file} 应当恰好有一个 target.entries 列表，实际找到 ${heads.length} 个`);
-  }
-  const listIndent = indentOf(lines[heads[0]]);
-
-  const items = [];
-  for (let i = heads[0] + 1; i < lines.length; i += 1) {
-    const line = lines[i];
-    if (line.trim() === '' || line.trimStart().startsWith('#')) continue;
-    if (indentOf(line) <= listIndent) break;
-    const start = /^\s*-\s+(\w+):\s*(.+?)\s*$/.exec(line);
-    if (start) {
-      items.push({ [start[1]]: unquote(start[2]) });
-      continue;
-    }
-    const cont = /^\s+(\w+):\s*(.+?)\s*$/.exec(line);
-    if (cont && items.length > 0) items[items.length - 1][cont[1]] = unquote(cont[2]);
-  }
-  const entries = items.map((it) => it.path).filter(Boolean);
-  if (entries.length === 0) throw new Error(`${file} 的 target.entries 为空`);
-  for (const it of items) {
-    if (!it.path) throw new Error(`${file} 的 target.entries 有一条没有 path`);
-  }
-
-  const syntaxHead = lines.map((l, i) => (/^\s*syntax_check:\s*$/.test(l) ? i : -1)).filter((i) => i >= 0)[0];
-  const syntaxCheck = [];
-  if (syntaxHead !== undefined) {
-    const base = indentOf(lines[syntaxHead]);
-    for (let i = syntaxHead + 1; i < lines.length; i += 1) {
-      const line = lines[i];
-      if (line.trim() === '' || line.trimStart().startsWith('#')) continue;
-      if (indentOf(line) <= base) break;
-      const m = /^\s*-\s+(.+?)\s*$/.exec(line);
-      if (m) syntaxCheck.push(unquote(m[1]));
-    }
-  }
-
-  return {
-    id: idMatch ? idMatch[1] : path.basename(file, '.yml'),
-    file,
-    expect: Number(expectMatch[1]),
-    entries,
-    items,
-    syntaxCheck,
-  };
-}
-
-/** 取一个 YAML 标量：去掉行内注释、去掉包裹引号、统一路径分隔符。 */
-function unquote(value) {
-  // 行内注释：`source: a/b.js   # 说明` —— 声明里到处是这种中文说明，
-  // 不剥掉就会把注释当成值的一部分（第一次跑构建时正是这么炸的）。
-  const withoutComment = value.replace(/\s+#.*$/, '').trim();
-  return withoutComment.replace(/^['"]|['"]$/g, '').replace(/\\/g, '/');
-}
+export { readPatchDecl, unquote } from '../../src/patchdecl.mjs';
 
 // —————————————————————————— 归档工具的位置与调用 ——————————————————————————
 

@@ -98,9 +98,14 @@ export function findAsarNode(header, entryPath) {
   return node;
 }
 
-/** 归档内全部叶子路径（正斜杠、以 '|' 无前导，用于 ls/grep 过滤）。 */
+/**
+ * 归档内全部叶子路径：正斜杠、**无前导斜杠**、与 `patches/*.yml` 里写的键同形。
+ *
+ * 去掉前导 `/` 是刻意的：声明、暂存树、`asar-verify` 的问题串全都用 `lib/main.js`
+ * 这种写法，只有这里若保留 `/lib/main.js` 就会让「按声明查归档里有没有」全部落空。
+ */
 export function listAsarPaths(header) {
-  return [...walkAsar(header)].map((e) => e.path);
+  return [...walkAsar(header)].map((e) => e.path.replace(/^\//, ''));
 }
 
 /** 文件数据区的起点：16 字节头 + JSON 头（等价于 8 + pickleSize）。 */
