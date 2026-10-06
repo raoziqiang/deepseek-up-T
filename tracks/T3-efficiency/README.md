@@ -9,7 +9,7 @@
 | 1 | **会话全文搜索** | `session-query-sqlite.openAt` | ✅ 已开（`path=$DSH_HOME/session-search.sqlite` + `openAt=first-search`），待重启验收 |
 | 2 | 上下文落盘阈值 | `spill-policy.maxInlineTokens` | `12500` |
 | 3 | 工具结果预压缩 | `tool-result-pruner` | `thresholdChars: 8192` / `headChars: 4096` / `tailChars: 1024` |
-| 4 | 会话标题质量 | `session-title-llm` | `targetWords: 5` / `targetCjkCharacters: 10` / `maxInputBytes: 4096` / `maxOutputTokens: 64` |
+| 4 | 会话标题质量 | `session-title-llm` | ✅ 已调：`targetWords: 8` / `targetCjkCharacters: 16` / `maxOutputTokens: 96`（原 5 / 10 / 64），待重启验收 |
 | 5 | 交互习惯 | `ui-conversation.busyEnter` | 已设 `steer` |
 | 6 | 快捷键 / 斜杠命令 | `dsh-client-shortcuts`、`dsh-commands` | ✅ 已梳理：7 个斜杠命令；快捷键**可重绑**（`Ctrl+/` 开速查），见记录 |
 | 7 | 记忆策略 | `@furongjun1999/dsh-memory`、`billion-context` | 已装，写入/召回策略未梳理 |
@@ -38,6 +38,7 @@
 - [x] 用 `acp_cache` 量一次当前缓存基线，作为后续调参的对照 —— 2026-10-06 完成，见下方记录
 - [ ] 梳理 `spill-policy` / `tool-result-pruner` 阈值对长会话成本的影响
 - [x] 梳理斜杠命令与快捷键 —— 2026-10-06 完成，见下方记录
+- [x] **让会话标题更长、更能区分** —— 2026-10-06 完成，见下方记录
 - [ ] 梳理记忆插件的写入与召回
 
 ## 验收
@@ -198,5 +199,43 @@
 结论是**记录 + 让用户按需在 `Ctrl+/` 面板里改**。真正值得留意的是 `Ctrl+B` 同时挂在左右两个侧栏上，
 但它们的默认档位不同（本机左栏 `Ctrl+B`、右栏 `Ctrl+B`/`Ctrl+Alt+B`），若真冲突，速查面板会标出「键位冲突」。
 第 6 项到此结案。
+
+### 2026-10-06 · 第 4 项：让会话标题更长、更能区分
+
+**问题**：base 把标题压得很短 —— `targetWords: 5` / `targetCjkCharacters: 10`。
+10 个汉字的标题只能表达到「这是一次关于 X 的会话」，同一主题的多次会话会长得一模一样，
+于是「找上周那次」只能靠点开看。这是**纯读数上的损失**，没有换来任何安全或成本收益。
+
+**改了什么**（现场 `cordis.patch.yml` 第 13 条；声明副本 `patches/T3-session-title.yml`）：
+
+| 字段 | 原 | 新 | 为什么 |
+| --- | --- | --- | --- |
+| `targetWords` | 5 | **8** | 非 CJK 语言下的目标词数 |
+| `targetCjkCharacters` | 10 | **16** | 16 个汉字 ≈ 48 字节，仍在 `session-title` 的 `maxTitleBytes: 80` 之内 |
+| `maxOutputTokens` | 64 | **96** | 多出的字数要留出生成空间；标题只有一两行，这点 token 可以忽略 |
+| `maxInputBytes` | 4096 | 4096 | **不动**：那是送进去的首条提示词上限，与「标题多长」无关，改了只会让成本变 |
+| `timeoutMs` | 60000 | 60000 | **不动**：已经足够宽 |
+
+**为什么五个字段全部写出来**：patch 是**按 id 整体替换该行的 config**（不是深合并），
+而该条目的五个字段在 schema 里全部 `.required()` —— 漏写任何一个那条条目都会校验失败。
+（对比 `tool-ralph`：那里只写 `disabled: false` 是安全的，因为**没给** `config`，于是完整继承 base 的。）
+另据 `state/probe-config-schema.txt`，这几个字段只要求 `"minimum": 1`，**没有上界**，所以放大是合法的。
+
+**怎么验的**：`precheck --patch` 先离线跑一遍，差异**恰好 3 行**（`targetWords` / `targetCjkCharacters` /
+`maxOutputTokens`），`maxInputBytes` 与 `timeoutMs` 显示未变 —— 这正是「整体替换写全了五个字段」的证据。
+落盘后再 `precheck`（现场）→ 退出码 0、问题 0、`与上一次预检相比：组合结果完全一致` ⇒ 现场与预检过的候选**逐字节等价**。
+`doctor` → 0 错误 2 警告、patch 条目 **13**；`baseline write` 重新固化（13 bundle / 13 patch 条）。
+
+**怎么撤**：删掉现场 `cordis.patch.yml` 里这一条（或改回 5 / 10 / 64），重启 DSH。改动前快照
+`20261006-082050-T3-会话标题-改动前`。
+
+**顺带修掉一个会反复过期的量具**：`test/upgrade.test.mjs` 里原本硬编码「顶层条目恰好 N 个」，
+每落盘一条都要改一次 —— 而它真正要守的性质是「解析器只认顶格 `- id:`，没被 config 里嵌套的骗到」。
+现在改成用独立算法对照：现场顶格 `- id:` 行数必须等于解析出的条目数，并另外断言「现场确实存在嵌套的 `- id:`」
+（实测 13 顶格 / **30** 嵌套 —— 那 30 条是 `llm-pi-ai` 三条路由里的模型 id），否则上一条断言等于没测东西。
+**这个量具从此不会再过期。**
+
+**生效条件**：组合层文件没有热重载，需**重启 DSH**。验收方式是看新会话的侧边栏标题是否比过去更有信息量
+（尤其同主题的连续会话能不能一眼分开）。
 
 

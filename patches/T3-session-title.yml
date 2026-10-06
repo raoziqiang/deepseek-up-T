@@ -1,0 +1,36 @@
+# ── deepseek-up-T · T3 使用效率 ── 让会话标题更长、更能区分
+#
+# 为什么：base 层把标题长度压得很短 ——
+#     targetWords: 5      targetCjkCharacters: 10
+# 10 个汉字的标题在侧边栏里几乎只能表达到「这是一次关于 X 的会话」，
+# 同一主题的多次会话会长得一模一样，于是「找上周那次」只能靠点开看。
+# 这是纯读数上的损失，没有任何安全或成本收益作交换。
+#
+# 改成什么（只动两个数，其余原样保留）：
+#   targetWords: 5 → 8
+#   targetCjkCharacters: 10 → 16      （16 个汉字 ≈ 48 字节，仍在 session-title 的
+#                                      maxTitleBytes: 80 之内，不需要连它一起改）
+#   maxOutputTokens: 64 → 96          （多出的字数要留出生成空间；标题本来就只有
+#                                      一两行，这点 token 成本可以忽略）
+#
+# 不动什么、以及为什么：
+#   maxInputBytes: 4096  —— 送进去的是首条提示词，截断它是为了不让标题生成读进
+#     整个上下文；与「标题多长」无关，改了只会让成本变。
+#   timeoutMs: 60000     —— 已经足够宽。
+#   session-title 的 fallback* / maxTitleBytes —— 那是「LLM 没产出时」的兜底，
+#     与正常路径无关；16 汉字的 LLM 标题不会碰到 80 字节的存储上限。
+#
+# 依据：该条目的配置 schema 对这些字段只要求 `"minimum": 1`，没有上界，所以放大是
+# 合法的；五个字段全部 `.required()`，而 patch 是**按 id 整体替换该行的 config**
+# （不是深合并），因此必须把五个字段一起写全，漏掉任何一个都会让那条条目校验失败。
+#
+# 怎么撤：把现场 cordis.patch.yml 里这一条删掉（或改回 5 / 10 / 64），重启 DSH 即恢复。
+
+- id: session-title-llm
+  name: '@deepseek-ai/dsh-session-title-first-prompt-llm'
+  config:
+    targetWords: 8
+    targetCjkCharacters: 16
+    maxInputBytes: 4096
+    maxOutputTokens: 96
+    timeoutMs: 60000

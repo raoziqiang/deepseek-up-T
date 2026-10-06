@@ -74,7 +74,7 @@
 **候选动作**
 1. **开会话全文搜索**（P4）。默认 `openAt: never` 时侧边栏只能按标题和工作区名匹配；打开后可以对历史会话内容检索。这是投入产出比最高的一项。✅ 已落地，待重启验收。
 2. **缓存与压缩参数**：`spill-policy.maxInlineTokens`、`tool-result-pruner.thresholdChars`、`compaction-basic` —— 直接决定长会话的成本。⏳ 缓存侧已结案（命中率 98.3%、压缩净 +92.35M，见 `tracks/T3-efficiency/README.md`）：**不要在缓存上优化，杠杆在「有多少内容进入上下文」**。
-3. **会话标题质量**：`session-title-llm` 的 `targetWords: 5` / `targetCjkCharacters: 10` / `maxInputBytes: 4096`。
+3. **会话标题质量**：`session-title-llm` 原来只有 `targetWords: 5` / `targetCjkCharacters: 10` —— 10 个汉字的标题无法区分同主题的多次会话，是纯读数损失。✅ 2026-10-06 已调为 `8` / `16` / `maxOutputTokens: 96`（`maxInputBytes` 与 `timeoutMs` 刻意不动），现场 `cordis.patch.yml` 第 13 条，声明副本 `patches/T3-session-title.yml`；**待重启验收**。
 4. **交互习惯**：`ui-conversation.busyEnter: steer` 已设。✅ 斜杠命令与快捷键已梳理（7 个斜杠命令；快捷键由 `@deepseek-ai/dsh-client-shortcuts` 提供、**按设备可重绑**，`Ctrl+/` 开速查面板，桌面端存 Electron `userData/keybindings.json`）。**不加配置**：默认值已覆盖主要动作，改默认反而破坏既有肌肉记忆。见 `tracks/T3-efficiency/README.md`。
 5. **记忆**：`@furongjun1999/dsh-memory` 与 `billion-context` 已在，梳理它们的写入/召回策略。
 

@@ -81,11 +81,14 @@ notes: |
 | | 写在哪 | 例子 | 升级后 |
 | --- | --- | --- | --- |
 | **L3** | `resources/app.asar` | `T1-whale-splash.yml` | **被覆盖，需要重打** |
-| **L0** | `profiles/<p>/cordis.patch.yml` | `T3-session-search.yml` | **幸存，无需重打** |
+| **L0** | `profiles/<p>/cordis.patch.yml` | `T3-session-search.yml`、`T3-session-title.yml`、`T2-enable-ralph.yml` | **幸存，无需重打** |
 
 - L3 声明用 `target.archive` + `entries:`，由 `vendor/whale/build.mjs` 与 `install.mjs` 执行。
 - L0 声明就是一**片段**（`- id:` / `name:` / `config:`），它记录的是「往 profile patch 里加了什么」，
   由人手写进 `cordis.patch.yml`。`dsht upgrade` 会拿它与现场逐行比对，不一致就是**漂移**。
+- L0 的两个写法都被实测验证过：**给 `config`** 就是整体替换（`T3-session-title.yml` 因此把五个字段写全），
+  **不给 `config`** 就完整继承 base 那一行（`T2-enable-ralph.yml` 只写 `disabled: false`，证据在
+  `state/probe-dump.txt:458`）。
 - 判据：能在 L0 表达的，**不要**写成 L3。L0 改完重启就生效，且升级不会丢。
 
 > 状态：**已闭环**。`T1-whale-splash.yml` 的构建链与校验链路都已实现并实跑通过。
