@@ -1,0 +1,20 @@
+{
+  "name": "deepseek-up-t",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "deepseek-up-T —— DSH 改造控制台：环境基线、快照、体检、回滚、复现。",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "dsht": "./src/cli.mjs"
+  },
+  "scripts": {
+    "env": "node src/cli.mjs env",
+    "doctor": "node src/cli.mjs doctor",
+    "snap": "node src/cli.mjs snapshot create",
+    "snaps": "node src/cli.mjs snapshot list",
+    "baseline": "node src/cli.mjs baseline write"
+  }
+}

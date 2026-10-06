@@ -1,0 +1,180 @@
+{
+  "capturedAt": "2026-10-06T13:52:52.071Z",
+  "project": "deepseek-up-T",
+  "home": "C:\\Users\\Z1848\\.dsh",
+  "profile": "desktop",
+  "profileDir": "C:\\Users\\Z1848\\.dsh\\profiles\\desktop",
+  "installDir": "D:\\Program Files (x86)\\deepseekharness",
+  "dshVersion": "44.0.0",
+  "nodeVersion": "v24.21.0",
+  "bundles": [
+    "@deepseek-ai/dsh-base",
+    "@deepseek-ai/dsh-web-app",
+    "dshmarket",
+    "dsh-context",
+    "billion-context",
+    "@furongjun1999/dsh-memory",
+    "dsh-better-sidebar",
+    "dsh-whale-widget",
+    "@deepseek-ai/dsh-experimental-agent-team-profile",
+    "@deepseek-ai/dsh-experimental-auto-review",
+    "@deepseek-ai/dsh-experimental-schedule-bundle",
+    "@deepseek-ai/dsh-experimental-voice-input-bundle"
+  ],
+  "facts": {
+    "asarBytes": 121348951,
+    "asarHash": "983ca71114e6dfd353fc79af5a1f9481a250ee64c2a3c757673029b811b23bc2",
+    "asarFiles": 12967,
+    "asarPackages": 529,
+    "asarDshPackages": 503,
+    "patchEntries": 10
+  },
+  "summary": {
+    "error": 0,
+    "warn": 3,
+    "info": 6,
+    "total": 20
+  },
+  "checks": [
+    {
+      "group": "环境",
+      "id": "DSH_HOME",
+      "level": "error",
+      "ok": true,
+      "detail": "C:\\Users\\Z1848\\.dsh"
+    },
+    {
+      "group": "环境",
+      "id": "profile 目录",
+      "level": "error",
+      "ok": true,
+      "detail": "C:\\Users\\Z1848\\.dsh\\profiles\\desktop"
+    },
+    {
+      "group": "环境",
+      "id": "profile 版本文件",
+      "level": "info",
+      "ok": true,
+      "detail": "Harness 44.0.0"
+    },
+    {
+      "group": "环境",
+      "id": "内置 Node",
+      "level": "error",
+      "ok": true,
+      "detail": "v24.21.0  C:\\Users\\Z1848\\.dsh\\dsh-runtimes\\dsh-primary-runtime\\dependencies\\node\\bin\\node.exe"
+    },
+    {
+      "group": "组合层",
+      "id": "cordis.yml 保持空数组",
+      "level": "error",
+      "ok": true,
+      "detail": "顶层为 []，符合约定"
+    },
+    {
+      "group": "组合层",
+      "id": "cordis.patch.yml",
+      "level": "info",
+      "ok": true,
+      "detail": "5.0KB  C:\\Users\\Z1848\\.dsh\\profiles\\desktop\\cordis.patch.yml"
+    },
+    {
+      "group": "组合层",
+      "id": "patch 顶层为数组",
+      "level": "error",
+      "ok": true,
+      "detail": "是（10 个条目）"
+    },
+    {
+      "group": "组合层",
+      "id": "无 Tab 缩进",
+      "level": "error",
+      "ok": true,
+      "detail": "未发现 Tab"
+    },
+    {
+      "group": "组合层",
+      "id": "条目 id 无重复",
+      "level": "error",
+      "ok": true,
+      "detail": "无重复 id"
+    },
+    {
+      "group": "组合层",
+      "id": "!!js 表达式",
+      "level": "info",
+      "ok": true,
+      "detail": "1 处"
+    },
+    {
+      "group": "组合层",
+      "id": "每个条目都有 id",
+      "level": "warn",
+      "ok": true,
+      "detail": "全部有条目 id"
+    },
+    {
+      "group": "安装包",
+      "id": "app.asar 头可解析",
+      "level": "error",
+      "ok": true,
+      "detail": "头 3.2MB，条目 12967 文件 / 2609 目录"
+    },
+    {
+      "group": "安装包",
+      "id": "app.asar 大小",
+      "level": "info",
+      "ok": true,
+      "detail": "115.7MB（121348951 字节）  sha256:983ca71114e6dfd3"
+    },
+    {
+      "group": "安装包",
+      "id": "原版备份可比对",
+      "level": "info",
+      "ok": true,
+      "detail": "内容与当前 app.asar 完全一致"
+    },
+    {
+      "group": "安装包",
+      "id": "无残留 app.asar.tmp",
+      "level": "warn",
+      "ok": false,
+      "detail": "残留 115.8MB（D:\\Program Files (x86)\\deepseekharness\\resources\\app.asar.tmp）"
+    },
+    {
+      "group": "安装包",
+      "id": "Harness 进程",
+      "level": "info",
+      "ok": true,
+      "detail": "正在运行（含托盘）"
+    },
+    {
+      "group": "解析",
+      "id": "bundles 全部可解析",
+      "level": "error",
+      "ok": true,
+      "detail": "12 个 bundle 全部可解析"
+    },
+    {
+      "group": "解析",
+      "id": "仅安装包提供的 bundle",
+      "level": "warn",
+      "ok": false,
+      "detail": "@deepseek-ai/dsh-experimental-agent-team-profile, @deepseek-ai/dsh-experimental-auto-review, @deepseek-ai/dsh-experimental-schedule-bundle, @deepseek-ai/dsh-experimental-voice-input-bundle"
+    },
+    {
+      "group": "解析",
+      "id": "patch 引用的包可解析",
+      "level": "error",
+      "ok": true,
+      "detail": "10 个包全部可解析"
+    },
+    {
+      "group": "解析",
+      "id": "patch 中仅安装包提供的包",
+      "level": "warn",
+      "ok": false,
+      "detail": "@deepseek-ai/dsh-client-ui-chat, @deepseek-ai/dsh-client-ui-settings-account, @deepseek-ai/dsh-agent-preset-registry"
+    }
+  ]
+}
