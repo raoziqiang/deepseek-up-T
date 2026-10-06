@@ -137,5 +137,42 @@ check(
   nhJson.patches.find((p) => p.layer === 'L3')?.state,
 );
 
+// ── `--stage`：把「重打」这一步真的做掉，但不落盘 ──
+//
+// 要一起钉住两件事：
+//   ① 它真的构建了，而且构建是按声明核对的（不是「跑完了没报错」就算数）；
+//   ② `--json` 下它没有把构建自己的 stdout 混进 JSON 文档里 —— 继承 stdio 就会，
+//      而且这种坏法（stdout 里多出一段人话）很难一眼看出来。
+// 另有一条同样重要：构建**绝不能**碰安装目录，用 mtime 当证人。
+console.log('\n── --stage：半自动重打 ──');
+const stagedFile = path.join(PROJECT_ROOT, 'state', 'staged', 'app.asar');
+const stageBefore = fs.existsSync(stagedFile) ? fs.statSync(stagedFile) : null;
+const asarMtimeBefore = fs.statSync(P.asar).mtimeMs;
+
+const stageJson = spawnSync(process.execPath, ['src/cli.mjs', 'upgrade', '--stage', '--json', '--no-hash'], {
+  cwd: PROJECT_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
+});
+let stageParsed = null;
+try { stageParsed = JSON.parse(stageJson.stdout); } catch { /* stageParsed 保持 null */ }
+check('--stage --json 的 stdout 仍是合法 JSON（构建输出被捕获而不是继承）', stageParsed !== null);
+check(
+  '--stage 报告真的构建了',
+  stageParsed?.staged?.attempted === true && stageParsed?.staged?.ok === true,
+  JSON.stringify(stageParsed?.staged ?? null),
+);
+check('--stage 构建的正是缺的那条声明', (stageParsed?.staged?.ids ?? []).includes('T1-whale-splash'));
+check('--stage 把构建自己的输出也带回来了（不是只报个成功）', String(stageParsed?.staged?.stdout ?? '').includes('条目按声明改动'));
+check('--stage 之后暂存包存在且变新了', fs.existsSync(stagedFile) && (!stageBefore || fs.statSync(stagedFile).mtimeMs >= stageBefore.mtimeMs));
+check('--stage 只写 state/，安装目录的 mtime 一动没动', fs.statSync(P.asar).mtimeMs === asarMtimeBefore);
+check('--stage 退出码 0（构建成功时不该拖累退出码）', stageJson.status === 0, `实际 ${stageJson.status}`);
+
+const stageHuman = spawnSync(process.execPath, ['src/cli.mjs', 'upgrade', '--stage', '--no-hash'], {
+  cwd: PROJECT_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
+});
+const stageHumanOut = stageHuman.stdout ?? '';
+check('人类可读输出里说明已构建到暂存包', stageHumanOut.includes('已构建到 state/staged/app.asar'));
+check('人类可读输出里仍把「落盘」留给用户，并给出两条命令', stageHumanOut.includes('完全退出 Harness') && stageHumanOut.includes('baseline write'));
+check('人类可读输出里说明基线必须在落盘之后写', stageHumanOut.includes('基线必须在落盘之后写'));
+
 console.log(bad ? `\n${bad} 个失败` : `\n全部通过`);
 process.exit(bad ? 1 : 0);

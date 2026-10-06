@@ -12,9 +12,10 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 import {
-  resolvePaths, exists, statOrNull, readText, readJson, human, sha256,
+  resolvePaths, PROJECT_ROOT, exists, statOrNull, readText, readJson, human, sha256,
 } from './paths.mjs';
 import { runDoctor } from './doctor.mjs';
 import {
@@ -467,16 +468,70 @@ const L0_LABEL = {
   error: '声明解析失败',
 };
 
+// ── upgrade --stage：把「重打」这一步真的做掉（但不落盘）──
+//
+// 铁律是「写安装包必须由人挑时间」，构建不在这条铁律里：vendor/whale/build.mjs
+// 只读安装目录、只写 state/staged/，所以 Harness 开着也能跑。把构建自动化之后，
+// 升级后剩下的人工动作就只有「退出 → install --yes → 回来写基线」。
+//
+// 两个刻意的决定：
+//   ① 素材过期时**直接不构建**。构建器自己也会拦（那是最后一道），但跑到一半才
+//      失败不如现在就说清楚：`action: patch` 的 source 必须与升级后归档逐字节相同。
+//   ② --json 下必须把子进程输出**捕获**而不是继承 —— 否则构建自己的 stdout 会插进
+//      我们正在写的 JSON 文档里，把机器可读输出弄坏（这类坏法很难看出来）。
+function runStageBuild(r, ids, quiet) {
+  if (!ids.length) {
+    return { attempted: false, ok: true, ids: [], reason: '没有需要重打的声明' };
+  }
+  if (r.stale.length) {
+    return {
+      attempted: false,
+      ok: false,
+      ids,
+      reason: `${r.stale.length} 条声明的原始素材已过期（action: patch 的 source 与升级后的归档不是逐字节相同）—— 先重新抽取素材，再谈重打`,
+    };
+  }
+  const build = path.join(PROJECT_ROOT, 'vendor', 'whale', 'build.mjs');
+  const t0 = Date.now();
+  const run = spawnSync(process.execPath, [build], {
+    cwd: PROJECT_ROOT,
+    env: process.env,
+    stdio: quiet ? ['ignore', 'pipe', 'pipe'] : 'inherit',
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  const ms = Date.now() - t0;
+  const tail = (b) => String(b ?? '').slice(-4096);
+  if (run.error) {
+    return { attempted: true, ok: false, ids, ms, reason: `构建没能启动：${run.error.message}` };
+  }
+  if (run.status !== 0) {
+    return {
+      attempted: true, ok: false, ids, ms, code: run.status,
+      reason: `构建失败（退出码 ${run.status}）`,
+      stdout: quiet ? tail(run.stdout) : undefined,
+      stderr: quiet ? tail(run.stderr) : undefined,
+    };
+  }
+  return {
+    attempted: true, ok: true, ids, ms, code: 0,
+    stdout: quiet ? tail(run.stdout) : undefined,
+  };
+}
+
 async function cmdUpgrade({ flags }) {
   const r = await runUpgradeCheck({ hash: !flags.has('--no-hash') });
+  const stageIds = [...r.needsReapply, ...(r.neverApplied ?? [])];
+  const stage = flags.has('--stage') ? runStageBuild(r, stageIds, flags.has('--json')) : null;
 
   if (flags.has('--json')) {
     const { patches, ...rest } = r;
     process.stdout.write(`${JSON.stringify({
       ...rest,
       patches: patches.map((p) => ({ ...p, staleSources: p.staleSources })),
-      plan: reapplyPlan([...r.needsReapply, ...(r.neverApplied ?? [])]),
+      plan: reapplyPlan(stageIds),
+      staged: stage,
     }, null, 2)}\n`);
+    if (stage && !stage.ok) return 1;
     return r.ok ? 0 : 1;
   }
 
@@ -565,11 +620,30 @@ async function cmdUpgrade({ flags }) {
     console.log('\n重打步骤：');
     for (const l of reapplyPlan(r.needsReapply)) console.log(`  ${l}`);
   }
+  if (stage) {
+    console.log('\n── 重打（构建）──');
+    if (!stage.attempted) {
+      console.log(stage.ok
+        ? `  ${TAG.info} 不需要构建：${stage.reason}。`
+        : `  ${TAG.warn} 先不构建：${stage.reason}`);
+    } else if (stage.ok) {
+      console.log(`  ${TAG.ok} 已构建到 state/staged/app.asar（${(stage.ms / 1000).toFixed(1)}s），差异集合按声明核对通过`);
+      console.log(`  涉及声明：${stage.ids.join(', ')}`);
+      console.log('  构建只写了 state/staged/，没碰安装目录 —— 落盘仍然由你挑时间：');
+      console.log('    1) 完全退出 Harness    node vendor/whale/install.mjs --yes');
+      console.log('    2) 回到命令行          node src/cli.mjs baseline write');
+      console.log('       （基线必须在落盘之后写：提前写会把「还没装上的状态」固化成基线）');
+    } else {
+      console.log(`  ${TAG.error} ${stage.reason}`);
+      if (stage.stderr) console.log(`         ${stage.stderr.trim().split('\n').slice(-1)[0]}`);
+    }
+  }
   if (r.l0Drift?.length) {
     console.log(`\nL0 声明需要对齐（${r.l0Drift.length}）：${r.l0Drift.join(', ')}`);
     console.log('  把 patches/*.yml 的 config 块改成与现场一致，或把现场改回声明。');
     console.log('  两者不一致时，声明就不再是「权威描述」——这正是要靠升级检测发现的漂移。');
   }
+  if (stage && !stage.ok) return 1;
   return r.ok ? 0 : 1;
 }
 
@@ -590,6 +664,7 @@ function usage() {
   snapshot prune          快照保留策略（默认只预演；--keep N / --keep-match GLOB / --yes）
   baseline write          把当前事实固化为 state/baseline.json
   upgrade                 升级检测：Harness 升级后哪些 L3 改动需要重打、素材是否过期
+                          （--stage 顺带把构建做掉；落盘仍由人挑时间）
   precheck                组合预检：隔离探针家里 dump 出权威组合结果（真实 profile 只读）
   asar ls [正则]          列安装包条目（无正则时按顶层目录汇总）
   asar cat <路径>         读出安装包里单个条目的内容（--out 落盘）
@@ -598,6 +673,8 @@ function usage() {
 选项
   --json                  机器可读输出
   --no-hash               doctor / upgrade：跳过 121MB 安装包的 sha256（更快；upgrade 会退回按大小比较）
+  --stage                 upgrade：把需要重打的声明真的构建到 state/staged/app.asar
+                          （只写 state/，不碰安装目录，Harness 开着也能跑）
   --limit N               asar ls / grep 的结果上限
   --out 文件              asar cat 落盘目标
   --file <asar>           覆盖要读的归档路径

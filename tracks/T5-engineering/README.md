@@ -20,6 +20,7 @@
 | `node src/cli.mjs asar cat <路径>` | 读出安装包里单个条目的**原文**（`--out` 落盘） |
 | `node src/cli.mjs asar grep <正则>` | 在安装包内容里检索（只扫文本类条目） |
 | `node src/cli.mjs upgrade` | **升级检测**：安装包/版本/profile 变了没有、哪些 L3 声明需要重打、哪些只是从未落盘、原版素材是否过期、L0 声明有没有漂移 |
+| `node src/cli.mjs upgrade --stage` | 检测 + **半自动重打**：把 `action: patch/insert` 真的构建到 `state/staged/app.asar`（只写 `state/`，Harness 开着也能跑）；素材过期时**先不构建**；落盘仍由人挑时间 |
 | `node test/run.mjs [关键字]` | 发现式跑 `test/*.test.mjs` 全部（也可只跑匹配的那几套）；找不到任何测试文件时**退出码 2**，不装成成功 |
 
 代码在 `src/`，**零依赖**——`doctor` 必须在「DSH 装坏了」的时候还能跑。
@@ -67,7 +68,7 @@ node vendor/whale/install.mjs --yes    # 需要先完全退出 Harness
 - [x] **归拢第三批** —— 视觉验证 6 个（`vendor/visual/`）+ T2 探针 8 个（`vendor/route/`），2026-10-06 完成，见下方记录
 - [x] **升级检测** —— `dsht upgrade`，2026-10-06 完成，见下方记录
 - [x] **候选清单预检** —— `precheck --profile-json <文件>`，2026-10-06 完成，见下方记录
-- [ ] 自动重打：`upgrade` 目前只报告 + 给命令，不自动落盘（写安装包必须由人挑时间）
+- [x] 半自动重打：`upgrade --stage` —— 构建自动化（只写 `state/staged/`），落盘仍由人挑时间，2026-10-06 完成，见下方记录
 - [x] 快照保留策略：`snapshot prune`（默认预演）+ 三层拒绝守卫，2026-10-06 完成，见下方记录
 - [x] 测试总入口 `test/run.mjs`（发现式），2026-10-06 完成，见下方记录
 - [x] `doctor` 扩展：运行时心跳探测（回答「重启到底有没有把我的插件装进去」），2026-10-06 完成，见下方记录
@@ -455,6 +456,46 @@ L3 状态在这种情况下仍能靠 `insert` 条目的存在性判定，所以�
 **教训**：一个「加载成功了吗」这种只能靠肉眼回答的问题，通常不是因为没有答案，而是因为**没有把答案写下来**。
 把每次加载写成一行带 pid 与时间的文件，问题就从「看界面」变成「读一行字」，
 而且**顺带解释了为什么它是静默的** —— 因为静默正是它当初的设计目标。
+
+### 2026-10-06 · `upgrade --stage`：半自动重打
+
+**起因**：待办里那条「自动重打」写的是「不自动落盘（写安装包必须由人挑时间）」。但把这句话读细一点会发现
+它只禁掉了**落盘**，没有禁掉**构建**：`vendor/whale/build.mjs` 读安装目录是只读的、产物只写
+`state/staged/app.asar`，Harness 开着也能跑。而这一步恰恰是最容易漏、漏了后果最坏的一步 ——
+漏掉之后 `upgrade` 会把「从未落盘」说成「被升级覆盖」，你会去追一个不存在的回归。
+
+**做成了什么**
+- `src/cli.mjs`：`import { spawnSync } from 'node:child_process'` + `PROJECT_ROOT`；
+  新增 `runStageBuild(r, ids, quiet)`，`cmdUpgrade` 支持 `--stage`。人类模式下打一段
+  「已构建到 `state/staged/app.asar`（1.2s），差异集合按声明核对通过」并把**落盘与写基线两条命令**
+  连带理由一起打出来；`--json` 下把结果放进 `staged: { attempted, ok, ids, ms, code, stdout, reason }`。
+- 三种结果各自诚实：没有要重打的声明 → `attempted: false, ok: true, reason: 没有需要重打的声明`；
+  素材过期 → `attempted: false, ok: false` + 一句「先重新抽取素材，再谈重打」，**一个字节都不构建**；
+  构建失败 → `attempted: true, ok: false`，退出码 1（成功时退出码仍是 `upgrade` 自己的判断）。
+
+**两个刻意的决定**
+1. **素材过期时直接不构建**。构建器自己也会拦（source 与归档必须逐字节相同），但那是最后一道；
+   与其跑到一半失败，不如先说清楚哪份素材已经不是新版本那一段了。
+2. **`--json` 下必须捕获子进程输出，不能 `stdio: 'inherit'`**。构建自己的 stdout 会直接插进
+   我们正在写的 JSON 文档里 —— 这种坏法（stdout 里多出一段人话）极难一眼看出，而所有下游消费者
+   都会在 `JSON.parse` 上炸。成功时把输出尾部放进 `staged.stdout`，机器可读文档保持纯净。
+
+**怎么验的**
+- 真跑：`upgrade --stage --no-hash` → 退出码 0，`state/staged/app.asar` 121,415,560 B（1.2s），
+  与手工构建逐字节同一份（大小未变、mtime 前进）；
+- `upgrade --stage --json --no-hash` → **`JSON.parse` 成功**，`staged.stdout` 里能看到构建自己的
+  「11 个条目按声明改动，其余 11466 个条目逐字节一致」；
+- 篡改素材（往 `D:\Z1848\harness-ds\.probe\main.js` 尾部加一个字节）→ `stale: 1`、
+  `staged.attempted = false`、退出码 **1**、**暂存包 mtime 没动**；还原后 sha256 与篡改前一致
+  （素材在仓库外，只能自己备份还原）；
+- 安装目录 mtime 在整轮构建前后**一动没动**（用 mtime 当「没碰安装目录」的证人，比再哈希 121MB 便宜）；
+- `test/upgrade.test.mjs` 加 **10 条断言**（26 → 36）：JSON 仍是合法 JSON、真的构建了、构建的正是缺的那条声明、
+  构建输出被带回来了、暂存包变新、安装目录 mtime 未动、退出码 0、人类输出含「已构建到…」「完全退出 Harness」
+  「baseline write」「基线必须在落盘之后写」。**整套测试 4/4 通过、3.2s**（构建两次约 2s，可接受）。
+
+**教训**：把一条「不能自动化」的待办**拆开看它到底禁了什么** —— 常常禁的只是最后那一步（落盘），
+前一步（构建/校验）完全可以自动化，而前一步恰恰是最容易漏的。另一种说法：
+「必须先退出应用」这个约束属于**写安装目录**，不属于**算出一份安装目录的替代品**。
 
 
 

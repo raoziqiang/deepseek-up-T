@@ -39,11 +39,14 @@ node src/cli.mjs snapshot prune                # 快照保留策略（默认只�
 node src/cli.mjs precheck                      # 改完 cordis.patch.yml 后、重启前，预检组合
 node src/cli.mjs baseline write                # 把当前事实固化为基线
 node src/cli.mjs upgrade                       # Harness 升级后：哪些 L3 改动要重打、素材过期没
+node src/cli.mjs upgrade --stage               # 顺手把重打构建做掉（只写 state/staged/，不落盘）
 ```
 
 `doctor` 退出码：`0` = 无错误（警告不算），`1` = 存在 error 级问题。可直接接进任何 CI / 钩子。
 `precheck` 退出码：`0` = 组合可用，`1` = 有问题，`2` = 预检自身跑不起来。
 `upgrade` 退出码：`0` = 安装包没变且没有漂移，`1` = 有要重打或要修的东西。
+`upgrade --stage` 只把**构建**自动化：它读安装目录、写 `state/staged/app.asar`，Harness 开着也能跑；
+落盘（`vendor/whale/install.mjs --yes`）仍然必须由人在 Harness 完全退出后挑时间做。
 
 ---
 
@@ -112,6 +115,8 @@ deepseek-up-T/
   - ✅ 旧 `app.asar.tmp` 已确认是**坏构建**并删除（重复 import 会让主进程起不来）。
 - **M3 已完成**：
   - ✅ `dsht upgrade` —— 升级检测：区分「被升级覆盖」与「从未落盘」，报素材过期与 L0 漂移。
+  - ✅ `dsht upgrade --stage` —— **半自动重打**：把构建做掉（只写 `state/staged/`，Harness 开着也能跑），
+    落盘仍留给人挑时间；素材过期时**先不构建**，因为拿旧素材打补丁会静默丢掉新版本代码。
   - ✅ `precheck --profile-json <文件>` —— 用**候选** profile 清单预检，改动前就能知道会不会炸。
   - ✅ T3 缓存经济学结案：命中率 98.3%、17 次折叠净 **+92.35M tok** ⇒ 缓存层没有问题可修。
   - 🚧 T4 脚手架 `plugins/dsh-up-t` 已落盘（离线单测 14 条断言 + 候选预检 + doctor 全过），
