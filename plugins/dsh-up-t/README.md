@@ -200,6 +200,31 @@ window.__ModuleLoader__.load({
 一个条目就是设置里的一整页；`SlotCore` 构造时预置 `'root'`。注册**未声明**的 slot、
 重复声明子项、缺 `select` 的 chain 都会在**加载时抛错** —— 也就是说挂错座位不会静默，会直接报错。
 
+## ★ 状态页的判定：拿不到的事实不许说成反面结论
+
+设置页上有一行「判定」，它要回答的是「安装包被动过没有」。这条结论**很容易说错**，错法还很毒：
+拿不到证据时给出一个反面结论，人就会照着一个不存在的故障去查。
+
+真实的踩坑记录：运行中的旧版实例报 `install.asarBytes: 0`，而磁盘上那份 `app.asar` 是
+**121,348,951 B** —— 于是三态判定 `asarBytes === backupBytes` 得出 `false`，页面显示
+**「已被改造（大小不同）」**。那是一句纯粹的冤枉：0 不是「大小不同」，0 只是「这份事实没拿到」。
+
+现在的规则（两条，都被断言钉住）：
+
+1. **0 字节与读不到一律算「拿不到」**，不是反面证据。`sameSizeAsBackup` 只在两侧都拿到正数时才是
+   `true`/`false`，否则是 `null`；`judgedBy` 同步从 `size` 降级成 `unavailable`，界面于是说
+   **「无法判断（宿主这次没拿到可比的大小）」**，而不会声称「依据：大小比较」。
+2. **候选路径被否掉时，理由一起带出去**。`findInstall()` 会依次试
+   `path.dirname(process.resourcesPath)` 与 `path.dirname(process.execPath)` 两个根，
+   `不存在` / `stat 失败` / `0 字节` 三种候选都不作数，继续试下一个；全都不作数时
+   `status.json` 里的 `installRejected` 会带上 `{ dir, asar, why }`，页面显示成
+   **「读不到安装目录信息 —— 试过并否掉的路径：…（0 字节）」**。
+   （两个根在 Electron 下常常是同一个，所以候选要去重，否则同一条会被否掉两次。）
+
+同一节里顺手修掉了心跳那一行的第三种误报：**能拿到 `status.json` 却读不到心跳字段**，
+说明的是「这一版宿主还没有心跳功能」，不是「插件没被加载」—— 后者只有连 status.json 都拿不到时
+才成立。旧文案把前者也说成「插件没被加载」，而当时的运行实例正是这个状态。
+
 ## 安装（本地开发形态）
 
 ```powershell
@@ -234,7 +259,7 @@ node src\cli.mjs precheck --profile-json state\candidate\package.json
 
 ```powershell
 cd D:\Z1848\harness-ds\deepseek-up-T
-node test\plugin.test.mjs   # 44 条断言：心跳（apply + ready 两枚、trail、route 清单）、注入行、四条路由、操作守卫与真 spawn、specs 的 writes 标记、握手通道（GET 只读 / 缺头 403 / 两条通道分开记 / bundle 恰好握一次）、客户端 bundle 形态与按钮、设置页的心跳行与握手状态、清理
+node test\plugin.test.mjs   # 46 条断言：心跳（apply + ready 两枚、trail、route 清单）、注入行、四条路由、操作守卫与真 spawn、specs 的 writes 标记、握手通道（GET 只读 / 缺头 403 / 两条通道分开记 / bundle 恰好握一次）、客户端 bundle 形态与按钮、设置页的心跳行与握手状态、判定的三态与「拿不到 ≠ 不同」（含 `findInstall` 跳过 0 字节候选的回归测试）、清理
 node src\cli.mjs doctor     # bundles 全部可解析
 node src\cli.mjs precheck   # 组合可用
 ```

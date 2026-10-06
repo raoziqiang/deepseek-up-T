@@ -14,7 +14,8 @@
 
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { readFileSync, existsSync, rmSync } from 'node:fs';
+import { readFileSync, existsSync, rmSync, mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 
@@ -843,6 +844,86 @@ check('设置页：把心跳走到哪一步也显示出来（「加载了」≠�
   // 否则人只会看到一片空白，然后去猜是不是自己没重启。
   assert.match(render({ stage: 'apply', pid: 1 }), /只走到 apply/);
   assert.match(render(null), /还没有心跳/);
+});
+
+check('设置页：证据不足时不许说「已被改造」，也不许假装「依据：大小比较」', () => {
+  const render = (data) => {
+    const client = makeClient();
+    client.component();
+    client.scripted.setStates([{ phase: 'ready', data, error: null }]);
+    return JSON.stringify(client.component());
+  };
+  const base = { ok: true, plugin: { name: 'dsh-up-t', version: '0.1.0' }, time: 't', heartbeat: null };
+  // 1) 拿不到大小（宿主这次没读到，或原版备份不在）：必须落「无法判断」，
+  //    而且必须说清是哪种拿不到 —— 这正是运行中实例里 asarBytes: 0 踩出来的坑。
+  const unavailable = render({
+    ...base,
+    install: { dir: 'D:\\apps\\harness', version: '44.0.0', asarBytes: null, backupBytes: 121348951, sameSizeAsBackup: null, judgedBy: 'unavailable' },
+  });
+  assert.match(unavailable, /无法判断/);
+  assert.ok(!unavailable.includes('已被改造'), '证据不足时不许下「已被改造」这种结论');
+  assert.ok(!unavailable.includes('大小比较'), 'judgedBy 已降级，不许再说依据是大小比较');
+  // 2) 三条事实都在（同一个大小、不同的大小、拿不到）：
+  assert.match(render({ ...base, install: { dir: 'd', version: 'v', asarBytes: 10, backupBytes: 10, sameSizeAsBackup: true, judgedBy: 'size' } }), /未改造/);
+  assert.match(render({ ...base, install: { dir: 'd', version: 'v', asarBytes: 11, backupBytes: 10, sameSizeAsBackup: false, judgedBy: 'size' } }), /已被改造/);
+  // 3) 读不到安装目录时，「为什么」必须一起显示；否则人只能猜。
+  const none = render({ ...base, install: null, installRejected: [{ dir: 'D:\\apps\\harness', asar: 'D:\\apps\\harness\\resources\\app.asar', why: '0 字节' }] });
+  assert.match(none, /读不到安装目录信息/);
+  assert.match(none, /0 字节/);
+  // 4) 能拿到 status.json 却读不到心跳字段 ⇒ 这是「这一版宿主还没写心跳」，不是「插件没被加载」。
+  assert.match(render(base), /没有心跳字段/);
+  assert.match(render({ ...base, ok: false }), /还没有心跳/, '拿不到 status.json 时才是「插件没被加载」');
+});
+
+check('findInstall：0 字节的 app.asar 是「拿不到」，不是「大小不同」——必须被否掉并记下理由', () => {
+  // 来源：运行中的旧版实例报过 install.asarBytes: 0，而磁盘上那份是 121MB，
+  // 于是设置页得出「已被改造」。0 字节不是证据，它只是坏掉的一条线索。
+  const root = mkdtempSync(path.join(tmpdir(), 'dsht-install-'));
+  try {
+    const real = path.join(root, 'real');
+    const decoy = path.join(root, 'decoy');
+    mkdirSync(path.join(decoy, 'resources'), { recursive: true });
+    mkdirSync(path.join(real, 'resources'), { recursive: true });
+    writeFileSync(path.join(decoy, 'resources', 'app.asar'), '');
+    writeFileSync(path.join(real, 'resources', 'app.asar'), 'x'.repeat(64));
+    writeFileSync(path.join(real, 'version'), '44.0.0\n');
+
+    const resourcesPath = path.join(decoy, 'resources');
+    const execPath = path.join(real, 'DeepSeek Harness.exe');
+    // 换成别的路径跑一次，跑完**恢复成原样**（原本没有这个属性就删掉）——
+    // 测试不许给进程留下状态，否则后面的断言会在一个被改过的世界里通过。
+    const withPaths = (r, e, fn) => {
+      const prevR = Object.getOwnPropertyDescriptor(process, 'resourcesPath');
+      const prevE = Object.getOwnPropertyDescriptor(process, 'execPath');
+      Object.defineProperty(process, 'resourcesPath', { value: r, configurable: true });
+      Object.defineProperty(process, 'execPath', { value: e, configurable: true });
+      try { return fn(); } finally {
+        if (prevR) Object.defineProperty(process, 'resourcesPath', prevR); else delete process.resourcesPath;
+        if (prevE) Object.defineProperty(process, 'execPath', prevE); else delete process.execPath;
+      }
+    };
+
+    // 第一条线索（resourcesPath）指向 0 字节的那份：必须跳过它，落到真正有内容的那份。
+    const inst = withPaths(resourcesPath, execPath, () => mod.findInstall());
+    assert.equal(inst.installDir, real, '必须跳过 0 字节的候选，去找真正的那一份');
+    assert.equal(inst.asarBytes, 64, '带回来的必须是真实大小，而不是 0');
+    assert.equal(inst.rejected.length, 1, '被否掉的候选要留下来当解释');
+    assert.equal(inst.rejected[0].dir, decoy);
+    assert.equal(inst.rejected[0].why, '0 字节');
+    assert.ok(inst.rejected[0].asar.endsWith(path.join('resources', 'app.asar')));
+
+    // 两条线索指向同一个根时不许在 rejected 里出现两遍（Electron 下这两条线索常常相同）。
+    writeFileSync(path.join(decoy, 'resources', 'app.asar'), 'y'.repeat(8));
+    const same = withPaths(
+      path.join(decoy, 'resources'),
+      path.join(decoy, 'DeepSeek Harness.exe'),
+      () => mod.findInstall(),
+    );
+    assert.equal(same.rejected.length, 0, '候选根要去重，否则同一个根会被否掉两次');
+    assert.equal(same.asarBytes, 8);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 check('package.json 声明了 dsh.client.platform=web 且导出 ./client', () => {

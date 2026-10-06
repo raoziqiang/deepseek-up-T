@@ -48,23 +48,41 @@
         return n + " B";
       }
 
+      // 被否掉的候选路径也是事实：读不到安装目录时，它就是「为什么」。
+      function rejectedText(list) {
+        if (!list || !list.length) return null;
+        return list.map(function (r) { return r.asar + "（" + r.why + "）"; }).join("；");
+      }
+
       function verdictText(data) {
         var install = data && data.install;
-        if (!install) return "读不到安装目录信息";
+        if (!install) {
+          var why = rejectedText(data && data.installRejected);
+          return why ? "读不到安装目录信息 —— 试过并否掉的路径：" + why : "读不到安装目录信息";
+        }
+        // 判据不足时先说「无法判断」，再说「为什么」：把拿不到的事实说成「不同」是冤枉。
+        if (install.judgedBy !== "size" || install.sameSizeAsBackup === null) {
+          return "无法判断（" + (install.judgedBy !== "size"
+            ? "宿主这次没拿到可比的大小（app.asar 或原版备份读不到）"
+            : "缺少原版备份") + "）";
+        }
         if (install.sameSizeAsBackup === true) {
           return "未改造（app.asar 与原版备份大小相同）";
         }
-        if (install.sameSizeAsBackup === false) {
-          return "已被改造（app.asar 与原版备份大小不同）";
-        }
-        return "无法判断（缺少原版备份）";
+        return "已被改造（app.asar 与原版备份大小不同）";
       }
 
       // 「加载了」和「能用」是两件事，这个页面恰恰是「什么都没出现」时人会来看的地方，
       // 所以把心跳走到哪一步也显示出来：只走到 apply() 就说明 webServer 依赖没就绪。
       function heartbeatText(data) {
         var beat = data && data.heartbeat;
-        if (!beat) return "还没有心跳（插件没被加载，或还没重启 Harness）";
+        if (!beat) {
+          // 有心跳字段是后来才加的功能。能拿到 status.json 就说明宿主半侧**被加载了**，
+          // 此时说「插件没被加载」是错的 —— 正确的是「这一版宿主还没写心跳」。
+          return data && data.ok
+            ? "宿主半侧没有心跳字段（心跳是后来才加的功能）—— 重启 Harness 之后才会出现"
+            : "还没有心跳（插件没被加载，或还没重启 Harness）";
+        }
         // 握手是渲染层自己报的「我真的跑起来了」。宿主就绪而这一格空着，说明问题在
         // 投递（注入行/bundle 加载）而不是宿主 —— 这正是「界面里什么都没有」的两种近邻原因。
         var seen = (data && data.clientSeen) || beat.client || null;
@@ -378,20 +396,19 @@
         } else {
           var data = snapshot.data;
           var install = data.install || {};
-          children.push(
-            h(
-              "div",
-              { key: "facts", style: { margin: "0 0 12px" } },
-              row("插件", (data.plugin && data.plugin.name) + " " + (data.plugin && data.plugin.version)),
-              row("Harness 版本", install.version),
-              row("安装目录", install.dir),
-              row("app.asar", fmtBytes(install.asarBytes)),
-              row("原版备份", fmtBytes(install.backupBytes)),
-              row("判定", verdictText(data)),
-              row("心跳", heartbeatText(data)),
-              row("读取时间", data.time),
-            ),
-          );
+          var facts = [
+            row("插件", (data.plugin && data.plugin.name) + " " + (data.plugin && data.plugin.version)),
+            row("Harness 版本", install.version),
+            row("安装目录", install.dir),
+            row("app.asar", fmtBytes(install.asarBytes)),
+            row("原版备份", fmtBytes(install.backupBytes)),
+            row("判定", verdictText(data)),
+            row("心跳", heartbeatText(data)),
+            row("读取时间", data.time),
+          ];
+          var rejected = rejectedText(data.installRejected);
+          if (rejected) facts.push(row("被否掉的路径", rejected));
+          children.push(h("div", { key: "facts", style: { margin: "0 0 12px" } }, facts));
         }
 
         children.push(

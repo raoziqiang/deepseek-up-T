@@ -134,6 +134,9 @@ export function writeHeartbeat(stage = 'apply', extra = {}) {
 }
 
 export const heartbeatPath = HEARTBEAT_FILE;
+// 导出给测试：这条「0 字节不作数」的规则是用运行中的实例换来的（旧版报过 asarBytes: 0
+// ⇒ 设置页说「已被改造」），必须有回归测试盯着，不能只靠注释。
+export { findInstall };
 
 /**
  * 渲染层的握手记录。
@@ -197,27 +200,49 @@ const INJECT_ROW_TEXT =
   + `var s=document.createElement("script");s.src="${CLIENT_PATH}";`
   + 's.onerror=function(){};d.appendChild(s)}catch(e){}})()';
 
-/** 找 Harness 安装目录。宿主进程可能是 Electron 也可能不是，两条线索都试。 */
+/**
+ * 找 Harness 安装目录。宿主进程可能是 Electron 也可能不是，两条线索都试。
+ *
+ * **0 字节的候选不算数。** 一份取不到的尺寸不是「大小不同」的证据 —— 旧版本在这里报过
+ * `asarBytes: 0`，于是设置页把它读成「已被改造（大小不同）」，一句纯粹的冤枉。所以：
+ * 找不到 / stat 失败 / 0 字节，三种都当作「这条线索不作数」，继续试下一条；全都不作数时
+ * 把被否掉的候选原样带回去，让界面能把「哪条路径被否掉、为什么」当成事实显示出来，
+ * 而不是只留一句「读不到安装目录信息」让人猜。
+ */
 function findInstall() {
   const roots = [];
   if (process.resourcesPath) roots.push(path.dirname(process.resourcesPath));
   if (process.execPath) roots.push(path.dirname(process.execPath));
+  const rejected = [];
+  const tried = new Set();
   for (const root of roots) {
+    // 两条线索在 Electron 里常常指向同一个根，不去重会在 rejected 里出现两遍
+    if (tried.has(root)) continue;
+    tried.add(root);
     const asar = path.join(root, 'resources', 'app.asar');
-    if (fs.existsSync(asar)) {
-      return {
-        installDir: root,
-        asar,
-        backup: `${asar}.whale-backup`,
-        versionFile: path.join(root, 'version'),
-      };
-    }
+    if (!fs.existsSync(asar)) { rejected.push({ dir: root, asar, why: '不存在' }); continue; }
+    const size = sizeOrNull(asar);
+    if (size === null) { rejected.push({ dir: root, asar, why: 'stat 失败' }); continue; }
+    if (size === 0) { rejected.push({ dir: root, asar, why: '0 字节' }); continue; }
+    return {
+      installDir: root,
+      asar,
+      asarBytes: size,
+      backup: `${asar}.whale-backup`,
+      versionFile: path.join(root, 'version'),
+      rejected,
+    };
   }
-  return null;
+  return { installDir: null, asar: null, asarBytes: null, backup: null, versionFile: null, rejected };
 }
 
 function sizeOrNull(file) {
   try { return fs.statSync(file).size; } catch { return null; }
+}
+
+/** 只有正数才是证据。0 与 null 一样表示「这份事实拿不到」。 */
+function evidenceOrNull(n) {
+  return typeof n === 'number' && n > 0 ? n : null;
 }
 
 /**
@@ -241,11 +266,13 @@ function collectStatus() {
     // 两条投递通道分开记，见 noteClientSeen 的注释。
     clientSeen,
   };
+  // 被否掉的候选路径永远带出去：它是「为什么读不到」的答案，不是内部细节。
+  out.installRejected = (inst && inst.rejected) || [];
   try { out.heartbeat = JSON.parse(fs.readFileSync(HEARTBEAT_FILE, 'utf8')); } catch { /* 还没落过 */ }
-  if (!inst) return out;
+  if (!inst || !inst.asar) return out;
 
-  const asarBytes = sizeOrNull(inst.asar);
-  const backupBytes = sizeOrNull(inst.backup);
+  const asarBytes = evidenceOrNull(inst.asarBytes);
+  const backupBytes = evidenceOrNull(sizeOrNull(inst.backup));
   let version = null;
   try { version = fs.readFileSync(inst.versionFile, 'utf8').trim(); } catch { /* 没有就算了 */ }
 
@@ -254,9 +281,10 @@ function collectStatus() {
     version,
     asarBytes,
     backupBytes,
-    // 三态：true 同大小 / false 大小不同 / null 没有原版备份可比
+    // 三态：true 同大小 / false 大小不同 / null 拿不到可比的事实
     sameSizeAsBackup: (asarBytes !== null && backupBytes !== null) ? asarBytes === backupBytes : null,
-    judgedBy: 'size',
+    // 判据也要跟着降级：证据不足时不许写成 'size'，否则界面会说「依据：大小比较」。
+    judgedBy: (asarBytes !== null && backupBytes !== null) ? 'size' : 'unavailable',
   };
   return out;
 }
