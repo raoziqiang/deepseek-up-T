@@ -39,7 +39,7 @@
 | `vendor/whale/patch-session-controller.mjs` | 视觉模型自动路由的锚点替换 | 只写暂存树 |
 | `vendor/whale/bundle.mjs` | 动画模块 → CSP 允许的经典脚本 | 只写暂存树 |
 | `vendor/whale/install.mjs` | 落盘（三道保险）/ `--rollback` | **写安装包** |
-| `vendor/visual/*.mjs` | 6 个：抓帧 / 描轮廓 / 帧数值分析 / 帧配色 / 形状检查 / 静态服务 | 只读 |
+| `vendor/visual/*.mjs` | 6 个：抓帧 / 描轮廓 / 帧数值分析 / 帧配色 / 形状检查 / 静态服务（`capture-frames.mjs` 需要真 Chrome + CDP；**行为**验证优先用 `test/splash.test.mjs` 的假浏览器） | 只读 |
 | `vendor/route/*.mjs` | 8 个：Provider 与网关探针（`store-go-credential.mjs` 会写凭据库） | 只读为主 |
 
 **构建与落盘是两步**，刻意分开（这就是「写安装包必须由人挑时间」的落地方式）：
@@ -73,6 +73,15 @@ node vendor/whale/install.mjs --yes    # 需要先完全退出 Harness
 - [x] 测试总入口 `test/run.mjs`（发现式），2026-10-06 完成，见下方记录
 - [x] `doctor` 扩展：运行时心跳探测（回答「重启到底有没有把我的插件装进去」），2026-10-06 完成，见下方记录
 - [x] 处置 `app.asar.tmp` 残留（115.8MB）—— 确认是坏构建，已删除
+- [ ] **把 T1 的作者素材搬进仓库**（`D:\Z1848\harness-ds\.probe\build\**`，约 43 KB：`whale-animation.js` 的
+      ESM 源、`renderer/*`、`lib/preload-charm.cjs`、三个 `action: patch` 的原版素材）。
+      现在 `patches/T1-whale-splash.yml` 的 `source:` 指向**仓库之外**的路径 ⇒ 一份全新 clone 拿得到声明
+      却拿不到素材（`vendor/whale/build.mjs` 会响亮报错，不是静默失败，但构建不可只靠仓库复现）。
+      搬完必须重建暂存包并 `node vendor/asar/verify.mjs "<app.asar.whale-backup>" state\staged\app.asar --expect 11`
+      确认产物一字未变 —— 素材换位置不该改变产物；若变了，说明复制的素材版本与当初构建时不一致。
+- [ ] `vendor/visual/` 那 6 个脚本没有 README，且其中 `capture-frames.mjs` 需要真 Chrome + CDP。
+      行为级验证已改由 `test/splash.test.mjs` 的假浏览器承担（更便宜、更精确）；
+      这 6 个脚本留给「画得像不像」这类只有像素能回答的问题，值得在 README 里写清各自的适用范围与依赖。
 
 ## 验收
 
@@ -744,6 +753,38 @@ catch 吞掉，而那一刻**事件监听与定时刷新都还没注册** ——
    而后者恰恰是所有静默失败的高发区。便宜的不变量检查应该排在昂贵的像素检查前面。
 3. **给一条规则立反例，等于给这条规则本身立了防线。** 只用「当前文件是对的」做断言，
    规则写错时测试照样全绿 —— 把真实坏版本存进 `test/fixtures/` 才有意义。
+
+### 2026-10-06 · 让「从来没人执行过」的代码被执行一次：`test/splash.test.mjs`
+
+**起因**：`test/assets.test.mjs` 关掉了「页面装配」这一层，但还剩一层更靠下的静默区 ——
+启动窗口那两段脚本（`lib/welcome/whale-animation.js` 23,828 B、`renderer/whale-splash.js` 7,311 B）
+此前只有 `node --check`（语法）与逐字节核对（是否按声明改动）。
+**这两样加起来仍然不回答「跑起来对不对」**：canvas 画不出来时不抛异常，只是什么都没有。
+
+**做了什么**：`test/splash.test.mjs`（**19 条断言**，发现式总入口自动收，套数 8 → **9**）——
+用 `node:vm` 造一个假浏览器（假 `document`/元素/2D 上下文/`matchMedia`/`localStorage`/`requestAnimationFrame`），
+把**归档里**的两段脚本按 `welcome.html` 里同样的顺序真跑一遍，然后推进整条时间线做断言。
+脚本来源是 `state/staged/app.asar`（要落盘的那一份），取不到就 `SKIP` 正常退出 ——
+不谎报失败，也不假装验过。
+
+**为什么用假 DOM 而不是真浏览器**：`vendor/visual/capture-frames.mjs` 那条路要真 Chrome + CDP，
+慢、脆、且只能看像素；而这一层要问的是**行为**（有没有排帧、有没有钳制边界、有没有重画、
+有没有把 NaN 喂给画布），假 DOM 更便宜也更精确。**「画得像不像」和「跑起来对不对」是两层，
+后者更靠下、也更容易静默失败。**
+
+**测试里最值钱的一条**：2D 上下文的**每一个数值参数都必须是有限数**。
+`createLinearGradient(NaN, …)` / `bezierCurveTo(NaN, …)` 都不报错，只是什么都不画 ——
+**NaN 是 canvas 最典型的静默失败**，而全时间线 + 全重画都从这一条过。
+
+**教训**：
+1. **「语法正确 + 字节吻合」与「跑起来是对的」之间隔着一整类失败**，它们的共同特征是**只在真正执行时才出现**。
+   第一屏、没有兜底的界面代码，都值得备一个假浏览器。
+2. **期望值要量出来，不要推算出来。** 本轮三条假失败全出在这上面：写死 `616px` 而实际钳制值是 `615.76px`
+   （挂件高度 `size * 1.08 = 84.24`）；键盘用例复用了上一条把挂件拖到下边界的状态，
+   `ArrowDown + Shift` 被钳住不动；断言「创建后已重画 ≥1 次」，而首画是直接排进 raf 的、不走 `el.__paint` 包装。
+3. **假宿主必须模拟真实的联动关系。** 第一版假 DOM 的 `className` 与 `classList` 互相不联动，
+   于是「挂件到底建出来没有」被假 DOM 说了谎；`querySelector` 能不能找到 `className` 设的类，
+   和真 DOM 一样是测试的前提，不是细节。
 
 
 

@@ -30,6 +30,8 @@
 - [x] 把主题/气泡等偏好从 asar 侧迁到 `dsh-whale-widget` 的 L1 设置 —— **侦察后结论是「本来就不该这么做」**：`dsh-whale-widget` 0.3.18 的 `package.json` 只声明 `dsh.bundle.patch`，**没有任何 `Config` schema**，它的偏好本来就不在 asar 里，而是落在 `$DSH_HOME\.dshw-size.json` / `.dshw-turn.json` / `.dshw-usage.json`（设备本地，随用随写）。四层改造面（L0–L3）管的是**组合与代码**，不管这层用户数据。⇒ 这条待办的前提是错的，撤销；真要改默认值应改 widget 自己的默认值（L1 包内），而不是「迁到 L1 设置」（见下方记录）。
 - [x] 桌面挂件窗口的**开关**（设置 →「通用」里那一行）—— 2026-10-06 完成：出货 Harness 有整套挂件机制，却没有任何代码调用 `window.dshWhaleCharm`，于是 `whale-charm.json` 永远是 `enabled: false`、挂件永不出现且不报错。开关改由 L1 插件 `dsh-up-t` 提供（`settings.general.item`），**不碰安装包、硬刷新即生效**。见下方记录与 [plugins/dsh-up-t/README.md](../../plugins/dsh-up-t/README.md)。
 - [ ] 桌面挂件菜单的「Replay animation」目前是空操作（`"replay"` 发给主窗口，而启动画面在欢迎窗口）—— 要修必须改安装包（打通主进程作用域），单独一步。
+- [ ] 让 T1 的构建**只靠仓库就能复现**：作者素材（`.probe/build/**`，约 43 KB：`whale-animation.js` 的 ESM 源、`renderer/*`、`preload-charm.cjs`、三个 `action: patch` 的原版素材）现在在**仓库之外**，而声明里的 `source:` 指向那些仓库外路径。`vendor/whale/build.mjs` 缺素材时会响亮报错（不是静默），但一份全新 clone 仍然构建不出来。搬进仓库后必须重建暂存包并用 `node vendor/asar/verify.mjs "<app.asar.whale-backup>" state\staged\app.asar --expect 11` 确认产物一字不差（素材换位置不该改变产物）。
+- [ ] **仓库外那个 `.probe/build/whale-animation.js` 是唯一一份「bundle 之前」的源** —— 归档里只有 bundle 后的 23828 B 那一份。上面这条待办不落，它就只活在这台机器上。
 
 ## 验收
 
@@ -72,6 +74,9 @@
   `renderer/pendant.css`、`renderer/pendant.js`、`lib/preload-charm.cjs`、`lib/welcome/whale-animation.js`）。
 - **引用完整性**已单独核对（`node test\assets.test.mjs`）：这两页 HTML 引用的每个本地资源都真的在归档里，
   且替换页没有丢掉原版加载过的东西（见下方「登录窗口页面」那条记录 —— 这正是它抓出来的）。
+- 启动窗口那两段脚本**已经在假浏览器里真跑过一遍**（`node test\splash.test.mjs`，19 条断言）：
+  从归档里取脚本、按页面同样的顺序执行、推进整条时间线、模拟拖动/键盘/主题翻转/存储被禁，
+  并检查**每一个画布参数都是有限数** —— 这一条专治「不报错但白屏」。
 - 脚本的守卫路径**已实测**：Harness 运行中运行它 → 打印 `[STOP]`、`exit 2`、**不动任何文件**。
 - `install.mjs` 自己在落盘后还会**按声明逐项比对差异集合**，多一条少一条都判失败并提示回滚；
   原版备份 `app.asar.whale-backup` 在落盘前已存在且与当前 `app.asar` 逐字节一致。
@@ -81,12 +86,47 @@
 | 看什么 | 期望 |
 | --- | --- |
 | 启动时的画面 | 画卷 → 鲸鱼 → 桌面挂件动画 |
+| 桌面上的小挂件 | 能拖（松手后位置记住）、方向键能挪、右键有菜单；关掉设置里的开关即消失 |
 | `node src/cli.mjs doctor` | 「原版备份可比对」那行**不再是「完全一致」** |
 | `node src/cli.mjs upgrade` | `T1-whale-splash` 从「未应用」变成 `applied`，退出码 0 |
 
 **出问题怎么退**：`node vendor\whale\install.mjs --rollback`（从备份恢复，恢复后自带逐字节核对）。
 
 **记录**
+
+### 2026-10-06 · 启动界面那两段脚本，第一次真的被执行了一遍
+
+- **起因**：T1 那 7 个插入文件里，`lib/welcome/whale-animation.js`（23,828 B）与 `renderer/whale-splash.js`（7,311 B）
+  是唯一两段**运行期代码**（其余是 HTML/CSS 与 preload）。此前对它们只有两种证据：`node --check`（语法）
+  与逐字节核对（是否按声明改动）。这两样都答不了「跑起来会不会白屏」。
+- **为什么这条链是静默的**：启动窗口是第一屏，**没有别的界面兜底**；画布的失败形态是「什么都不画」
+  而不是报错；打包若漏掉一个全局导出（`window.drawWhale`），挂件的 `paint()` 会抛 TypeError ——
+  而那段代码在 window 里，没有人接这个异常。
+- **做了什么**：新增 `test/splash.test.mjs`（**19 条**断言）。用 `node:vm` 造一个假浏览器
+  （假 document/元素/2D 上下文/`matchMedia`/`localStorage`/`requestAnimationFrame`），把归档里的两段脚本
+  按 `welcome.html` 里**同样的顺序**（先 `whale-animation.js` 再 `whale-splash.js`）真跑一遍。
+  脚本来源是 `state/staged/app.asar`（要落盘的那一份），取不到就打印 `SKIP` 正常退出。
+- **其中最有价值的一条**：2D 上下文的**每一个数值参数都必须是有限数**。`createLinearGradient(NaN, …)`、
+  `bezierCurveTo(NaN, …)` 都不报错，只是什么都不画 —— **NaN 是 canvas 最典型的静默失败**。
+  这一条覆盖全部帧与全部重画。
+- **覆盖**：导出四件套（`WhaleSplash`/`whalePath`/`drawWhale`/`__WHALE_PIXEL__`）；两份都是经典脚本
+  （启动窗口 CSP 只允许 `'self'`，ESM 会直接加载失败）；加载即起帧循环；第一帧画背景；全时间线画完；
+  到点交出挂件（`.whale-pendant` + `is-done` + `transitionend` + 900ms 兜底移除）；`pagehide` 后停帧；
+  拖动（边界钳制 + 抓指针 + 写 `localStorage`）；键盘（8px / Shift 24px）；位置记忆与越界钳制；
+  主题翻转重画；深浅两套皮肤调色板确实不同；`whalePath` 11 段；减动效直接出挂件；
+  没有 `#whale-stage` 时安静退出；存储被禁（企业策略/隐私模式）仍能拖动并记住位置。
+- **当场抓到的真问题**（都在**测试自己**里，产品代码这轮没被改动）：假 DOM 一开始 `className` 与 `classList`
+  不联动 —— 脚本用 `el.className = 'whale-pendant'` 建挂件、用 `querySelector('.whale-pendant')` 查询，
+  不联动就等于让假 DOM 在「挂件到底建出来没有」这件事上说谎；挂件是 `div` + 内层 `<canvas>`，
+  2D 上下文在内层（第一版对着 div 断言，误报失败）。
+- **三次假失败（都值得记）**：① 期望值写整数 `616`，而挂件高度是 `size * 1.08 = 84.24`，
+  钳制算出来是 `615.76`；② 键盘用例复用了上一条把挂件拖到下边界的状态，`ArrowDown + Shift` 被钳住不动；
+  ③ 断言「挂件创建后 `paintCalls >= 1`」，而 `createPendant()` 的首画是直接 `requestAnimationFrame(paint)`
+  排进去的，**不走 `el.__paint` 这层包装**。三条的共性：**期望值来自推算，而不是量出来的现实**。
+- **怎么验的**：`node test\splash.test.mjs` → 19/19；`node test\run.mjs` → **9/9 套**；
+  `node src\cli.mjs doctor` → 退出码 0、0 错误 2 警告。
+- **教训**：「语法正确 + 字节吻合」与「跑起来是对的」之间隔着一整类失败，它们的共同特征是
+  **只在真正执行时才出现**。凡是第一屏、没有兜底的界面代码，都值得备一个这样的假浏览器。
 
 ### 2026-10-06 · 桌面挂件：整套机制都在，唯独没有人打开它
 

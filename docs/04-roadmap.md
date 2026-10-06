@@ -15,6 +15,12 @@
 - `dsh-whale-widget@0.3.18` 已装（L1），提供 Web 右下角余额小鲸鱼、气泡、音效、角色。
 - `.dsh/whale-audio`、`.dsh/whale-bubble-imgs`、`.dsh/whale-roles` 是它的数据目录（目前多为空）。
 - **动画尚未落盘**（`app.asar` 与备份 sha256 一致，见 P2 / P1）。
+- 启动窗口那两段脚本**已有行为级离线单测**（`test/splash.test.mjs`，19 条断言）：用 `node:vm` 造假浏览器，
+  把归档里的 `lib/welcome/whale-animation.js` 与 `renderer/whale-splash.js` 按页面同样的顺序真跑一遍，
+  推进整条时间线，模拟拖动/键盘/主题翻转/存储被禁，并检查**每个画布参数都是有限数**（NaN 是 canvas 最典型的静默失败）。
+- 桌面挂件的**开关**已由 L1 插件 `dsh-up-t` 提供（设置 →「通用」里那一行），硬刷新即生效，不碰安装包。
+- **已知缺口**：T1 的作者素材在仓库之外的 `.probe/build/**`（约 43 KB），声明里的 `source:` 指向那些路径 ⇒
+  一份全新 clone 构建不出这一层（`build.mjs` 会响亮报错）。搬进仓库是 T5 的待办。
 
 **抓手**
 | 想改什么 | 走哪层 | 入口 |
@@ -163,7 +169,8 @@
 - ✅ L3 改动的声明式描述已落地：`patches/*.yml` + `vendor/whale/build.mjs`（构建到暂存位）+ `vendor/whale/install.mjs`（落盘 + 逐项核对）。
 - ✅ **落盘链路可以离线演练**（`install.mjs --yes --to <临时目标>` / `install-whale.cmd /dry`）：把暂存包复制到临时目标，在**不退出 Harness、不动在用安装包**的前提下跑同一段声明核对；`--to` 落在安装目录里一律拒绝，`--to` 指向在用 asar 时按真落盘处理（不给它开后门绕过守卫）。回归测试 `test/install.test.mjs`（26 条）钉住构建确定性、演练核对、三条拒绝路径，并用 sha256 证明全程在用安装包未变。
 - ✅ **渲染层脚本也有离线行为级单测**：`test/capsule.test.mjs`（16 条）用假 DOM + 假 `fetch` 把左下角胶囊（`plugins/dsh-up-t/assets/client.js`）真跑一遍 —— 挂载四条路径、幂等、握手、状态与数字、点击/拖动/右键隐藏、四种降级、存储被禁时仍可用，以及「所有运行里 `client failed` 一次都没响」。它当场抓到 `localStorage` 读取没包 `try`（存储被禁时胶囊在但点不动、无报错）。
-- ✅ **构建产物的引用完整性有独立检查**：`test/assets.test.mjs`（28 条）。`vendor/asar/verify.mjs` 的逐字节核对只能回答「是不是按声明改了」，回答不了「改对了没有」—— 手写的替换素材没有锚点保护。于是把三条不变量单独钉住：引用的资源必须存在、替换页不许丢掉原版引用过的资源、替换页的 CSP 不许变严。它当场抓到 `renderer/welcome.html`（DSH 的欢迎/登录窗口页面）被换成预览页后**丢掉了应用自己的 React 启动脚本**（窗口会打开但里面全空），坏版本原文留在 `test/fixtures/` 当永久反例。全套 **8 套**测试。
+- ✅ **构建产物的引用完整性有独立检查**：`test/assets.test.mjs`（28 条）。`vendor/asar/verify.mjs` 的逐字节核对只能回答「是不是按声明改了」，回答不了「改对了没有」—— 手写的替换素材没有锚点保护。于是把三条不变量单独钉住：引用的资源必须存在、替换页不许丢掉原版引用过的资源、替换页的 CSP 不许变严。它当场抓到 `renderer/welcome.html`（DSH 的欢迎/登录窗口页面）被换成预览页后**丢掉了应用自己的 React 启动脚本**（窗口会打开但里面全空），坏版本原文留在 `test/fixtures/` 当永久反例。
+- ✅ **启动窗口那两段脚本也有离线行为级单测**：`test/splash.test.mjs`（19 条）用 `node:vm` 造一个假浏览器，把归档里的 `lib/welcome/whale-animation.js` 与 `renderer/whale-splash.js` 按页面里同样的顺序真跑一遍（推进整条时间线、模拟拖动/键盘/主题翻转/存储被禁），并检查**每个画布参数都是有限数** —— NaN 是 canvas 最典型的静默失败。此前对这两段代码只有 `node --check` 与逐字节核对，两者都不回答「跑起来对不对」。全套 **9 套**测试。
 
 - ✅ `../tools/` 的 23 个脚本**已全部归拢**到 `vendor/`（asar 三件套、构建链 6 个、视觉验证 6 个、Provider 探针 8 个）；`../tools/` 保留为历史副本，等 T1 验收后再删。见 `vendor/README.md`。
 
