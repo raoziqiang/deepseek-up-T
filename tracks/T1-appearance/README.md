@@ -75,12 +75,13 @@
 
 **这一步已经预先验过的东西**（所以你不用担心它是「碰运气」）：
 
-- 暂存包与声明**完全吻合**：`node vendor/asar/verify.mjs "<app.asar.whale-backup>" state\staged\app.asar --expect 11`
-  → `OK：恰好 11 个预期条目不同，其余逐字节一致`（比较 11,466 个归档内条目 + 1,497 个 unpacked 条目），
-  差异集合 = 4 改（`renderer/welcome.html` 645→1510、`lib/main.js` 490173→497395、
+- 暂存包与声明**完全吻合**：`node vendor/asar/verify.mjs "<app.asar.whale-backup>" state\staged\app.asar --expect 13`
+  → `OK：恰好 13 个预期条目不同，其余逐字节一致`（比较 11,466 个归档内条目 + 1,497 个 unpacked 条目），
+  差异集合 = 4 改（`renderer/welcome.html` 645→1510、`lib/main.js` 490173→500046、
   `lib/preload-app.cjs` 41075→41776、`dsh-api-session-controller/lib/index.js` 124151→125198）
-  + 7 增（`renderer/whale.css`、`renderer/whale-splash.js`、`renderer/pendant.html`、
-  `renderer/pendant.css`、`renderer/pendant.js`、`lib/preload-charm.cjs`、`lib/welcome/whale-animation.js`）。
+  + 9 增（`renderer/whale.css`、`renderer/whale-splash.js`、`renderer/replay.html`、`renderer/replay.js`、
+  `renderer/pendant.html`、`renderer/pendant.css`、`renderer/pendant.js`、`lib/preload-charm.cjs`、
+  `lib/welcome/whale-animation.js`）。
 - **引用完整性**已单独核对（`node test\assets.test.mjs`）：这两页 HTML 引用的每个本地资源都真的在归档里，
   且替换页没有丢掉原版加载过的东西（见下方「登录窗口页面」那条记录 —— 这正是它抓出来的）。
 - 启动窗口那几段脚本**已经在假浏览器里真跑过一遍**（`node test\splash.test.mjs`，**23** 条断言）：
