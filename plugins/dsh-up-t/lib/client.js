@@ -38,6 +38,7 @@
 
       var STATUS_PATH = "/dsh-up-t/status.json";
       var ACTIONS_PATH = "/dsh-up-t/action";
+      var SEEN_PATH = "/dsh-up-t/seen";
       var ACTION_HEADER = "x-dsh-up-t";
 
       function fmtBytes(n) {
@@ -64,15 +65,20 @@
       function heartbeatText(data) {
         var beat = data && data.heartbeat;
         if (!beat) return "还没有心跳（插件没被加载，或还没重启 Harness）";
+        // 握手是渲染层自己报的「我真的跑起来了」。宿主就绪而这一格空着，说明问题在
+        // 投递（注入行/bundle 加载）而不是宿主 —— 这正是「界面里什么都没有」的两种近邻原因。
+        var seen = (data && data.clientSeen) || beat.client || null;
+        var via = seen && seen.sources ? Object.keys(seen.sources).sort().join("+") : null;
+        var tail = via ? " · 渲染层已握手（" + via + "）" : " · 还没有渲染层握手";
         var stage = typeof beat.stage === "string" ? beat.stage : null;
         if (stage === "ready") {
           var n = beat.routes && beat.routes.length;
-          return "服务已就绪" + (typeof n === "number" ? "（路由 " + n + " 条）" : "") + " · pid " + beat.pid;
+          return "服务已就绪" + (typeof n === "number" ? "（路由 " + n + " 条）" : "") + " · pid " + beat.pid + tail;
         }
         if (stage === "apply") {
-          return "只走到 apply() · webServer 依赖没就绪 —— 界面里不会出现胶囊与设置页 · pid " + beat.pid;
+          return "只走到 apply() · webServer 依赖没就绪 —— 界面里不会出现胶囊与设置页 · pid " + beat.pid + tail;
         }
-        return "心跳没有 stage 字段（旧版本写的） · pid " + beat.pid;
+        return "没有 stage 字段（旧版本写的） · pid " + beat.pid + tail;
       }
 
       function row(label, value) {
@@ -410,7 +416,22 @@
 
       var inject = ["slots"];
 
+      // 握手：告诉宿主「渲染层的这个 bundle 真的跑到了这里」。
+      // 这一步只能由渲染层自己说 —— 宿主知道自己注册了路由（心跳的 ready），
+      // 但不知道浏览器有没有真的把这个 bundle 加载起来（注入行可能没被收集、bundle 可能加载失败）。
+      // 失败绝不影响界面：这是一条纯粹的证据，不是一个功能。
+      function shakeHands(via) {
+        try {
+          fetch(SEEN_PATH, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-dsh-up-t": "1" },
+            body: JSON.stringify({ via: via }),
+          }).catch(function () {});
+        } catch (e) { /* 握手失败不该影响界面 */ }
+      }
+
       function apply(ctx) {
+        shakeHands("bundle");
         ctx.effect(function () {
           return ctx.slots.inject("settings.section", function () {
             return ctx.slots.register(

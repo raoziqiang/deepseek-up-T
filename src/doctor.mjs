@@ -154,9 +154,16 @@ export async function runDoctor({ hash = true } = {}) {
       // 把「我手里没有这条信息」说成「你坏了」是最糟的一种诊断错误。
       const stage = typeof beat.stage === 'string' ? beat.stage : null;
       const routeCount = Array.isArray(beat.routes) ? beat.routes.length : null;
+      // 握手 = 渲染层自己报的「这段脚本真的跑起来了」。宿主就绪而握手缺失，说明断点在**投递**上
+      // （注入行没被收集 / bundle 在渲染层加载失败），而不是宿主半侧 —— 这两者都不报错。
+      const seenVia = beat.client && typeof beat.client.sources === 'object' && beat.client.sources
+        ? Object.keys(beat.client.sources).sort() : [];
+      const seenText = seenVia.length ? ` · 渲染层已握手（${seenVia.join('+')}）` : '';
       const head = `${beat.plugin ?? '?'} ${beat.version ?? '?'} · ${beat.at ?? '时间未知'}${age} · pid ${beat.pid ?? '?'}`;
+      const seenPart = seenVia.length ? seenText
+        : (stage === 'ready' ? ' · 还没有渲染层握手' : '');
       const step = stage === 'ready'
-        ? ` · 服务已就绪${routeCount !== null ? `（路由 ${routeCount} 条）` : ''}`
+        ? ` · 服务已就绪${routeCount !== null ? `（路由 ${routeCount} 条）` : ''}${seenPart}`
         : stage === 'apply' ? ' · 只走到 apply()' : ' · 心跳没有 stage 字段（旧版本写的）';
       if (alive === false) {
         add('运行时', 'T4 插件 dsh-up-t 心跳', 'warn', false,
@@ -169,6 +176,12 @@ export async function runDoctor({ hash = true } = {}) {
           '插件被加载了、`apply()` 也跑完了，但之后**没有走到 ready** —— 也就是 `webServer` 这个依赖一直没就绪：'
           + '路由没注册，界面里既不会有胶囊也不会有设置页，而且不会有任何报错。'
           + `去看 .plugin-manager/logs 里有没有加载错误；心跳本身在 ${P.pluginHeartbeat}。`);
+      } else if (stage === 'ready' && !seenVia.length) {
+        add('运行时', 'T4 插件 dsh-up-t 心跳', 'warn', false,
+          `${head}${step}`,
+          `宿主半侧已经就绪（路由已注册${routeCount !== null ? `：${routeCount} 条` : ''}），但**渲染层还没有握手** —— 浏览器里那段脚本还没跑起来。`
+          + '桌面形态下这意味着注入行没被收集、或客户端脚本在渲染层加载失败（**两种都不报错**）；'
+          + '刚启动的头几秒、以及无界面形态下出现这一条是正常的，可以先等一下再跑一次。');
       } else {
         add('运行时', 'T4 插件 dsh-up-t 心跳', 'warn', true, `${head}${step}`, null);
       }

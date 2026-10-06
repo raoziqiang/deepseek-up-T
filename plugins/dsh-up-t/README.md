@@ -29,6 +29,7 @@ up-T · ?             ← 黄点：没有原版备份可比 / 宿主没回应
 | `/dsh-up-t/client.js` | 客户端脚本。按 **mtime** 重读，所以改完**硬刷新页面即生效，不用重启 DSH** |
 | `/dsh-up-t/status.json` | 状态事实（只做 stat 级读取，不算 121MB 的 sha256；含磁盘上的心跳） |
 | `/dsh-up-t/action` | 操作通道。`GET` 列出可用操作（只读、无需请求头），`POST` 才真的执行 |
+| `/dsh-up-t/seen` | 握手通道。渲染层脚本跑起来后 `POST` 一句「我到了」；`GET` 只读，永不记录 |
 
 `apply()` 的**第一条语句**就是 `writeHeartbeat()`，然后立刻注册 `webserver/index-inject` 的注入行；
 其余逻辑在 `root.inject(['webServer'], …)` 里。
@@ -56,24 +57,48 @@ up-T · ?             ← 黄点：没有原版备份可比 / 宿主没回应
 | `stage` | 什么时候 | 结论 |
 | --- | --- | --- |
 | `apply` | `apply()` 的第一件事（不依赖任何服务） | 插件确实被加载并执行了 |
-| `ready` | `webServer` 就绪、三条路由都注册完之后 | **能用**：界面里该出现的东西确实有地方可取 |
+| `ready` | `webServer` 就绪、四条路由都注册完之后 | **能用**：界面里该出现的东西确实有地方可取 |
 
 - `trail` 是这两步的路径（出问题时最想知道的就是「它停在哪一步」），`loadedAt` 钉在第一步。
   同一个进程里插件被重新加载时，`trail` 从新的 `apply` 重新开始 —— 旧的那条属于上一次生命周期。
 - **绝不抛异常**：写失败只记进 `lastHeartbeatResult`，并通过 `status.json` 的 `heartbeatWriteError` 暴露。
 - **返回值被忽略** —— 磁盘上的文件才是证据。
-- `dsht doctor` 读它并给四种结论：**没有文件 → INFO**（还没重启，预期）、
+- `dsht doctor` 读它并给几种结论：**没有文件 → INFO**（还没重启，预期）、
   **不是合法 JSON → WARN**、**`stage: "apply"` 且进程活着 → WARN**（加载了但依赖没就绪，
   即上面那种静默失败，提示里直接说「界面里既不会有胶囊也不会有设置页」）、
-  **`stage: "ready"` → OK 并报出路由条数**；`pid` 已经不在了 → WARN（来自上一个进程）。
+  **`stage: "ready"` → OK 并报出路由条数**、**`stage: "ready"` 但还没有渲染层握手 → WARN**
+  （见下一节：宿主能跑了，但浏览器里那段脚本没跑起来）；`pid` 已经不在了 → WARN（来自上一个进程）。
   心跳**没有** `stage` 字段时按「未知」处理并明说是旧版本写的 —— 把「我手里没有这条信息」
   说成「你坏了」是最糟的一种诊断错误。
-- 设置页的「心跳」一行显示同一件事（`服务已就绪（路由 3 条）` / `只走到 apply()`）。
+- 设置页的「心跳」一行显示同一件事（`服务已就绪（路由 4 条）` / `只走到 apply()`），
+  并跟上握手状态（`· 渲染层已握手（bundle+capsule）` / `· 还没有渲染层握手`）。
   设置页恰恰是「什么都没出现」时人会来看的地方，让它自己说出卡在哪一步，比让人去猜「是不是没重启」有用。
 - 所以它写在**包自己的 `.runtime/`**，不写项目的 `state/`：插件若以非 junction 方式安装，
   它写的就不是我们这份副本的目录 —— 而 `doctor` 看不到它，**这正是正确的结论**。
 
 `.runtime/` 已在 `.gitignore` 里（它含本机 pid 与绝对路径，是「这一刻」的证据，不是源码）。
+
+## ★ 握手：让渲染层自己说「我跑起来了」
+
+心跳的 `ready` 只说**宿主侧**把路由注册上了。它答不了最后一个问题：浏览器里那段脚本到底跑了没有？
+注入行可能没被收集、`lib/client.js` 可能在渲染层加载失败 —— **两种都不报错**，界面里就是什么都没有，
+和「插件根本没加载」长得一模一样。这一段只有渲染层自己说得出来，所以 `/dsh-up-t/seen` 收一条
+「我到了」的 `POST`：
+
+| `via` | 谁发的 | 它证明了什么 |
+| --- | --- | --- |
+| `capsule` | `assets/client.js`（注入行那条通道） | 注入行被收集了，且脚本在渲染层真的执行了 |
+| `bundle` | `lib/client.js`（ModuleLoader 那条通道） | 设置页那个 bundle 被加载了 |
+
+两条通道**分开记**（`client.sources`）：「胶囊在、设置页不在」和反过来是两种不同的故障，
+合成一个布尔值就再也分不开了。`client.count` 是握手次数、`client.at` 是最近一次。
+
+- **握手是证据，不是功能**：两处都包在 `try/catch` 里、失败静默。旧宿主上没有这条路由（404）时
+  界面照旧 —— 这条通道的价值全在诊断上，绝不能成为新的失败原因。
+- 记进**同一份心跳文件**（`client` 字段），所以 `doctor` / `status.json` / 设置页三处都看得到它。
+- 需要 `x-dsh-up-t: 1` 头才记录；`GET` **只读、永不记录**（不能靠 GET 凭空造出一次握手）。
+- 时间语义：**刚启动的头几秒、以及无界面（headless）形态下，没有握手是正常的** ——
+  诊断文案里明说了这一句，免得把正常状态说成故障。
 
 ## ★ 操作通道：把 `dsht` 最常跑的命令挂成按钮
 
@@ -209,7 +234,7 @@ node src\cli.mjs precheck --profile-json state\candidate\package.json
 
 ```powershell
 cd D:\Z1848\harness-ds\deepseek-up-T
-node test\plugin.test.mjs   # 39 条断言：心跳（apply + ready 两枚、trail、route 清单）、注入行、三条路由、操作守卫与真 spawn、specs 的 writes 标记、客户端 bundle 形态与按钮、设置页的心跳行、清理
+node test\plugin.test.mjs   # 44 条断言：心跳（apply + ready 两枚、trail、route 清单）、注入行、四条路由、操作守卫与真 spawn、specs 的 writes 标记、握手通道（GET 只读 / 缺头 403 / 两条通道分开记 / bundle 恰好握一次）、客户端 bundle 形态与按钮、设置页的心跳行与握手状态、清理
 node src\cli.mjs doctor     # bundles 全部可解析
 node src\cli.mjs precheck   # 组合可用
 ```

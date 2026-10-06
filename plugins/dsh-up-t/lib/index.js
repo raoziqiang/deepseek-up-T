@@ -50,6 +50,16 @@ const CLIENT_PATH = '/dsh-up-t/client.js';
 const STATUS_PATH = '/dsh-up-t/status.json';
 const ACTION_PATH = '/dsh-up-t/action';
 /**
+ * 握手路径：渲染层的客户端脚本**真的跑起来了**之后 POST 这里。
+ *
+ * 为什么需要第三个证人：宿主能知道自己注册了路由（心跳的 `ready`），但**不知道浏览器有没有
+ * 真的加载这个 bundle** —— 注入行可能没被收集、bundle 可能在渲染层抛错，两种都是静默的。
+ * `ready` 与「界面里出现了胶囊」之间隔着的那一段，只有渲染层自己说话才能填上。
+ */
+const SEEN_PATH = '/dsh-up-t/seen';
+/** 宿主注册的那几条路由。心跳的 `ready` 与握手都引用它，避免两处各写一份。 */
+const ROUTE_PATHS = [CLIENT_PATH, STATUS_PATH, ACTION_PATH, SEEN_PATH];
+/**
  * 自定义请求头。跨源 `<form>`/`fetch` 不经过预检就带不上自定义头，而我们从不下发
  * CORS 允许头 —— 所以这一个字段就把「别的网页悄悄让本机跑命令」挡在外面。
  */
@@ -124,6 +134,29 @@ export function writeHeartbeat(stage = 'apply', extra = {}) {
 }
 
 export const heartbeatPath = HEARTBEAT_FILE;
+
+/**
+ * 渲染层的握手记录。
+ *
+ * 两条投递通道分开记 —— 它们坏起来是各自独立的：`bundle`（ModuleLoader 加载 `lib/client.js`，
+ * 注册设置页）与 `capsule`（注入行加载 `assets/client.js`，画左下角胶囊）。
+ * 「胶囊在、设置页不在」和「设置页在、胶囊不在」是两种不同的故障，只有分开记才分得清。
+ */
+let clientSeen = null;
+
+export function noteClientSeen(via) {
+  const now = new Date().toISOString();
+  const known = via === 'bundle' || via === 'capsule' ? via : 'unknown';
+  const prev = clientSeen ?? { count: 0, sources: {} };
+  clientSeen = {
+    at: now,
+    count: prev.count + 1,
+    sources: { ...prev.sources, [known]: now },
+  };
+  // 同时落进磁盘上的心跳：`doctor` 只读文件，不读内存里的变量。
+  writeHeartbeat('ready', { routes: ROUTE_PATHS, client: clientSeen });
+  return clientSeen;
+}
 
 function readOwnPackage() {
   try {
@@ -204,6 +237,9 @@ function collectStatus() {
     heartbeat: null,
     heartbeatFile: HEARTBEAT_FILE,
     heartbeatWriteError: lastHeartbeatResult && !lastHeartbeatResult.ok ? lastHeartbeatResult.error : null,
+    // 握手是**内存里的当前值**（磁盘上的那一份同样有，见 heartbeat.client）；
+    // 两条投递通道分开记，见 noteClientSeen 的注释。
+    clientSeen,
   };
   try { out.heartbeat = JSON.parse(fs.readFileSync(HEARTBEAT_FILE, 'utf8')); } catch { /* 还没落过 */ }
   if (!inst) return out;
@@ -543,6 +579,34 @@ export default {
         },
       }));
 
+      // 握手通道：渲染层的脚本加载成功后会 POST 这里。GET 只读，好让人用浏览器确认路由活着。
+      disposers.push(ctx.webServer.register({
+        kind: 'exact',
+        path: SEEN_PATH,
+        handler: (req, res) => {
+          try {
+            if (String(req.method).toUpperCase() !== 'POST') {
+              sendJson(res, { ok: true, seen: clientSeen, note: '渲染层脚本加载后会 POST ' + SEEN_PATH });
+              return;
+            }
+            if (String(req.headers?.[ACTION_HEADER] ?? '') !== '1') {
+              sendJson(res, { ok: false, error: '缺少 ' + ACTION_HEADER + ' 头' }, 403);
+              req.resume(); // 不读 body 也要把它排空，否则连接不会被复用
+              return;
+            }
+            readBody(req, MAX_BODY).then((raw) => {
+              const body = parseJsonOrNull(raw);
+              sendJson(res, { ok: true, seen: noteClientSeen(body?.via) });
+            }).catch(() => {
+              // body 超限/读失败：不记这一步，但也绝不能因此炸掉请求。
+              try { sendJson(res, { ok: false, error: '请求体读取失败' }, 400); } catch { /* 已断开 */ }
+            });
+          } catch (err) {
+            sendJson(res, { ok: false, error: String(err?.message ?? err) }, 500);
+          }
+        },
+      }));
+
       // Web 形态（宿主自己渲染 index.html 时）用 tapIndex；桌面端靠上面的注入行。
       disposers.push(ctx.webServer.tapIndex((html) => {
         if (html.includes(CLIENT_PATH)) return html;
@@ -557,7 +621,7 @@ export default {
       // ③ 走到这里才是真的「能用」：webServer 就绪、三条路由都注册上了。再落一枚心跳，
       //    把 stage 推到 ready。这一步本身不依赖任何服务，失败也不该影响插件工作，
       //    所以 writeHeartbeat 永远不抛。
-      writeHeartbeat('ready', { routes: [CLIENT_PATH, STATUS_PATH, ACTION_PATH] });
+      writeHeartbeat('ready', { routes: ROUTE_PATHS, client: clientSeen });
     });
   },
 };

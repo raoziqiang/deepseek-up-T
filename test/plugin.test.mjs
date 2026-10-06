@@ -24,6 +24,7 @@ const PLUGIN = path.resolve(HERE, '..', 'plugins', 'dsh-up-t');
 const CLIENT_PATH = '/dsh-up-t/client.js';
 const STATUS_PATH = '/dsh-up-t/status.json';
 const ACTION_PATH = '/dsh-up-t/action';
+const SEEN_PATH = '/dsh-up-t/seen';
 
 const results = [];
 function check(name, fn) {
@@ -48,15 +49,23 @@ async function checkAsync(name, fn) {
 /** 假的 IncomingMessage：只实现路由真正用到的那几样。 */
 function makeReq({ method = 'POST', headers = {}, body = '' } = {}) {
   const listeners = { data: [], end: [], error: [] };
+  let resumed = false;
+  let destroyed = false;
   const req = {
     method,
     headers,
-    destroy() {},
+    resumed: false,
+    destroyed: false,
+    destroy() { destroyed = true; req.destroyed = true; },
+    // 真实 IncomingMessage 一定有 resume()：守卫拒掉一个带 body 的 POST 时靠它把流排空，
+    // 否则连接不会被复用。假件漏了它，会让「403 守卫」看起来返回 500（被 try/catch 吞掉）。
+    resume() { resumed = true; req.resumed = true; return req; },
     on(event, cb) { (listeners[event] ??= []).push(cb); return req; },
   };
   // 真实的 req 是流：注册完监听器之后才会推数据，且是异步的。
   queueMicrotask(() => {
-    for (const cb of listeners.data) cb(Buffer.from(body, 'utf8'));
+    if (destroyed) return;
+    if (!resumed) for (const cb of listeners.data) cb(Buffer.from(body, 'utf8'));
     for (const cb of listeners.end) cb();
   });
   return req;
@@ -215,10 +224,10 @@ check('依赖就绪前就已经注册了注入行（这是桌面端能看到挂�
   settle();
 });
 
-check('依赖就绪后注册了 client.js / status.json / action 三条精确路由', () => {
-  assert.equal(state.routes.length, 3);
+check('依赖就绪后注册了 client.js / status.json / action / seen 四条精确路由', () => {
+  assert.equal(state.routes.length, 4);
   const byPath = Object.fromEntries(state.routes.map((r) => [r.path, r]));
-  assert.deepEqual(Object.keys(byPath).sort(), [CLIENT_PATH, STATUS_PATH, ACTION_PATH].sort());
+  assert.deepEqual(Object.keys(byPath).sort(), [CLIENT_PATH, STATUS_PATH, ACTION_PATH, SEEN_PATH].sort());
   for (const r of state.routes) {
     assert.equal(r.kind, 'exact');
     assert.equal(typeof r.handler, 'function');
@@ -228,7 +237,7 @@ check('依赖就绪后注册了 client.js / status.json / action 三条精确路
 check('依赖就绪后心跳推进到 ready，并记下路由与完整的 trail', () => {
   const beat = JSON.parse(readFileSync(mod.heartbeatPath, 'utf8'));
   assert.equal(beat.stage, 'ready');
-  assert.deepEqual(beat.routes, [CLIENT_PATH, STATUS_PATH, ACTION_PATH]);
+  assert.deepEqual(beat.routes, [CLIENT_PATH, STATUS_PATH, ACTION_PATH, SEEN_PATH]);
   assert.deepEqual(beat.trail.map((s) => s.stage), ['apply', 'ready'], 'trail 要能看出它走过哪两步');
   assert.equal(beat.loadedAt, beat.trail[0].at, 'loadedAt 必须钉在第一枚心跳的时刻，不能随 ready 一起被改写');
   assert.ok(beat.at >= beat.loadedAt, `at(${beat.at}) 不该早于 loadedAt(${beat.loadedAt})`);
@@ -243,7 +252,7 @@ check('只走到 apply 的心跳形状 = 加载了但依赖没就绪（doctor / 
   assert.equal(beat.routes, undefined, '没走到 ready 就不该声称注册了路由');
   assert.deepEqual(beat.trail.map((s) => s.stage), ['apply'], '新的 apply 要丢掉上一次生命周期的 trail');
   assert.equal(beat.loadedAt, beat.at, '只有一步时 loadedAt 就是它自己');
-  mod.writeHeartbeat('ready', { routes: [CLIENT_PATH, STATUS_PATH, ACTION_PATH] }); // 还原，后面还要用
+  mod.writeHeartbeat('ready', { routes: [CLIENT_PATH, STATUS_PATH, ACTION_PATH, SEEN_PATH] }); // 还原，后面还要用
 });
 
 check('注册了 tapIndex（Web 形态用；桌面端靠注入行）', () => {
@@ -266,6 +275,10 @@ check('client.js 路由返回 200 + JS 且内容非空', () => {
   assert.ok(text.length > 500, '客户端脚本不该是空的');
   assert.ok(text.includes('__DSH_UP_T_CLIENT__'), '必须是经典脚本 IIFE 形态');
   assert.ok(!/^\s*import\s/m.test(text), '不得含 ESM import（CSP 不允许）');
+  // 胶囊也要握手：注入行没被收集时，它是**唯一**能替渲染层说话的证人（而且它和设置页 bundle
+  // 是两条独立的投递通道，分开记才分得清「胶囊在、设置页不在」和反过来）。
+  assert.ok(text.includes("'/dsh-up-t/seen'"), '胶囊必须向 /dsh-up-t/seen 握手');
+  assert.ok(text.includes("via: 'capsule'"), '两条通道要靠 via 区分');
 });
 
 check('status.json 路由返回可解析的 JSON，且字段齐备', () => {
@@ -298,6 +311,77 @@ check('status.json 把磁盘上的心跳原样带出来，且写失败时显式�
   assert.equal(status.heartbeat?.pid, process.pid, 'status 里的心跳必须来自磁盘，而不是内存里的变量');
 });
 
+/** 把路由的响应体当 JSON 读。握手那一段也用得到，所以定义必须在这两段之前。 */
+const actionJson = (res) => JSON.parse(res.body.toString('utf8'));
+
+// ── 握手通道（/dsh-up-t/seen）──────────────────────────────────────
+//
+// 这是「界面里出现了吗」这条链上**最后一段静默区**：宿主知道自己注册了路由（心跳的 ready），
+// 但不知道浏览器有没有真的把脚本跑起来 —— 注入行可能没被收集、bundle 可能在渲染层抛错，
+// 两种都不报错。所以让渲染层自己 POST 一句「我到了」，并把两条投递通道分开记。
+
+/** 打一次 seen 路由并等它给出响应。 */
+async function driveSeen(req) {
+  const route = state.routes.find((r) => r.path === SEEN_PATH);
+  assert.ok(route, 'seen 路由必须已注册');
+  const res = makeRes();
+  route.handler(req, res);
+  for (let i = 0; i < 4000 && res.statusCode === null; i += 1) {
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  assert.notEqual(res.statusCode, null, '路由没有给出任何响应');
+  return res;
+}
+
+await checkAsync('seen 路由：GET 只读（还没人握手时 seen 为 null，永不记录）', async () => {
+  const res = await driveSeen(makeReq({ method: 'GET' }));
+  assert.equal(res.statusCode, 200);
+  const j = actionJson(res);
+  assert.equal(j.ok, true);
+  assert.equal(j.seen, null, 'GET 绝不能凭空造出一次握手');
+});
+
+await checkAsync('seen 路由：缺 x-dsh-up-t 头一律 403（别的网页不能伪造握手）', async () => {
+  const res = await driveSeen(makeReq({ method: 'POST', body: JSON.stringify({ via: 'bundle' }) }));
+  assert.equal(res.statusCode, 403);
+  assert.equal(actionJson(res).ok, false);
+});
+
+await checkAsync('seen 路由：握手落进内存与磁盘心跳，且两条通道分开记', async () => {
+  const res = await driveSeen(makeReq({
+    method: 'POST',
+    headers: { 'x-dsh-up-t': '1' },
+    body: JSON.stringify({ via: 'capsule' }),
+  }));
+  assert.equal(res.statusCode, 200);
+  const seen = actionJson(res).seen;
+  assert.ok(Number.isFinite(Date.parse(seen.at)), '握手必须带时间戳');
+  assert.equal(seen.count, 1);
+  assert.deepEqual(Object.keys(seen.sources), ['capsule']);
+
+  // 磁盘上的那一份才是 doctor 的证据（doctor 只读文件）。
+  const beat = JSON.parse(readFileSync(mod.heartbeatPath, 'utf8'));
+  assert.equal(beat.client.count, 1);
+  assert.ok(beat.client.sources.capsule, '磁盘心跳里必须能看出是哪条通道握的手');
+  assert.equal(beat.client.sources.bundle, undefined, 'bundle 还没握过手，就不能凭空记上');
+
+  // 第二条通道：同一份记录里应当出现两个来源。
+  await driveSeen(makeReq({
+    method: 'POST',
+    headers: { 'x-dsh-up-t': '1' },
+    body: JSON.stringify({ via: 'bundle' }),
+  }));
+  const beat2 = JSON.parse(readFileSync(mod.heartbeatPath, 'utf8'));
+  assert.equal(beat2.client.count, 2);
+  assert.deepEqual(Object.keys(beat2.client.sources).sort(), ['bundle', 'capsule']);
+
+  // status.json 也要带出来（设置页显示的就是它）。
+  const statusRes = makeRes();
+  state.routes.find((r) => r.path === STATUS_PATH).handler({ url: STATUS_PATH }, statusRes);
+  const status = actionJson(statusRes);
+  assert.equal(status.clientSeen.count, 2, 'status 必须带上当前的握手状态');
+});
+
 // ── 操作通道（/dsh-up-t/action）────────────────────────────────────
 //
 // 这一段守的是「按钮点了会发生什么」。它的失败模式同样是静默的：路由没注册、守卫漏了、
@@ -316,8 +400,6 @@ async function driveAction(req) {
   assert.notEqual(res.statusCode, null, '路由没有给出任何响应');
   return res;
 }
-
-const actionJson = (res) => JSON.parse(res.body.toString('utf8'));
 
 await checkAsync('action 路由：GET 无头也答一句（好让人用浏览器确认路由活着）', async () => {
   const res = await driveAction(makeReq({ method: 'GET' }));
@@ -636,6 +718,32 @@ function panelOf(client) {
   assert.ok(panel, '设置页里必须有操作面板');
   return panel;
 }
+
+// ── 握手：让渲染层自己说「我跑起来了」────────────────────────────────
+//
+// 这是「界面里出现了吗」这条链上最后一段静默区：宿主知道自己注册了那几条路由（心跳的 ready），
+// 但注入行有没有被收集、bundle 有没有在渲染层真的执行，宿主无从得知 —— 而且两种失败都不报错。
+// 所以让渲染层自己 POST 一句。它必须**恰好报一次**，也必须**报不出去时不影响界面**。
+await checkAsync('客户端 bundle：apply 时先握一次手（证明渲染层真的加载了这个 bundle）', async () => {
+  const calls = [];
+  const client = withFetch((url, opts) => {
+    calls.push({ url, opts });
+    return Promise.resolve({ ok: true });
+  }, () => makeClient());
+  assert.equal(calls.length, 1, 'apply() 必须恰好握一次手');
+  assert.equal(calls[0].url, '/dsh-up-t/seen');
+  assert.equal(calls[0].opts.method, 'POST');
+  assert.equal(calls[0].opts.headers['x-dsh-up-t'], '1', '缺这个头宿主会 403');
+  assert.deepEqual(JSON.parse(calls[0].opts.body), { via: 'bundle' }, '两条投递通道必须可区分');
+  assert.ok(client.component, '握手是证据不是功能：它出了任何事，设置页都必须照常注册');
+  await flush();
+});
+
+await checkAsync('客户端 bundle：握手失败（比如宿主还没重启、路由不存在）绝不炸掉界面', async () => {
+  const client = withFetch(() => Promise.reject(new Error('404')), () => makeClient());
+  await flush();
+  assert.ok(client.component, '旧宿主上没有 /dsh-up-t/seen：必须静默失败，界面照旧');
+});
 
 await checkAsync('操作面板：按钮来自宿主给的清单，而不是前端硬编码', async () => {
   const client = makeClient();

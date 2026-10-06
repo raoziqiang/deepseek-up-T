@@ -16,9 +16,21 @@
     window.__DSH_UP_T_CLIENT__ = true;
 
     var STATUS_URL = '/dsh-up-t/status.json';
+    var SEEN_URL = '/dsh-up-t/seen';
     var POS_KEY = 'dsh-up-t:pos';
     var HIDDEN_KEY = 'dsh-up-t:hidden';
     var Z = 2147483000;
+
+    // 握手：把「这段脚本真的在渲染层跑起来了」告诉宿主。
+    // 宿主知道自己注册了路由，但不知道注入行有没有被收集、脚本有没有真的执行 ——
+    // 这两件事失败时都是静默的（没有胶囊、也没有报错）。失败不影响任何功能，纯证据。
+    try {
+      fetch(SEEN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-dsh-up-t': '1' },
+        body: JSON.stringify({ via: 'capsule' })
+      }).catch(function () {});
+    } catch (e) { /* 握手失败不该影响挂件 */ }
 
     var hideTimer = null;
 
