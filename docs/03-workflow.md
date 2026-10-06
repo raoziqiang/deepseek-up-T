@@ -1,9 +1,9 @@
 # 03 · 改造工作流
 
-任何一次改造都走同一个六步环。前两步和后两步是纪律，中间两步是手艺。
+任何一次改造都走同一个七步环。头两步和尾两步是纪律，中间三步是手艺。
 
 ```
-① 体检  →  ② 快照  →  ③ 改  →  ④ 复验  →  ⑤ 观察  →  ⑥ 收尾
+① 体检  →  ② 快照  →  ③ 改  →  ④ 预检  →  ⑤ 复验  →  ⑥ 观察  →  ⑦ 收尾
 ```
 
 ## ① 体检
@@ -50,7 +50,33 @@ node src/cli.mjs snapshot restore <id>     # 回滚（回滚前自动再留一�
 2. **`config` 是整体替换，不是深合并。** 改一个字段时，要把同一 row 其它你想保留的字段一并写出。
 3. **中文注释写清楚「为什么」。** 三个月后你自己就是那个读不懂的人。
 
-## ④ 复验
+## ④ 预检（改完、重启前）
+
+```powershell
+node src/cli.mjs precheck
+```
+
+`precheck` 在隔离探针家里，用安装版 Electron 以 Node 身份跑 **asar 内那份**
+`dsh/lib/bin.js --dump-config`，把运行中应用**真正会看到的组合清单**打出来，
+并与上一次预检逐条目比对。
+
+**为什么必须做这一步**：`desktop` profile 被 Electron 应用独占，CLI 直接拒绝
+`--dump-config`：
+
+```
+error: profile "desktop" is managed exclusively by the Electron application
+```
+
+于是这是改 `cordis.patch.yml` 之后、重启之前**唯一**的反馈渠道。判据：
+
+- 退出码 `0`，且「问题 0」。
+- 「与上一次预检相比」的条目变化**恰好是你打算改的那些**——多一条少一条都要停下来查。
+- 想先试一层再落盘，用 `--patch patches/<你的>.yml`，不用动真实 profile。
+
+边界见 [06-precheck.md](06-precheck.md)：预检**不执行 `!!js`、不加载模块、不是 boot**，
+所以它只回答「这层配置能不能被 loader 接受、有没有命中预期条目」。
+
+## ⑤ 复验
 
 ```powershell
 node src/cli.mjs doctor
@@ -59,7 +85,7 @@ node src/cli.mjs snapshot diff <id>
 
 `doctor` 必须回到 0 error。`diff` 用来确认**只改了你打算改的东西**——如果 diff 里冒出一个你没碰过的文件，停下来查。
 
-## ⑤ 观察
+## ⑥ 观察
 
 改动是否真的生效，取决于层：
 
@@ -72,7 +98,7 @@ node src/cli.mjs snapshot diff <id>
 
 L3 的落盘与 Harness 是否运行互斥。**当前会话本身就跑在 Harness 里，所以 L3 改造必须分两次会话完成：先构建好产物，再退出 Harness 落盘。**
 
-## ⑥ 收尾
+## ⑦ 收尾
 
 - 在对应 `tracks/T*/README.md` 记录这次改动（改了什么、为什么、怎么验、怎么撤）。
 - `node src/cli.mjs baseline write` 刷新基线。

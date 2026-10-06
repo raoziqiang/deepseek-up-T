@@ -19,8 +19,18 @@ import { runDoctor } from './doctor.mjs';
 import {
   createSnapshot, listSnapshots, restoreSnapshot, diffSnapshot, TRACKED_FILES,
 } from './snapshot.mjs';
+import {
+  readAsarHeader, walkAsar, listAsarPaths, readAsarEntry, grepAsarContent,
+} from './asar.mjs';
+import { runPrecheck, PROBE_PROFILE } from './precheck.mjs';
 
 const TAG = { error: 'FAIL', warn: 'WARN', info: 'INFO', ok: 'OK  ' };
+
+/** 这些选项要吃掉后面一个值；其余 `-x` / `--x` 一律当布尔开关。 */
+const VALUE_OPTS = new Map([
+  ['-m', 'message'], ['--message', 'message'],
+  ['--out', 'out'], ['--limit', 'limit'], ['--file', 'file'],
+]);
 
 function parseArgs(argv) {
   const flags = new Set();
@@ -28,8 +38,8 @@ function parseArgs(argv) {
   const opts = {};
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
-    if (a === '-m' || a === '--message') { opts.message = argv[++i]; continue; }
-    if (a.startsWith('--')) { flags.add(a); continue; }
+    if (a === '--patch') { (opts.patch ??= []).push(argv[++i]); continue; }
+    if (VALUE_OPTS.has(a)) { opts[VALUE_OPTS.get(a)] = argv[++i]; continue; }
     if (a.startsWith('-') && a.length > 1) { flags.add(a); continue; }
     positional.push(a);
   }
@@ -234,6 +244,153 @@ async function cmdBaseline({ flags, positional }) {
   return 0;
 }
 
+// ───────────────────────────── asar ─────────────────────────────
+//
+// 只读地读「真正在跑的那份代码」。实测结论：app.asar 内的包、
+// profiles/node_modules/@deepseek-ai/*（junction 到本地构建树）、以及
+// D:\Z1848\deepseek-harness 源码仓库，三者可能是**不同版本**；
+// 只有 app.asar 里那份是运行中的 Electron 应用真正加载的。
+// 所以排查「某个行为/字符串到底出自哪份产物」必须用这里，而不是读源码仓库。
+
+function cmdAsar({ flags, positional, opts }) {
+  const P = resolvePaths();
+  const asarPath = opts.file ?? P.asar;
+  if (!fs.existsSync(asarPath)) { console.error(`找不到归档：${asarPath}`); return 2; }
+
+  const sub = positional[1] ?? 'ls';
+  const json = flags.has('--json');
+  const limit = Number(opts.limit) || (sub === 'ls' ? 200 : 20);
+  const { header, jsonLen, pickleSize } = readAsarHeader(asarPath);
+
+  if (sub === 'ls') {
+    const all = listAsarPaths(header);
+    const src = positional[2];
+    if (!src) {
+      const buckets = new Map();
+      for (const p of all) {
+        const key = p.split('/').filter(Boolean).slice(0, 2).join('/');
+        buckets.set(key, (buckets.get(key) ?? 0) + 1);
+      }
+      const rows = [...buckets.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+      if (json) {
+        process.stdout.write(`${JSON.stringify({ archive: asarPath, total: all.length, buckets: Object.fromEntries(rows) }, null, 2)}\n`);
+        return 0;
+      }
+      console.log(asarPath);
+      console.log(`  条目 ${all.length}  ·  JSON 头 ${(jsonLen / 1048576).toFixed(1)}MB  ·  pickleSize ${pickleSize}\n`);
+      for (const [k, v] of rows) console.log(`  ${pad(k, 44)} ${String(v).padStart(6)}`);
+      console.log('\n  用 `asar ls <正则>` 精确列出条目');
+      return 0;
+    }
+    let re;
+    try { re = new RegExp(src); } catch (e) { console.error(`正则非法：${e.message}`); return 2; }
+    const hits = all.filter((p) => re.test(p));
+    if (json) {
+      process.stdout.write(`${JSON.stringify({ total: all.length, matched: hits.length, paths: hits.slice(0, limit) }, null, 2)}\n`);
+      return 0;
+    }
+    for (const p of hits.slice(0, limit)) console.log(p);
+    console.log(`\n匹配 ${hits.length} / ${all.length}${hits.length > limit ? `（只显示前 ${limit} 条，用 --limit 调整）` : ''}`);
+    return 0;
+  }
+
+  if (sub === 'cat') {
+    const entry = positional[2];
+    if (!entry) { console.error('用法：asar cat <归档内路径> [--out 文件]'); return 2; }
+    const buf = readAsarEntry(asarPath, entry);
+    if (buf === null) { console.error(`归档内没有该条目（或它是目录）：${entry}`); return 2; }
+    if (opts.out) { fs.writeFileSync(opts.out, buf); console.log(`已写出 ${buf.length} 字节 → ${opts.out}`); return 0; }
+    process.stdout.write(buf);
+    if (buf.length && buf[buf.length - 1] !== 0x0a) process.stdout.write('\n');
+    return 0;
+  }
+
+  if (sub === 'grep') {
+    const src = positional[2];
+    if (!src) { console.error('用法：asar grep <正则> [--limit N] [--json]'); return 2; }
+    let re;
+    try { re = new RegExp(src); } catch (e) { console.error(`正则非法：${e.message}`); return 2; }
+    const hits = grepAsarContent(asarPath, re, { limit });
+    if (json) { process.stdout.write(`${JSON.stringify(hits, null, 2)}\n`); return hits.length ? 0 : 1; }
+    if (!hits.length) { console.log(`未命中：${src}`); return 1; }
+    for (const h of hits) console.log(`${h.path}:${h.line}\n  ${h.text}`);
+    console.log(`\n命中 ${hits.length} 处（上限 ${limit}）`);
+    return 0;
+  }
+
+  console.error(`未知子命令：asar ${sub}\n可用：asar ls [正则] | asar cat <路径> [--out 文件] | asar grep <正则>`);
+  return 2;
+}
+
+// ─────────────────────────── precheck ───────────────────────────
+//
+// desktop profile 被 Electron 独占，CLI 拒绝 dump/boot，所以「改完会不会炸」
+// 只能靠隔离探针家 + Electron-as-Node 跑 asar 内那份 bin.js 来预检。
+
+function cmdPrecheck({ flags, opts }) {
+  const json = flags.has('--json');
+  const mode = flags.has('--default-only') ? 'dump-default-config' : 'dump-config';
+  const patches = opts.patch ?? [];
+
+  let r;
+  try {
+    r = runPrecheck({ patches, mode, fresh: flags.has('--fresh') });
+  } catch (err) {
+    console.error(`预检无法执行：${err?.message ?? err}`);
+    return 2;
+  }
+
+  if (json) {
+    process.stdout.write(`${JSON.stringify({
+      ok: r.ok,
+      mode,
+      patches,
+      status: r.run.status,
+      problems: r.problems,
+      notes: r.notes,
+      diff: r.diff,
+      dumpPath: r.dumpPath,
+    }, null, 2)}\n`);
+    return r.ok ? 0 : 1;
+  }
+
+  const P = r.probe.P;
+  console.log(`组合预检 · 探针 profile=${PROBE_PROFILE}（隔离，真实 $DSH_HOME 只读） ← 真实 profile=${P.profile}`);
+  console.log(`  归档      ${P.asar}`);
+  console.log(`  探针家    ${r.probe.probeHome}`);
+  console.log(`  模式      ${mode}${patches.length ? `  + ${patches.length} 个 --patch 覆盖层` : ''}`);
+  console.log(`  复制      ${r.probe.copied.join(' / ')}`);
+  for (const l of r.probe.links) console.log(`  junction  ${pad(l.name, 22)} ${l.result}`);
+  console.log(`  退出码    ${r.run.status}`);
+  console.log(`  问题      ${r.problems.length}`);
+  for (const p of r.problems) console.log(`    ${TAG.error} [${p.kind}] ${p.text}`);
+  if (r.notes.length) {
+    console.log(`  提醒      ${r.notes.length} 条（schema 层面的宽松校验提示，不阻塞）`);
+    for (const n of r.notes.slice(0, 5)) console.log(`    ${TAG.info} ${n}`);
+  }
+
+  if (r.diff === null) {
+    console.log('\n（首次预检，没有可比对的上一次结果；本次结果已保存为基线）');
+  } else if (r.diff.count === 0) {
+    console.log('\n与上一次预检相比：组合结果完全一致');
+  } else {
+    console.log(`\n与上一次预检相比：${r.diff.added.length} 新增 / ${r.diff.removed.length} 移除 / ${r.diff.changed.length} 修改`);
+    for (const id of r.diff.added) console.log(`    + 条目 ${id}`);
+    for (const id of r.diff.removed) console.log(`    - 条目 ${id}`);
+    for (const c of r.diff.changed) {
+      console.log(`    ~ 条目 ${c.id}`);
+      for (const l of c.removed) console.log(`        - ${l.trim()}`);
+      for (const l of c.added) console.log(`        + ${l.trim()}`);
+    }
+  }
+
+  console.log(`\n组合结果    ${r.dumpPath}`);
+  console.log(r.ok
+    ? '结论：组合可用。profile 层的 cordis.patch.yml 没有热重载，需重启 DSH 才生效。'
+    : '结论：组合有问题，先修掉上面列出的条目再重启 DSH。');
+  return r.ok ? 0 : 1;
+}
+
 // ───────────────────────────── help ─────────────────────────────
 
 function usage() {
@@ -249,10 +406,20 @@ function usage() {
   snapshot diff <id>      快照与当前现场对比
   snapshot restore <id>   回滚（需 --yes；回滚前自动留一份）
   baseline write          把当前事实固化为 state/baseline.json
+  precheck                组合预检：隔离探针家里 dump 出权威组合结果（真实 profile 只读）
+  asar ls [正则]          列安装包条目（无正则时按顶层目录汇总）
+  asar cat <路径>         读出安装包里单个条目的内容（--out 落盘）
+  asar grep <正则>        在安装包内容里检索（只扫文本类条目）
 
 选项
   --json                  机器可读输出
   --no-hash               doctor：跳过 121MB 安装包的 sha256（更快）
+  --limit N               asar ls / grep 的结果上限
+  --out 文件              asar cat 落盘目标
+  --file <asar>           覆盖要读的归档路径
+  --patch <文件>          预检：叠加一个额外 patch 层（可重复）
+  --default-only          预检：只 dump bundle 层（--dump-default-config）
+  --fresh                 预检：先删掉重建探针家
 
 环境变量
   DSH_HOME                默认 ${'C:\\Users\\<你>\\.dsh'}
@@ -275,6 +442,8 @@ async function main() {
     case 'doctor': return cmdDoctor(parsed);
     case 'snapshot': case 'snap': return cmdSnapshot(parsed);
     case 'baseline': return cmdBaseline(parsed);
+    case 'precheck': case 'pre': return cmdPrecheck(parsed);
+    case 'asar': return cmdAsar(parsed);
     case 'help': case '--help': case '-h': usage(); return 0;
     default:
       console.error(`未知命令：${cmd}\n`);

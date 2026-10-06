@@ -88,13 +88,55 @@ C:\Users\Z1848\.dsh\profiles\
 | P1 | `app.asar.tmp` 残留 115.8 MB | `doctor` WARN | 确认不再需要后删除，或完成落盘 |
 | P2 | 鲸鱼启动动画未落盘 | 备份与当前 asar sha256 一致 | 见 T1；落盘前必须退出 Harness 含托盘 |
 | P3 | 4 个 bundle + 3 个 patch 包只存在于安装包内 | `doctor` WARN | 改造它们只能走 L3，风险最高，需单独立项 |
-| P4 | 会话全文搜索默认关闭 | base 里 `session-query-sqlite.openAt: never` | 见 T3，overlay 可改 `first-search` |
+| P4 | 会话全文搜索默认关闭 | base 里 `session-query-sqlite.openAt: never` | ✅ **已处置**（2026-10-06，改 `path` + `openAt: first-search`），待重启验收 |
 | P5 | `tool-ralph` 默认 disabled | base 行 `disabled: true` | 需要时用 overlay 打开 |
+
+## 2026-10-06 补充实测（三条会直接影响判断的事实）
+
+### 1 · 运行中的 DSH 从 `app.asar` 加载 in-box 包，不是从 junction 树
+
+`resolveBundleDir()` 是**安装锚点优先**（详见 [02-architecture.md](02-architecture.md#包解析运行期是安装锚点优先)）。
+活证据是 `cordis_inspect_query` 返回的 `packageDir` 落在 `resources\app.asar\dsh\node_modules\...`。
+`profiles/node_modules/@deepseek-ai/*` 那 195 个 junction 指向
+`D:\Z1848\dsh-desktop-build\dist\win-unpacked\resources\dsh-cli\node_modules\@deepseek-ai\*`，
+对 in-box bundle 是**失效回退层**。
+
+**判据：asar / junction 构建树 / `D:\Z1848\deepseek-harness` 源码仓库三者版本可能不同，
+查事实以 `app.asar` 为准。**
+
+### 2 · `desktop` profile 被 Electron 应用独占，CLI 拒绝 dump/boot
+
+```
+$ dsh --profile desktop --dump-config
+error: profile "desktop" is managed exclusively by the Electron application
+```
+
+守卫在 asar 内 `@deepseek-ai/dsh/lib/bin.js`：
+
+```js
+function rejectElectronProfile(program, profile) {
+  if (profile.toLowerCase() === "desktop") program.error("error: profile \"desktop\" is managed exclusively by the Electron application");
+}
+// 只有 Desktop 自己的载体才传 manageDesktopProfile = true
+function parseDshArgs(argv, version, manageDesktopProfile = false) { ... }
+```
+
+⇒ 预检走隔离探针家，见 [06-precheck.md](06-precheck.md)。
+
+### 3 · `cordis.patch.yml` 没有热重载
+
+全运行时 `fs.watch/watchFile` 的使用点只有：`cordis-plugin-hmr`（watch 插件源码而非配置）、
+`dsh-client-hmr`（客户端 bundle stat 轮询）、`dsh-credentials-local`、`dsh-settings-file`、
+`dsh-skill-filesystem`（chokidar）。`dsh-app-boot` 定义了
+`const PROFILE_PATCH_FILENAME = "cordis.patch.yml";`，但**没有任何 watcher 监听它**。
+
+⇒ 改 profile 层只能**下次启动**生效，本会话内无法热验证。
 
 ## 复验方式
 
 ```powershell
 node src/cli.mjs env        # 路径与存在性
 node src/cli.mjs doctor     # 全部不变量 + 指纹
+node src/cli.mjs precheck   # 权威组合结果（隔离探针家 + Electron-as-Node）
 node src/cli.mjs baseline write   # 与本文件对照的机器可读基线
 ```

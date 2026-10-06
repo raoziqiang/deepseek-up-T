@@ -9,6 +9,7 @@
 // 实测值：pickleSize=3392056，jsonLen=3392048，16+3392048 = 文件头长度。
 
 import fs from 'node:fs';
+import path from 'node:path';
 
 const JSON_START = 16;
 
@@ -81,6 +82,115 @@ export function asarPackageIndex(header) {
     if (m && !index.has(m[1])) index.set(m[1], path);
   }
   return index;
+}
+
+/**
+ * 按归档内路径（`/a/b/c` 或 `a/b/c`）定位一个节点。目录节点返回 `{ files }`，叶子返回 `{ size, offset }`。
+ * 找不到返回 null。
+ */
+export function findAsarNode(header, entryPath) {
+  const parts = String(entryPath).replace(/^\/+/, '').split('/').filter(Boolean);
+  let node = header;
+  for (const part of parts) {
+    if (!node?.files || !(part in node.files)) return null;
+    node = node.files[part];
+  }
+  return node;
+}
+
+/** 归档内全部叶子路径（正斜杠、以 '|' 无前导，用于 ls/grep 过滤）。 */
+export function listAsarPaths(header) {
+  return [...walkAsar(header)].map((e) => e.path);
+}
+
+/** 文件数据区的起点：16 字节头 + JSON 头（等价于 8 + pickleSize）。 */
+export function asarDataStart(pickleSize) {
+  return 8 + pickleSize;
+}
+
+/**
+ * 读出归档中单个条目的字节。
+ * - `unpacked: true` 的条目内容在 `<asar>.unpacked/<path>`，此处自动回落到该目录。
+ * - 目录或不存在返回 null。
+ *
+ * 这是本项目读「**真正在跑的那份代码**」的唯一可靠方式：实测 asar 内的包与
+ * `profiles/node_modules/@deepseek-ai/*`（junction 到本地构建树）以及源码仓库
+ * 都可能是**不同版本**，只有 asar 里的才是运行中 Electron 应用加载的那一份。
+ */
+export function readAsarEntry(asarPath, entryPath) {
+  const { header, pickleSize } = readAsarHeader(asarPath);
+  const node = findAsarNode(header, entryPath);
+  if (!node || node.files) return null;
+
+  if (node.unpacked === true) {
+    const fallback = path.join(`${asarPath}.unpacked`, entryPath.replace(/^\/+/, ''));
+    return fs.existsSync(fallback) ? fs.readFileSync(fallback) : null;
+  }
+
+  const size = Number(node.size);
+  const offset = Number(node.offset);
+  if (!Number.isFinite(size) || !Number.isFinite(offset)) {
+    throw new Error(`条目 ${entryPath} 缺少 size/offset，无法读取`);
+  }
+
+  const base = asarDataStart(pickleSize);
+  const fd = fs.openSync(asarPath, 'r');
+  try {
+    const buf = Buffer.alloc(size);
+    let got = 0;
+    while (got < size) {
+      const r = fs.readSync(fd, buf, got, size - got, base + offset + got);
+      if (r <= 0) throw new Error(`条目 ${entryPath} 读取中断（已读 ${got}/${size}）`);
+      got += r;
+    }
+    return buf;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/** 结构粗筛用的文本后缀白名单：只对它们做内容检索。 */
+const TEXT_EXT = /\.(m?[jt]s|cjs|json|ya?ml|md|txt|html|css|svg|map|xml|toml|sh|ps1)$/i;
+
+/**
+ * 在归档内容里检索正则，返回 `{ path, line, text }`。
+ * 只扫文本后缀且不超过 `maxBytes` 的条目；命中数达到 `limit` 即停。
+ * 用途：确认某个字符串**到底出自哪份产物**（源码仓库、junction 构建树、还是 asar）。
+ */
+export function grepAsarContent(asarPath, pattern, { limit = 20, maxBytes = 4 * 1024 * 1024 } = {}) {
+  const re = pattern instanceof RegExp ? pattern : new RegExp(pattern);
+  const { header, jsonLen, pickleSize } = readAsarHeader(asarPath);
+  const base = asarDataStart(pickleSize);
+  const hits = [];
+  const fd = fs.openSync(asarPath, 'r');
+  try {
+    for (const { path: entryPath, node } of walkAsar(header)) {
+      if (hits.length >= limit) break;
+      if (!TEXT_EXT.test(entryPath)) continue;
+      if (node.unpacked === true) continue;
+      const size = Number(node.size);
+      if (!Number.isFinite(size) || size === 0 || size > maxBytes) continue;
+      const buf = Buffer.alloc(size);
+      let got = 0;
+      while (got < size) {
+        const r = fs.readSync(fd, buf, got, size - got, base + Number(node.offset) + got);
+        if (r <= 0) break;
+        got += r;
+      }
+      if (got < size) continue;
+      const text = buf.toString('utf8');
+      if (!re.test(text)) continue;
+      const lines = text.split('\n');
+      for (let i = 0; i < lines.length; i += 1) {
+        if (re.test(lines[i])) hits.push({ path: entryPath, line: i + 1, text: lines[i].trim().slice(0, 200) });
+        if (hits.length >= limit) break;
+      }
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+  void jsonLen;
+  return hits;
 }
 
 export function asarStats(header) {

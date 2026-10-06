@@ -1,5 +1,5 @@
 {
-  "capturedAt": "2026-10-06T13:52:52.071Z",
+  "capturedAt": "2026-10-06T14:33:40.641Z",
   "project": "deepseek-up-T",
   "home": "C:\\Users\\Z1848\\.dsh",
   "profile": "desktop",
@@ -27,7 +27,7 @@
     "asarFiles": 12967,
     "asarPackages": 529,
     "asarDshPackages": 503,
-    "patchEntries": 10
+    "patchEntries": 11
   },
   "summary": {
     "error": 0,
@@ -76,14 +76,14 @@
       "id": "cordis.patch.yml",
       "level": "info",
       "ok": true,
-      "detail": "5.0KB  C:\\Users\\Z1848\\.dsh\\profiles\\desktop\\cordis.patch.yml"
+      "detail": "5.9KB  C:\\Users\\Z1848\\.dsh\\profiles\\desktop\\cordis.patch.yml"
     },
     {
       "group": "组合层",
       "id": "patch 顶层为数组",
       "level": "error",
       "ok": true,
-      "detail": "是（10 个条目）"
+      "detail": "是（11 个条目）"
     },
     {
       "group": "组合层",
@@ -167,7 +167,7 @@
       "id": "patch 引用的包可解析",
       "level": "error",
       "ok": true,
-      "detail": "10 个包全部可解析"
+      "detail": "11 个包全部可解析"
     },
     {
       "group": "解析",

@@ -142,7 +142,14 @@
 | 里程碑 | 内容 | 状态 |
 | --- | --- | --- |
 | **M0** | 项目骨架 + 环境基线 + `doctor` / `snapshot` / `baseline` | ✅ 已完成 |
-| **M1** | T5 工具链归拢 + T3 会话搜索开启 | 待办 |
-| **M2** | T1 鲸鱼动画落盘 + T2 新增 Provider | 待办 |
-| **M3** | T4 自建 Web 插件样板 | 待办 |
+| **M1** | 权威组合预检 `precheck` + 只读安装包工具 `asar` + T3 会话搜索开启 | 🚧 代码与配置已落地，**待重启验收** |
+| **M2** | T5 `../tools/` 归拢进 `vendor/` + T1 鲸鱼动画落盘 | 待办 |
+| **M3** | T2 新增 Provider + T4 自建 Web 插件样板 | 待办 |
 | **M4** | 升级重打自动化 | 待办 |
+
+### M1 的验收标准
+
+- [x] `dsht precheck` 能吐出与运行中应用一致的组合结果，退出码语义明确
+- [x] `dsht asar ls|cat|grep` 能只读地读安装包里**真正在跑的那份代码**
+- [x] `session-query-sqlite` 的 `path` + `openAt: first-search` 已写入 profile patch，且预检 diff 恰好只有这两行
+- [ ] **重启 DSH 后**，按会话内容搜索能命中（这一步只能由人来做）

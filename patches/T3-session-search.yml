@@ -1,0 +1,25 @@
+# ── deepseek-up-T · T3 使用效率 ── 开启会话全文搜索
+#
+# 为什么：base 层把 session-query-sqlite 配成
+#     path: ':memory:'   +   openAt: never
+# 于是 /search 面板默认只能按标题、工作区名做匹配；一旦按内容/代码搜索，
+# 就直接以 SESSION_QUERY_SEARCH_DISABLED 失败。这是「想找上周那段改过 X 的
+# 会话却找不到」的直接原因。
+#
+# 改成什么：
+#   openAt: first-search —— 不选 startup。startup 会在服务发布前就打开句柄，
+#     索引无效时**整个插件激活失败**，把搜索这个附加能力变成启动风险；
+#     first-search 把导入与打开推迟到第一次真正搜索，首次并发搜索共享同一
+#     个就绪 promise，启动路径零成本。
+#   path: $DSH_HOME/session-search.sqlite —— 必须是**专用的派生索引**，绝不
+#     能指向 session-persistence 的库；放在 DSH_HOME 下可随用户目录一起备份，
+#     且不占用任何项目目录。
+#
+# 注意：patch 是**按 id 整体替换该行的 config**（不是深合并），所以 path 与
+# openAt 必须一起写，漏掉任何一个都会被重置为 schema 默认值。
+
+- id: session-query-sqlite
+  name: '@deepseek-ai/dsh-session-query-sqlite'
+  config:
+    path: !!js dshHomePath('session-search.sqlite')
+    openAt: first-search

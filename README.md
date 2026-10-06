@@ -14,7 +14,7 @@ DSH 不是一个「装好就固定」的应用，它有四层可改造面，而�
 
 | 层 | 改造面 | 生效方式 | 代价 | 升级后 |
 | --- | --- | --- | --- | --- |
-| **L0 配置层** | `$DSH_HOME/profiles/<p>/cordis.patch.yml` | 重启 profile / HMR | 极低 | ✅ 幸存 |
+| **L0 配置层** | `$DSH_HOME/profiles/<p>/cordis.patch.yml` | **只能重启**（无 watcher，实测确认） | 极低 | ✅ 幸存 |
 | **L1 插件层** | 第三方插件包 + 自建插件（`dsh.bundle.patch` / `dsh.client`） | 热重载或重启 | 中 | ✅ 幸存 |
 | **L2 宿主层** | `$DSH_HOME/profiles/node_modules/@deepseek-ai/*` 下的核心包 | 重启 | 中高 | ⚠️ 被覆盖 |
 | **L3 安装包层** | `resources/app.asar` 内的 `lib/`、`renderer/` | 必须重启 Harness | 高 | ❌ 被覆盖 |
@@ -35,10 +35,12 @@ node src/cli.mjs doctor     # 体检：组合层不变量 / 插件可解析 / �
 node src/cli.mjs snapshot create -m "改之前"   # 留快照
 node src/cli.mjs snapshot list                 # 列出快照
 node src/cli.mjs snapshot restore <id>         # 回滚（回滚前会自动再留一份）
+node src/cli.mjs precheck                      # 改完 cordis.patch.yml 后、重启前，预检组合
 node src/cli.mjs baseline write                # 把当前事实固化为基线
 ```
 
 `doctor` 退出码：`0` = 无错误（警告不算），`1` = 存在 error 级问题。可直接接进任何 CI / 钩子。
+`precheck` 退出码：`0` = 组合可用，`1` = 有问题，`2` = 预检自身跑不起来。
 
 ---
 
@@ -51,6 +53,8 @@ deepseek-up-T/
 ├── src/                    控制台代码（纯 Node，零依赖）
 │   ├── paths.mjs           路径与环境事实解析（只读）
 │   ├── cordis.mjs          cordis.patch.yml 结构扫描
+│   ├── asar.mjs            安装包只读读取（条目定位 / 读取 / 内容检索）
+│   ├── precheck.mjs        权威组合预检（隔离探针家 + Electron-as-Node）
 │   ├── doctor.mjs          体检
 │   ├── snapshot.mjs        快照 / 回滚
 │   └── cli.mjs             命令入口
@@ -59,7 +63,9 @@ deepseek-up-T/
 │   ├── 02-architecture.md  四层改造面与组合顺序
 │   ├── 03-workflow.md      标准改造工作流
 │   ├── 04-roadmap.md       五条工作线路线图
-│   └── 05-conventions.md   约定与红线
+│   ├── 05-conventions.md   约定与红线
+│   └── 06-precheck.md      权威组合预检：为什么 CLI 做不到、怎么绕、边界在哪
+├── patches/                L0/L3 改动的声明式副本（可审计、可重放）
 ├── tracks/                 五条工作线的落地目录
 │   ├── T1-appearance/      外观与体验
 │   ├── T2-capability/      能力扩展
@@ -67,7 +73,7 @@ deepseek-up-T/
 │   ├── T4-webgui/          Web GUI 扩展
 │   └── T5-engineering/     工程化
 ├── vendor/                 预留：从 ../tools 逐步归拢 asar 工具链
-└── state/                  运行时状态（快照载荷已 gitignore）
+└── state/                  运行时状态（快照载荷与探针家已 gitignore）
 ```
 
 ---
@@ -84,4 +90,15 @@ deepseek-up-T/
 
 ## 状态
 
-当前为 **M0：基线与控制台**。已交付 `env` / `doctor` / `snapshot` / `baseline` 四个命令。五条工作线的具体改造见 [docs/04-roadmap.md](docs/04-roadmap.md)。
+当前为 **M1：工具链与第一批落地**。
+
+- **M0 已完成**：`env` / `doctor` / `snapshot` / `baseline` 四个命令，基线固化，git 初始化。
+- **M1 进行中**：
+  - ✅ `dsht precheck` —— 权威组合预检（`desktop` 被 Electron 独占，CLI 拒绝 dump，所以自建隔离探针家）
+  - ✅ `dsht asar ls|cat|grep` —— 只读读安装包里**真正在跑的那份代码**
+  - ✅ T3 第一件落地：**开启会话全文搜索**（`session-query-sqlite` 改 `path` + `openAt: first-search`），**等重启验收**
+
+> ⚠️ 本机 `cordis.patch.yml` 的改动**不会热重载**，必须重启 DSH 才生效。重启后请按
+> [tracks/T3-efficiency/README.md](tracks/T3-efficiency/README.md) 的验收项确认搜索真的能用了。
+
+五条工作线的具体改造见 [docs/04-roadmap.md](docs/04-roadmap.md)，预检机制见 [docs/06-precheck.md](docs/06-precheck.md)。

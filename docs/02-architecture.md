@@ -34,7 +34,43 @@ cordis.patch.yml                         ← 你的个人层（本项目主战�
 
 > 推论：改 base 行时不要改 `app.asar`，而是在 `cordis.patch.yml` 里写同名 `id` 覆盖它。这是本项目最重要的一条工程纪律。
 
-## 包解析的三条根
+## 包解析：运行期是「安装锚点优先」
+
+**重要更正（2026-10-06，实测）。** 下面这张三条根表描述的是 `doctor` 的静态查找顺序，
+**不是**运行中 DSH 的 bundle 解析顺序。运行期由 `@deepseek-ai/dsh-app-boot` 的
+`resolveBundleDir()` 决定，它是**安装锚点优先**：
+
+```js
+function resolveBundleDir(binName, packageName, installAnchor, profileDir) {
+  for (const anchor of [installAnchor, join(profileDir, "package.json")]) {
+    const dir = packageDirFromAnchor(anchor, packageName);
+    if (dir !== void 0) return dir;
+  }
+  throw new Error(`${binName}: cannot resolve profile bundle ...`);
+}
+```
+
+源码注释把这条规矩写成了契约：
+
+> The installation-first order is the contract that `@deepseek-ai/dsh-base` (and every other
+> in-box bundle) always comes from the same installation as the running dsh, never from a
+> profile-local copy.
+
+**活证据**：`cordis_inspect_query(platform=host, provider=Config, method=listConfigs, input={"entry":"include:session-query-sqlite"})`
+返回 `packageDir = D:\Program Files (x86)\deepseekharness\resources\app.asar\dsh\node_modules\@deepseek-ai\dsh-session-query-sqlite`。
+
+⇒ **in-box 包（含只存在于 asar 的 4 个 `dsh-experimental-*`）从 `app.asar` 加载。**
+`$DSH_HOME/profiles/node_modules/@deepseek-ai/*` 那 195 个条目虽然确实存在
+（且都是 junction，指向 `D:\Z1848\dsh-desktop-build\dist\win-unpacked\resources\dsh-cli\node_modules\@deepseek-ai\*`），
+但对 in-box bundle **是失效的回退层**。
+
+**由此得出的判据**：asar / junction 构建树 / `D:\Z1848\deepseek-harness` 源码仓库，
+三者**版本并不相同**（例：运行版 `dsh-session-query-sqlite` 的 config Schema 有
+`persistedReadConcurrency` 与 `preparedSessionCacheSize`，junction 构建树那份是
+`persistedInspectConcurrency` 且没有后者）。**查事实一律以 `app.asar` 为准**
+（用 `dsht asar cat` / `dsht asar grep` 直接读），读源码仓库只用于理解意图。
+
+### 静态查找顺序（`doctor` 用的）
 
 `doctor` 按这个顺序找包，命中即停：
 

@@ -17,6 +17,27 @@ function unquote(v) {
   return s;
 }
 
+/**
+ * 逐行剥掉 YAML 注释。整行注释直接丢；行内 ` #` 之后的内容也丢。
+ *
+ * 为什么必须剥：真实 profile 的 cordis.patch.yml 第 3 行注释里就写了
+ * `!!js` 这个字样（说明文字），不剥的话 doctor 会报「!!js 表达式 1 处」，
+ * 而实际上是 0 —— 属于把说明文字当成事实。
+ *
+ * 引号内的 `#` 不当注释；这是够用的启发式，不是完整 YAML 词法分析。
+ */
+function stripComment(line) {
+  if (line.trimStart().startsWith('#')) return '';
+  let quote = null;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (quote !== null) { if (ch === quote) quote = null; continue; }
+    if (ch === '"' || ch === "'") { quote = ch; continue; }
+    if (ch === '#' && i > 0 && /\s/.test(line[i - 1])) return line.slice(0, i);
+  }
+  return line;
+}
+
 /** 去掉注释与空行后，内容是否为顶层空数组 */
 export function isEmptyArray(text) {
   const meaningful = String(text ?? '')
@@ -47,7 +68,8 @@ export function scanPatch(text) {
     lineCount: lines.length,
   };
 
-  out.jsTagCount = (src.match(/!!js/g) ?? []).length;
+  // 统计 !!js 时先剥注释：注释里的 `!!js` 是说明文字，不是表达式
+  out.jsTagCount = (lines.map(stripComment).join('\n').match(/!!js/g) ?? []).length;
   lines.forEach((l, i) => { if (l.includes('\t')) out.tabLines.push(i + 1); });
 
   if (isEmptyArray(src)) {

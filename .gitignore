@@ -5,6 +5,13 @@ node_modules/
 # 生成的快照载荷（元数据模板会保留目录）
 state/snapshots/
 
+# 探针家与预检产物：内含 junction 与本机绝对路径，不可跨机复现；
+# schema dump 单份近 1MB / 3 万行，可随时用 `precheck --schema` 重新生成。
+state/probe-home/
+state/probe-*
+state/dump-*
+state/*.err
+
 # 临时与日志
 tmp/
 *.log
