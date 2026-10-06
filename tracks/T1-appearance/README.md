@@ -9,7 +9,7 @@
 - `dsh-whale-widget@0.3.18` 已装为 **L1 插件**：Web 右下角余额小鲸鱼、气泡点击序列、音效、角色、动图。
 - 数据目录：`.dsh/whale-audio`、`.dsh/whale-bubble-imgs`、`.dsh/whale-roles`（多数为空）。
 - **动画仍未落盘**：`app.asar` 与 `app.asar.whale-backup` 的 sha256 一致（`doctor` 可验）。
-- **待落盘的暂存包已就绪且已验证**：`state/staged/app.asar`（121,415,560 B，11 条目按声明改动，其余 11,466 条目逐字节一致）。
+- **待落盘的暂存包已就绪且已验证**：`state/staged/app.asar`（121,416,081 B，11 条目按声明改动，其余 11,466 条目逐字节一致）。
 
 ## 主战场
 
@@ -63,10 +63,12 @@
 
 - 暂存包与声明**完全吻合**：`node vendor/asar/verify.mjs "<app.asar.whale-backup>" state\staged\app.asar --expect 11`
   → `OK：恰好 11 个预期条目不同，其余逐字节一致`（比较 11,466 个归档内条目 + 1,497 个 unpacked 条目），
-  差异集合 = 4 改（`renderer/welcome.html` 645→991、`lib/main.js` 490173→497395、
+  差异集合 = 4 改（`renderer/welcome.html` 645→1510、`lib/main.js` 490173→497395、
   `lib/preload-app.cjs` 41075→41776、`dsh-api-session-controller/lib/index.js` 124151→125198）
   + 7 增（`renderer/whale.css`、`renderer/whale-splash.js`、`renderer/pendant.html`、
   `renderer/pendant.css`、`renderer/pendant.js`、`lib/preload-charm.cjs`、`lib/welcome/whale-animation.js`）。
+- **引用完整性**已单独核对（`node test\assets.test.mjs`）：这两页 HTML 引用的每个本地资源都真的在归档里，
+  且替换页没有丢掉原版加载过的东西（见下方「登录窗口页面」那条记录 —— 这正是它抓出来的）。
 - 脚本的守卫路径**已实测**：Harness 运行中运行它 → 打印 `[STOP]`、`exit 2`、**不动任何文件**。
 - `install.mjs` 自己在落盘后还会**按声明逐项比对差异集合**，多一条少一条都判失败并提示回滚；
   原版备份 `app.asar.whale-backup` 在落盘前已存在且与当前 `app.asar` 逐字节一致。
@@ -82,6 +84,38 @@
 **出问题怎么退**：`node vendor\whale\install.mjs --rollback`（从备份恢复，恢复后自带逐字节核对）。
 
 **记录**
+
+### 2026-10-06 · 登录窗口页面被换成了「预览页」：替换素材没有锚点保护
+
+- **症状**：**没有任何症状** —— 构建 exit 0、11 个条目按声明改动、其余 11,466 个条目逐字节一致、
+  `node --check` 全过、`doctor` 也不报错。它只会在**登录/欢迎窗口**真的出现时表现出来：窗口打开了，
+  里面什么都没有。
+- **怎么发现的**：给 `_whale-splash` 的渲染层找最后一条离线证据时，先问了一句「替换页在归档里到底引用了什么」。
+  `renderer/welcome.html` 是 DSH 的欢迎/登录窗口页面（`lib/main.js` 的 `openWelcomeWindow()` 用
+  `loadFile(join(app.getAppPath(), "renderer", "welcome.html"))` 载入），三处不对。
+- **三处问题**：
+  1. 漏了原版加载的 `../lib/welcome/welcome.js`（欢迎界面自己的 React 启动脚本，挂到 `#root`）
+     与 `../lib/welcome/welcome.css` ⇒ `#root` 永远是空的，登录界面不会出现；
+  2. `../lib/welcome/whale-splash.js` 指向一个归档里**不存在**的条目（它实际插入在
+     `renderer/whale-splash.js`）⇒ splash 控制器 404，画布上什么都不画；
+  3. CSP 少了 `font-src 'self'` ⇒ 品牌字体被 `default-src 'none'` 拦掉。
+- **根因**：`action: replace` 的素材是**手写的**，和 `action: patch` 完全不同 —— patch 的素材是原版那份文件，
+  构建时逐字节校验，锚点错一处就命中不了；而 replace 的素材只被检查「与原来不同」，
+  **从不检查「是不是少了什么」**。这一页应该是从离线预览页改来的（`.probe\build\preview.html`
+  就是同一批脚本的预览载体），改的时候把应用自己的启动脚本一起删掉了。
+- **修法**：改声明里的 `source`（`.probe\build\renderer\welcome.html`）—— 恢复 `font-src 'self'`、
+  `../lib/welcome/welcome.css`、`../lib/welcome/welcome.js`，并把 splash 控制器指向同目录真实存在的
+  `whale-splash.js`；页内注释写明这三样为什么必须留着。重新 `node vendor\whale\build.mjs` →
+  11 个条目按声明改动（`renderer/welcome.html` 645→1510）。
+- **怎么防止再来一次**：新增 `test\assets.test.mjs`（28 条断言，发现式总入口自动收进第 8 套）。三条不变量：
+  **A.** 被 insert/replace 的 HTML，它引用的每个本地资源都必须在归档里存在；
+  **B.** `action: replace` 的页面不许丢掉原版引用过的任何资源；
+  **C.** 替换页的 CSP 不许比原版更严（更严 = 原来能加载的现在加载不了）。
+  坏版本原文留在 `test\fixtures\welcome-html-broken-before-2026-10-06.html`（sha256 前 16 位 `5BC23F972FCC30A6`），
+  测试直接拿它当反例 —— 既证明规则会响，也证明「就是这些规则没响才放它过去」。
+- **教训**：**只有 `patch` 类素材受锚点保护。手写素材通过「字节核对」不代表内容正确 —— 字节核对回答的是
+  「是不是按声明改了」，从不回答「改对了没有」。** 凡是「替换一整个文件」的动作，都必须额外问一句：
+  原来那一份加载的东西，新的这一份还在加载吗？
 
 ### 2026-10-06 · 发现「已构建未落盘」的那份产物是坏构建
 

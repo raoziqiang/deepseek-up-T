@@ -25,7 +25,7 @@ SyntaxError: Identifier 'readFileSync' has already been declared
 原因是 `patch-main.mjs` 无条件插入 `import { readFileSync, writeFileSync } from "node:fs";`，
 而原版 `main.js`（esbuild 产物）第 8 行已声明同名绑定 —— 落盘后主进程会拒绝启动。
 已删除该文件（可再生），并在 `vendor/whale/patch-main.mjs` 里修掉根因（只补缺的绑定）。
-现在有一份**语法正确、已交叉验证**的暂存包：`state/staged/app.asar` = 121,415,560 字节。
+现在有一份**语法正确、已交叉验证**的暂存包：`state/staged/app.asar` = 121,416,081 字节。
 
 ## DSH 用户态（DSH_HOME）
 

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; base-uri 'none'; form-action 'none'">
+    <title></title>
+    <link rel="stylesheet" href="../lib/welcome/brand-font.css">
+    <link rel="stylesheet" href="welcome.css">
+    <link rel="stylesheet" href="whale.css">
+    <script src="../lib/welcome/whale-animation.js" defer></script>
+    <script src="../lib/welcome/whale-splash.js" defer></script>
+  </head>
+  <body>
+    <!--
+      The whale splash renders into this canvas and then hands control back to the
+      welcome UI: the original React app mounts into #root, and the canvas fades
+      out underneath it once the charm has settled.
+    -->
+    <canvas id="whale-stage" aria-hidden="true"></canvas>
+    <div id="root"></div>
+  </body>
+</html>

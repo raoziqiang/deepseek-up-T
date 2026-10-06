@@ -113,6 +113,12 @@ node vendor/asar/verify.mjs <原版> <改动后> --expect 11
 落盘链路本身的自检（构建确定性、`--to` 演练、三条拒绝路径、全程在用安装包 sha256 未变）：
 `node test/install.test.mjs` —— 26 条断言，约 4 秒，不碰安装目录。
 
+构建产物**内容**的自检（引用完整性校验，**字节核对查不出来的那一类**）：
+`node test/assets.test.mjs` —— 28 条断言。它只读归档，检查被 insert/replace 的 HTML 引用的每个本地资源
+都真的存在、`action: replace` 的页面没有丢掉原版引用过的资源、替换页的 CSP 没变严。
+`vendor/asar/verify.mjs` 回答的是「是不是按声明改了」，这一套回答的是「改对了没有」——
+两者的差别见 `tracks/T1-appearance/README.md` 里那条登录窗口页面的记录。
+
 ## 归拢状态（源在 `D:\Z1848\harness-ds\tools\`，共 23 个脚本）
 
 **23/23 已全部归拢**，`../tools/` 只剩历史副本（保留原位未删，见下方「为什么没删」）。
