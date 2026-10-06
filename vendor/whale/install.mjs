@@ -8,9 +8,14 @@
 //
 // 用法：
 //   node vendor/whale/install.mjs --yes                落盘暂存包（默认 state/staged/app.asar）
+//   node vendor/whale/install.mjs --yes --to <archive> 演练：写到别处并按声明核对（不碰在用安装包）
 //   node vendor/whale/install.mjs --rollback           从 app.asar.whale-backup 恢复
 //   node vendor/whale/install.mjs --decl <file>        换一份声明
 //   node vendor/whale/install.mjs --staged <archive>   换暂存包位置
+//
+// `--to` 存在的理由：这条路径过去**没法在 Harness 开着的时候验证** —— 它的守卫（以及
+// 「声明与实际差异是否一致」这条核对）只在真落盘那一刻才跑，而真落盘一年只做几次。
+// 现在它可以在临时目标上跑一遍：声明、守卫、核对、字节相等全部能离线验。
 import fs from 'node:fs';
 import path from 'node:path';
 import {
@@ -68,6 +73,33 @@ function main() {
       `没有暂存包：${staged}\n先构建：node vendor/whale/build.mjs\n`,
     );
   }
+
+  // ── 演练路径（--to）：不碰在用安装包，因此不需要退出 Harness ────────────────
+  // 刻意用 copyFileSync 而不是 renameSync：真落盘那条路会把暂存包**移走**，
+  // 而演练跑完之后人还要接着用同一个暂存包去落盘。
+  const to = arg('--to', null);
+  if (to) {
+    const target = path.resolve(to);
+    if (target === path.resolve(P.asar)) {
+      // 指向在用的那一份 = 真落盘，走下面的守卫路径，不许借 --to 绕过去。
+      process.stdout.write('--to 指的就是在用安装包，按真落盘处理（需要 Harness 已退出）\n');
+    } else if (isInside(target, P.resourcesDir)) {
+      return fail(
+        `演练目标不许落在安装目录里：${target}\n` +
+        `那会让人以为改动落盘了，其实 Harness 读的仍是 ${P.asar}。换个目录（例如 state/cmp/）。\n`,
+      );
+    } else {
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.copyFileSync(staged, target);
+      process.stdout.write(
+        `\n⚠ 演练：这次写的**不是**在用安装包。\n` +
+        `  目标  ${target}\n` +
+        `  在用  ${P.asar}（未被改动）\n`,
+      );
+      return verifyAgainst(target, decl, declFile, { rehearsal: true });
+    }
+  }
+
   assertHarnessStopped('覆盖 app.asar');
 
   const stagedInfo = fs.statSync(staged);
@@ -94,7 +126,22 @@ function main() {
   }
 
   // ── 用声明核对实际差异 ────────────────────────────────────────────────────
-  const check = runAsarVerify(P.asarBackup, P.asar, decl.expect);
+  return verifyAgainst(P.asar, decl, declFile, { rehearsal: false });
+}
+
+/** `child` 是否落在 `parent` 目录内（含相等）。用于拒绝「往安装目录里演练」。 */
+function isInside(child, parent) {
+  const rel = path.relative(path.resolve(parent), path.resolve(child));
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+/**
+ * 落盘/演练共用的核对：拿声明去比对**实际差异条目集合**，多一条少一条、
+ * 或者哪条不是声明里写的，都算失败。两条路共用同一段代码，是为了不让
+ * 「演练通过」和「真落盘通过」变成两套可能各说各话的判据。
+ */
+function verifyAgainst(target, decl, declFile, { rehearsal }) {
+  const check = runAsarVerify(P.asarBackup, target, decl.expect);
   if (!check.ok) {
     process.stderr.write(
       `\n核对失败：预期 ${decl.expect} 个差异，实际 ${check.problems.length} 个。\n` +
@@ -117,7 +164,9 @@ function main() {
 
   process.stdout.write(
     `\n完成：${actual.size} 个条目按声明改动，其余全部逐字节一致。\n` +
-    '启动 DeepSeek Harness 即可看到新的启动界面与桌面挂件。\n',
+    (rehearsal
+      ? '这是演练：在用安装包一个字都没动。真要落盘请在退出 Harness 后跑同样的命令、去掉 --to。\n'
+      : '启动 DeepSeek Harness 即可看到新的启动界面与桌面挂件。\n'),
   );
 }
 

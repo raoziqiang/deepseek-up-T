@@ -119,8 +119,11 @@ deepseek-up-T/
     落盘仍留给人挑时间；素材过期时**先不构建**，因为拿旧素材打补丁会静默丢掉新版本代码。
   - ✅ `precheck --profile-json <文件>` —— 用**候选** profile 清单预检，改动前就能知道会不会炸。
   - ✅ T3 缓存经济学结案：命中率 98.3%、17 次折叠净 **+92.35M tok** ⇒ 缓存层没有问题可修。
-  - 🚧 T4 脚手架 `plugins/dsh-up-t` 已落盘（离线单测 14 条断言 + 候选预检 + doctor 全过），
-    **只差重启 DSH 后确认胶囊真的出现**。
+  - 🚧 T4 脚手架 `plugins/dsh-up-t` 已落盘（宿主路由 + 六条操作 + 心跳 + 握手 + 设置页 + 左下角胶囊，
+    离线单测覆盖到这些形态；候选预检与 `doctor` 全过），**只差重启 DSH 后确认界面里真的出现了**。
+    `dsht accept` 会在重启后把这件事一次问完。
+  - ✅ 落盘链路可**离线演练**：`install.mjs --to <临时目标>`（或双击 `install-whale.cmd /dry`）在不退出
+    Harness、不动在用安装包的前提下跑同一段声明核对；`test/install.test.mjs` 26 条断言守着它。
 
 > ⚠️ `cordis.patch.yml` 与 profile `package.json` 的改动**不会热重载**，必须重启 DSH 才生效；
 > `app.asar` 的改动必须**连托盘一起退出 Harness** 才能落盘。重启后请按

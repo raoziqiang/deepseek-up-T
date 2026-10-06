@@ -27,7 +27,7 @@
 
 - [x] 清理 `app.asar.tmp` 残留（115.8 MB）——**已确认是坏构建**（见下「记录」），已删除
 - [ ] 鲸鱼启动动画落盘：**运行 `install-whale.cmd`**（先完全退出 Harness，见下方操作清单）
-- [ ] 把主题/气泡等偏好从 asar 侧迁到 `dsh-whale-widget` 的 L1 设置
+- [x] 把主题/气泡等偏好从 asar 侧迁到 `dsh-whale-widget` 的 L1 设置 —— **侦察后结论是「本来就不该这么做」**：`dsh-whale-widget` 0.3.18 的 `package.json` 只声明 `dsh.bundle.patch`，**没有任何 `Config` schema**，它的偏好本来就不在 asar 里，而是落在 `$DSH_HOME\.dshw-size.json` / `.dshw-turn.json` / `.dshw-usage.json`（设备本地，随用随写）。四层改造面（L0–L3）管的是**组合与代码**，不管这层用户数据。⇒ 这条待办的前提是错的，撤销；真要改默认值应改 widget 自己的默认值（L1 包内），而不是「迁到 L1 设置」（见下方记录）。
 
 ## 验收
 
@@ -47,13 +47,17 @@
 
 **怎么做**
 
+0. （可选，**不用退出 Harness**）先演练：双击 `install-whale.cmd` 前先跑 `install-whale.cmd /dry`，
+   或 `node vendor/whale/install.mjs --yes --to state\cmp\rehearsal-app.asar` —— 它把暂存包写到临时文件、
+   按声明逐项核对，**不动在用安装包**。不放心产物的那天就先跑这一步。
 1. 右键**托盘**里的 DeepSeek Harness 图标 → **退出 / Quit**。
    ⚠️ 关窗口不够 —— 它只是收进托盘，进程还在，`app.asar` 仍然被占用。
 2. 双击 `deepseek-up-T\install-whale.cmd`。
    - 脚本先查 `tasklist`，Harness 还在就打印 `[STOP]` 并 **exit 2**（不会白写文件）；
    - 不在运行才调用 `node vendor\whale\install.mjs --yes`；
    - 结束后按任意键关窗。
-3. 重新启动 DeepSeek Harness。
+3. 重新启动 DeepSeek Harness，然后跑 `node src\cli.mjs accept` —— 它会一次问完宿主路由、渲染层握手、
+   L0/L3 声明与体检，把「该转成 pass 的那几项」直接列出来。
 
 **这一步已经预先验过的东西**（所以你不用担心它是「碰运气」）：
 
@@ -100,3 +104,25 @@
   - 与旧坏暂存包交叉比对：`node vendor/asar/verify.mjs "<旧 tmp>" state/staged/app.asar --expect 2`
     → `OK：恰好 2 个预期条目不同，其余逐字节一致`，差异即 `lib/main.js 497450 -> 497395`（删掉重复 import）与 `lib/welcome/whale-animation.js 23820 -> 23828`（换掉 banner）。**确定性构建**获得独立证据。
 - **怎么撤**：`node vendor/whale/install.mjs --rollback`。
+
+### 2026-10-06 · 落盘链路现在可以离线演练（`install.mjs --to` + `test/install.test.mjs`）
+
+- **改了什么**：
+  - `vendor/whale/install.mjs` 新增 `--to <archive>` 与 `/dry` 包装：把暂存包**复制**到临时目标
+    （不是 rename —— 真落盘那条路会把暂存包移走，而演练之后人还要用同一个暂存包去落盘）、
+    在临时目标上跑**同一段**声明核对；`--to` 落在安装目录里一律拒绝，`--to` 指向在用 asar 时
+    刻意按真落盘处理（不给它开后门绕过 Harness 守卫）。
+  - `install-whale.cmd` 增加 `/dry`（不用退出 Harness 的演练）与落盘后的 `dsht accept` 提示。
+  - 新增 `test/install.test.mjs`（26 条断言，套数 5 → 6）。
+- **为什么**：这条路径过去只在**真落盘那一刻**才被验证 —— 一年做几次的事等于没验证，而它最危险的
+  两种坏法都很安静：写之前忘了确认 Harness 退出；写完只看退出码、不核对「实际改的条目集合」是不是
+  声明里那几条（锚点全命中、却静默改了别的东西）。
+- **怎么验**：`node test/install.test.mjs` → 26/26，4.1 秒。它真跑：两次独立构建 sha256 相同（确定性）→
+  `upgrade --stage` 重打 → `--to` 演练落盘 → 按原版备份核对差异集合恰好 = 声明数 = 列出数 →
+  三条拒绝路径（无 `--yes` / 目标在安装目录内 / Harness 在跑时 `assertHarnessStopped` 拦下）→
+  **全程前后在用 `app.asar` 与原版备份 sha256 均未变**。
+- **怎么撤**：`--to` 是新增分支，删掉即回到旧行为；演练产物落在 `state/cmp/`（已 gitignore）且测试自清。
+- **副作用 / 教训**：`install-whale.cmd` 里**不能出现非 ASCII 字节**。cmd.exe 按当前代码页解析这个文件，
+  中文 `rem` 注释会把后续行嚼成 `'K]' is not recognized as an internal or external command` 之类的假错误，
+  而且退出码会是 0（看起来像成功）。现在该文件是纯 ASCII + 中文说明放在本 README 里。
+  （顺带：LF 行尾在这个文件上实测没问题，坏的是字节而不是行尾。）

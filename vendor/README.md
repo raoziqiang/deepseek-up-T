@@ -19,7 +19,7 @@ vendor/
   asar/verify.mjs          逐字节比对两个归档，--expect N 校验差异数量
   asar/write.mjs           单条目重写，其余条目字节保持不变
   whale/build.mjs          按 patches/*.yml 构建暂存包（不碰安装目录）
-  whale/install.mjs        把暂存包落盘 / 从备份回滚（唯一会覆盖在用 app.asar 的地方）
+  whale/install.mjs        把暂存包落盘 / 从备份回滚 / --to 演练核对（唯一会覆盖在用 app.asar 的地方）
   whale/patch-main.mjs     lib/main.js 的锚点替换
   whale/patch-preload.mjs  lib/preload-app.cjs 的锚点替换
   whale/patch-session-controller.mjs  视觉模型自动路由的锚点替换
@@ -62,6 +62,17 @@ node vendor/whale/install.mjs --yes   # 需要先退出 Harness
 分开的理由：构建可以随时重跑、失败、回退；落盘只有一次机会。
 构建阶段就把「暂存包 vs 原版」逐字节比完了，所以落盘只是一次文件替换。
 
+**落盘可以在 Harness 开着的时候先演练**（不需要退出，也不动在用安装包）：
+
+```powershell
+node vendor/whale/install.mjs --yes --to state/cmp/rehearsal-app.asar
+```
+
+`--to` 把暂存包**复制**到临时目标（真落盘那条路是 rename，会把暂存包移走；演练之后人还要用它去落盘），
+然后对临时目标跑**同一段**声明核对。两条规则：`--to` 落在安装目录里一律拒绝（那会让人以为落盘了，
+其实 Harness 读的仍是在用那份）；`--to` 指向在用 `app.asar` 时按真落盘处理，不许借它绕过 Harness 守卫。
+双击版：`install-whale.cmd /dry`。这条路径的回归由 `test/install.test.mjs`（26 条断言）守着。
+
 ## 路径约定
 
 所有路径从 `src/paths.mjs` 来（`vendor/lib/harness.mjs` 再导出），**不在 vendor 里另拼一套**。
@@ -98,6 +109,9 @@ node vendor/asar/verify.mjs <原版> <改动后> --expect 11
 `verify.mjs` 无位置参数时默认比较 `app.asar.whale-backup` vs `app.asar`。
 
 实测输出（2026-10-06）：`比较 11470 个归档内条目、1497 个 unpacked 条目` + `OK：逐字节一致`。
+
+落盘链路本身的自检（构建确定性、`--to` 演练、三条拒绝路径、全程在用安装包 sha256 未变）：
+`node test/install.test.mjs` —— 26 条断言，约 4 秒，不碰安装目录。
 
 ## 归拢状态（源在 `D:\Z1848\harness-ds\tools\`，共 23 个脚本）
 
