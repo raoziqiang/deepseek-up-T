@@ -126,7 +126,12 @@
         root.style.top = pos.y + 'px';
         root.style.bottom = 'auto';
       }
-      if (localStorage.getItem(HIDDEN_KEY) === '1') root.style.display = 'none';
+      // 存储整块被禁（企业策略 / 隐私模式）时 getItem 会直接抛。这一句曾经没包 try：
+      // 抛出去会被最外层那个 catch 吞掉，而那时事件监听与定时刷新**都还没注册** ——
+      // 表现是「胶囊在，但点不动、状态永远不刷新」，且没有任何报错。所以必须就地兜住。
+      var hidden = false;
+      try { hidden = localStorage.getItem(HIDDEN_KEY) === '1'; } catch (e) { /* 存储被禁：当成没隐藏 */ }
+      if (hidden) root.style.display = 'none';
 
       var row = function (k, v, color) {
         var line = el('div', { display: 'flex', gap: '8px', margin: '2px 0' });

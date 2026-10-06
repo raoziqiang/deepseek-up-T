@@ -34,6 +34,11 @@ up-T · ?             ← 黄点：没有原版备份可比 / 宿主没回应
 `apply()` 的**第一条语句**就是 `writeHeartbeat()`，然后立刻注册 `webserver/index-inject` 的注入行；
 其余逻辑在 `root.inject(['webServer'], …)` 里。
 
+左下角那个胶囊的源码是 `assets/client.js`（经典脚本、无依赖、无构建），由 `/dsh-up-t/client.js` 提供。
+它整段包在一个 `try { … } catch (e) { console.warn(…) }` 里 —— 这是刻意的（挂件坏掉绝不能影响主界面），
+代价是**任何异常都表现为「界面上什么都没有」**：没有胶囊、没有报错、没有堆栈。
+正是因为这个，它的行为用 `test/capsule.test.mjs` 在假 DOM 里真跑一遍（见下面「验证」）。
+
 ## ★ 心跳：回答「重启到底有没有把我装进去」
 
 这个插件的失败路径**全都是静默的** —— 没重启就什么都没发生；`apply()` 抛错宿主照常跑；
@@ -262,11 +267,21 @@ node src\cli.mjs precheck --profile-json state\candidate\package.json
 
 ```powershell
 cd D:\Z1848\harness-ds\deepseek-up-T
-node test\plugin.test.mjs   # 46 条断言：心跳（apply + ready 两枚、trail、route 清单）、注入行、四条路由、操作守卫与真 spawn、specs 的 writes 标记、握手通道（GET 只读 / 缺头 403 / 两条通道分开记 / bundle 恰好握一次）、客户端 bundle 形态与按钮、设置页的心跳行与握手状态、判定的三态与「拿不到 ≠ 不同」（含 `findInstall` 跳过 0 字节候选的回归测试）、清理
-node src\cli.mjs doctor     # bundles 全部可解析
-node src\cli.mjs precheck   # 组合可用
+node test\plugin.test.mjs    # 46 条断言：心跳（apply + ready 两枚、trail、route 清单）、注入行、四条路由、操作守卫与真 spawn、specs 的 writes 标记、握手通道（GET 只读 / 缺头 403 / 两条通道分开记 / bundle 恰好握一次）、客户端 bundle 形态与按钮、设置页的心跳行与握手状态、判定的三态与「拿不到 ≠ 不同」（含 `findInstall` 跳过 0 字节候选的回归测试）、清理
+node test\capsule.test.mjs   # 16 条断言：在假 DOM + 假 fetch 里把 assets/client.js 真跑一遍 —— 挂载（complete / loading / 无 body / 重试）、幂等、握手、状态渲染与数字、点击展开与拖动、右键隐藏与持久化、四种降级文案、存储被禁时依然可用，以及「全程一次都没有 `client failed`」
+node src\cli.mjs doctor      # bundles 全部可解析
+node src\cli.mjs precheck    # 组合可用
 ```
 
 **胶囊与设置页真的出现**只能在重启 DSH 之后看到 —— 组合层文件没有热重载。
 （客户端脚本本身按 mtime 重读，所以**改客户端代码之后硬刷新页面即生效**，不用再重启。
 但**操作通道是宿主半侧的新路由，必须重启**。）
+
+`test/capsule.test.mjs` 不是在检查「语法对不对」，而是把脚本连同它的失败模式一起钉住：
+给最小假 DOM（`createElement` / `appendChild` / `style` / `textContent` / 事件派发 / `getBoundingClientRect`）、
+假 `localStorage`、假 `fetch`（回一份**真实形状**的 `status.json`），然后断言胶囊真的挂上了、
+面板里的数字真的是人话、拖动与隐藏真的改到了该改的状态。
+它抓到过一个真 bug：`localStorage.getItem(HIDDEN_KEY)` 那一句以前没包 `try`，而存储被禁时它抛出的异常
+会被最外层 catch 吞掉 —— 那时事件监听与定时刷新**都还没注册**，表现是「胶囊在，但点不动、状态永不刷新」，
+且没有任何报错。现在这句话有 `try`，而「存储整个被禁时胶囊仍然可用」是其中一条断言。
+

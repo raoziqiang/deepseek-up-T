@@ -667,5 +667,33 @@ Harness 在跑时 `assertHarnessStopped` 拦下并报出 pid）→ **全程前�
    **而且退出码是 0**（看起来像成功）。现在它是纯 ASCII，中文说明放在 `tracks/T1-appearance/README.md`。
    （顺带一个反直觉的结论：这个文件是 LF 行尾，实测没问题 —— 坏的是字节，不是行尾。）
 
+### 2026-10-06 · 把「故意吞掉异常」的渲染层脚本也变成可验证的：`test/capsule.test.mjs`
+
+**起因**：给 T4 那座插件做重启前的最后一遍风险盘点，发现整条链上只剩一处**没有任何证据**：
+`plugins/dsh-up-t/assets/client.js`（左下角胶囊）整段包在 `try { … } catch (e) { console.warn(…) }` 里。
+这个 `try` 是刻意加的（挂件坏掉不能影响主界面），但它的代价是**异常不再有第二个出口** ——
+界面上「什么都没有」，日志里只有一行 warning，用户重启后只会问「说好的胶囊呢」。
+而 `test/plugin.test.mjs` 覆盖的是宿主路由与 `lib/client.js`（设置页 bundle），这个文件**一行断言都没有**。
+
+**做了什么**：`test/capsule.test.mjs`（**16 条断言**，发现式总入口自动收，套数 6 → **7**）。
+不查语法，而是用 `node:vm` 给假 DOM + 假 `localStorage` + 假 `fetch`（回**真实形状**的 `status.json`）
+把脚本真跑一遍，断言落到**具体产物**上（DOM 里有没有那个节点、面板里的数字是不是人话、
+`localStorage` 里有没有那个键）。细节见 `tracks/T4-webgui/README.md` 的第九步记录。
+
+**当场抓到的真 bug**：`localStorage.getItem(HIDDEN_KEY)` 没包 `try`。存储被禁时它抛出的异常被最外层
+catch 吞掉，而那一刻**事件监听与定时刷新都还没注册** —— 胶囊在，但点不动、永不刷新，且没有报错。
+先跑到 13/16（含这条失败），修完才 16/16。
+
+**教训**：
+1. **一段故意吞掉异常的代码，等于把「它坏了」也从世界里删掉了。** 对这种代码，
+   「读一遍觉得没问题」不算验证；**把它跑起来、断言产物存在**才算。
+2. 断言要落在**产物**上，不要落在**过程**上（「DOM 里有胶囊节点」而不是「挂载函数被调用了」）——
+   后者在脚本提前 return / 被外层 catch 时同样会通过。
+3. 假宿主/假 DOM 必须模拟真实的**时序**（`readyState`、依赖就绪、`textContent` setter 清子节点、
+   事件派发顺序），否则测试会替被测代码把 bug 藏起来。这一条在写 `plugin.test.mjs` 与
+   `capsule.test.mjs` 时各踩了一次（假 DOM 少了 `window.addEventListener` ⇒ 13 条里一半假失败；
+   用 `cursor === 'grab'` 认胶囊 ⇒ 按住之后找不到，因为按下时它被改成 `grabbing`）。
+
+
 
 
