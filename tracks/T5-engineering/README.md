@@ -46,19 +46,24 @@ node vendor/whale/build.mjs            # → state/staged/app.asar（可随便�
 node vendor/whale/install.mjs --yes    # 需要先完全退出 Harness
 ```
 
-## 待归拢的既有资产（`../tools/`，共 23 个脚本）
+| `vendor/visual/*.mjs` | 视觉验证 6 个（抓帧 / 描轮廓 / 数值分析 / 形状 / 配色 / 静态服务） | 只读 |
+| `vendor/route/*.mjs` | Provider 与网关探针 8 个（`store-go-credential.mjs` 会写凭据库） | 只读为主 |
 
-已归拢 9 个（另新增 `vendor/lib/harness.mjs`）。剩余 14 个：
+约定见 `vendor/README.md`。四条铁律：省略 `--out` 绝不原地重写、写安装包前必须过进程守卫、
+落盘后必须拿实际差异集合与声明逐项比对、声明读不到就报错不用默认值。
 
-| 脚本 | 作用 |
-| --- | --- |
-| `capture-frames.mjs` | 无头 Chrome + CDP 按时间轴截图 |
-| `trace-whale.mjs` | 在真实渲染像素上描轮廓，打印 ASCII |
-| `analyze-frames.mjs` | 统计每帧占比与质心轨迹 |
-| `frame-colors.mjs` / `check-whale-shape.mjs` / `serve-dir.mjs` | 视觉验证辅助 |
-| `e2e-opencode-go.mjs` / `verify-live-routes.mjs` / `market-verify.mjs` | T2 的端到端验证 |
-| `probe-go-protocols.mjs` / `probe-go-session-header.mjs` / `probe-opencode-go.mjs` | T2 的协议探针 |
-| `fetch-go-docs.mjs` / `store-go-credential.mjs` | 文档抓取与凭据写入 |
+**构建与落盘是两步**，刻意分开：
+
+```powershell
+node vendor/whale/build.mjs            # → state/staged/app.asar（可随便重跑、失败、比对）
+node vendor/whale/install.mjs --yes    # 需要先完全退出 Harness
+```
+
+## 归拢状态（`../tools/`，共 23 个脚本）
+
+**23/23 已全部归拢**（三批：asar 三件套 + `install-whale`；构建链；视觉验证 6 + Provider 探针 8）。
+`../tools/` 原样保留为历史副本，等 T1 落盘验收后再删——在那之前留一份能独立跑通的旧副本是回退手段。
+每个脚本与 `../tools/` 原文件的对应关系记在各文件首行的「归拢自 …」注释里。
 
 ## 待办
 
@@ -67,7 +72,7 @@ node vendor/whale/install.mjs --yes    # 需要先完全退出 Harness
 - [x] **L3 改动的声明式描述** —— `patches/T1-whale-splash.yml` 已写，执行器已能解析并校验（见下方记录）
 - [x] **归拢第一批** —— `vendor/lib/harness.mjs` + `asar` 三件套 + `whale/install.mjs`，2026-10-06 完成
 - [x] **归拢第二批（构建链）** —— `vendor/whale/build.mjs` + 三个 patcher + `bundle.mjs`，2026-10-06 完成
-- [ ] **归拢第三批** —— 视觉验证 6 个 + T2 探针 8 个
+- [x] **归拢第三批** —— 视觉验证 6 个（`vendor/visual/`）+ T2 探针 8 个（`vendor/route/`），2026-10-06 完成，见下方记录
 - [x] **升级检测** —— `dsht upgrade`，2026-10-06 完成，见下方记录
 - [ ] 自动重打：`upgrade` 目前只报告 + 给命令，不自动落盘（写安装包必须由人挑时间）
 - [ ] 快照保留策略：自动保留最近 N 份 + 所有带标签的
@@ -133,8 +138,10 @@ in-box bundle) always comes from the same installation as the running dsh, never
 ### 2026-10-06 · 归拢第一批：`vendor/` 底座 + asar 三件套 + 落盘器
 
 **为什么**
-`../tools/` 里的脚本是在项目外长出来的，靠 `path.resolve(here, '..')` 猜工作区根，
-脚本一搬目录就静默写到别处；而且它们对 `patches/*.yml` 一无所知——
+`../tools/` 里的脚本是在项目外长出来的。其中**构建链那两个**（`build-whale.mjs` /
+`install-whale.mjs`）靠 `path.resolve(here, '..')` 猜工作区根，脚本一搬目录就静默写到别处
+（第三批实测：其余 14 个并没有这个毛病，但当时无法预知，所以统一按同一套路径约定重写）；
+而且它们对 `patches/*.yml` 一无所知——
 声明和执行器之间没有任何东西保证「声明说的」与「实际做的」是一回事。
 
 **做成了什么**
@@ -245,11 +252,51 @@ Harness 升级会整体替换 `resources/app.asar`，L3 改动随之消失。不
 **怎么验**
 - `node src/cli.mjs upgrade` → exit 0：判定未升级；L3 `T1-whale-splash` 未应用；
   L0 `session-query-sqlite` 声明与现场一致。
-- `state/cmp/test-upgrade.mjs`（一次性，gitignore）13 项分支断言全通过：applied / drift /
-  absent / error / 素材过期 / pristine⇒absent / 全缺⇒absent / 全在⇒applied。
-- `state/cmp/test-upgrade-branch.mjs`：把 `state/baseline.json` 的版本号临时改成
-  `44.9.9-fake-upgrade` 再跑，输出正确的「已被升级覆盖、需要重打」分支与重打步骤，
-  exit 1，**跑完基线 sha256 原样还原**。
+- `node test/upgrade.test.mjs`（已随 M3 提交，21 项断言）覆盖 applied / drift / absent / error /
+  素材过期 / pristine⇒absent / 全缺⇒absent / 全在⇒applied / 半应用⇒partial，以及把
+  `state/baseline.json` 的版本号临时改成 `44.9.9-fake-upgrade` 后的「已被升级覆盖、需要重打」分支
+  （断言退出码 1，跑完用 sha256 确认基线原样还原）。
 
 **教训**：诊断命令的措辞就是它的功能。判据算错顶多显示错，措辞错会让人去做错事。
+
+### 2026-10-06 · 归拢第三批：视觉验证 6 个 + Provider 探针 8 个
+
+**先侦察，再动手。** 对 14 个目标脚本逐个 grep
+`fileURLToPath|import.meta.url|path.resolve|../|process.env.|DSH_HOME|homedir|process.exit`，
+结论：**没有一个**用 `path.resolve(here, '..')` 或 `fileURLToPath(import.meta.url)` 猜工作区根
+（唯一 cwd 相关的是 `serve-dir.mjs` 的 `path.resolve(process.argv[2] ?? '.')`，那是它本来的语义）。
+所以这 14 个可以整目录搬，不需要逐个改路径逻辑——这跟第二批（`build-whale.mjs` /
+`install-whale.mjs` 真的在猜根）完全不同。**先 grep 一遍再决定改哪些，比先假设一个统一改法便宜得多。**
+
+**搬迁时改的三处**
+1. DSH 凭据库改走 `$DSH_HOME`：`e2e-opencode-go.mjs` / `verify-live-routes.mjs` /
+   `market-verify.mjs` / `store-go-credential.mjs` 原本写死 `join(homedir(), '.dsh', ...)`，
+   换成 `P.home`。`DSH_HOME` 被改过时原写法会读错库。
+2. **保留不动**：`join(homedir(), '.local', 'share', 'opencode', 'auth.json')`（4 个 route 脚本）。
+   那是 OpenCode CLI 自己的凭据库，不是 DSH 的路径，不能跟着 `DSH_HOME` 走。
+   *这一条是这次最容易做错的地方：看到 `homedir()` 就一律替换，会把外部工具的凭据读坏。*
+3. 环境变量收口：`HOST` 统一尊重 `DSH_WEB_URL`；`e2e-opencode-go.mjs` 的 `CWD` 从写死的
+   `D:\Z1848\harness-ds\.probe-workspace` 改为 `DSH_UP_T_E2E_CWD ?? join(WORKSPACE, '.probe-workspace')`。
+
+**怎么验**（不是只跑 `node --check`）
+- `node --check` 14/14 通过。
+- 只读的那批**逐个真跑**：`check-whale-shape`（exit 0，判定「有尾缺口」）、
+  `analyze-frames ../.probe/frames`（7 帧全解析）、`trace-whale frame-0_35.png`（whale 8.40%）、
+  `frame-colors`（主色 43.41%）、`serve-dir ../.probe/dist 8198`（`GET /renderer/pendant.html` → 200，1106 B）、
+  `verify-live-routes`（走运行中的网关，`llm/listProviders -> 200`，5 个 provider）、
+  `market-verify`（dshmarket 在 application 批，client.js 724114 B）、`fetch-go-docs`（status 200）。
+- **证据分级**：`verify-live-routes` / `market-verify` 的 200 同时证明了 `P.home` 那处改动是对的
+  （它们必须读到 `$DSH_HOME/.credentials.yaml` 才能通过网关照鉴权）。
+- 没实跑并说明原因：`e2e-opencode-go`（会发真实 prompt 并改默认模型）、3 个 `probe-go-*`
+  （会请求外部 API）、`store-go-credential`（会写凭据库）、`capture-frames`（需无头 Chrome + 活着的预览 URL）。
+
+**教训**：归拢的验收不能停在 `node --check`。语法通过只证明文件能解析，
+证明不了「它在新位置还能拿到路径」。能安全真跑的脚本就要真跑。
+
+### 2026-10-06 · `../tools/` 保留为历史副本
+
+23/23 已归拢，但**没有删除 `../tools/`**。理由：T1 还没真正落盘、没验收，
+在 T1 通过之前保留一份能独立跑通的旧副本是回退手段；素材（`.probe/`、`whale-motion/`）
+和历史说明（`README-whale-splash.md`）也还引用得到它们。删除单独作为一步，放在 T1 验收之后。
+
 

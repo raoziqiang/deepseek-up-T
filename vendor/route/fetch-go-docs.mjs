@@ -1,0 +1,22 @@
+// 归拢自 tools/fetch-go-docs.mjs（与所在目录无关，直接搬）。
+// Fetch the OpenCode Go docs page and print the model/endpoint table as plain text.
+const res = await fetch('https://opencode.ai/docs/zh-cn/go/', { headers: { 'Accept-Language': 'zh-CN,zh;q=0.9' } })
+console.log(`status ${res.status}`)
+const html = await res.text()
+const text = html
+  .replace(/<script[\s\S]*?<\/script>/gi, '')
+  .replace(/<style[\s\S]*?<\/style>/gi, '')
+  .replace(/<\/(p|div|li|tr|h1|h2|h3|h4|section|article|table)>/gi, '\n')
+  .replace(/<\/t[dh]>/gi, ' | ')
+  .replace(/<[^>]+>/g, '')
+  .replace(/&nbsp;/g, ' ')
+  .replace(/&amp;/g, '&')
+  .replace(/&lt;/g, '<')
+  .replace(/&gt;/g, '>')
+  .replace(/&#x27;|&#39;/g, "'")
+  .replace(/&quot;/g, '"')
+  .split('\n')
+  .map((l) => l.replace(/\s+/g, ' ').trim())
+  .filter((l) => l !== '')
+  .join('\n')
+console.log(text)

@@ -11,7 +11,7 @@
 
 **当前状态**
 - `whale-motion/` 有完整的启动动画素材与渲染管线（192 帧 PNG + `render.py` + `render.mjs`）。
-- `../tools/build-whale.mjs` 已经能「打包 → 打补丁 → 语法检查 → 重打包 → 交付」。
+- `vendor/whale/build.mjs`（由 `../tools/build-whale.mjs` 重写而来，改为按 `patches/T1-whale-splash.yml` 声明驱动）已经能「生成 → 语法检查 → 重打包 → 逐字节核对」，产物 `state/staged/app.asar`。
 - `dsh-whale-widget@0.3.18` 已装（L1），提供 Web 右下角余额小鲸鱼、气泡、音效、角色。
 - `.dsh/whale-audio`、`.dsh/whale-bubble-imgs`、`.dsh/whale-roles` 是它的数据目录（目前多为空）。
 - **动画尚未落盘**（`app.asar` 与备份 sha256 一致，见 P2 / P1）。
@@ -125,10 +125,10 @@
 - ✅ 本项目已交付：`env` / `doctor` / `snapshot create|list|diff|restore` / `baseline write` / `precheck` / `asar ls|cat|grep` / `upgrade`。
 - ✅ **升级检测已交付**（`dsht upgrade`）：把 `state/baseline.json` 与现场比对，一次回答「升级发生了没有 / 哪些 L3 声明需要重打 / 哪些只是从未落盘 / 重打前哪份原版素材已过期 / L0 声明有没有与现场漂移」。
 - ✅ L3 改动的声明式描述已落地：`patches/*.yml` + `vendor/whale/build.mjs`（构建到暂存位）+ `vendor/whale/install.mjs`（落盘 + 逐项核对）。
-- ⏳ `../tools/` 20 多个成熟脚本里已归拢 9 个（asar 三件套、构建链、`lib/harness.mjs`），剩余 14 个（视觉验证 6 + T2 探针 8）。
+- ✅ `../tools/` 的 23 个脚本**已全部归拢**到 `vendor/`（asar 三件套、构建链 6 个、视觉验证 6 个、Provider 探针 8 个）；`../tools/` 保留为历史副本，等 T1 验收后再删。见 `vendor/README.md`。
 
 **候选动作**
-1. ✅ **归拢 asar 工具链到 `vendor/`**（第一批 + 第二批已完成，第三批待做）。
+1. ✅ **归拢 asar 工具链到 `vendor/`**（三批全部完成）。
 2. ✅ **升级检测**：已交付，见上。
 3. ✅ **L3 改动的声明式描述**：`patches/T1-whale-splash.yml` 是第一条真实声明。
 4. ⏳ **自动重打**：`upgrade` 目前只**报告**并给出命令，不自动执行落盘（写安装包必须由人挑时间，Harness 一退出才能做）。

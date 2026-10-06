@@ -24,7 +24,33 @@ vendor/
   whale/patch-preload.mjs  lib/preload-app.cjs 的锚点替换
   whale/patch-session-controller.mjs  视觉模型自动路由的锚点替换
   whale/bundle.mjs         动画模块 → CSP 允许的经典脚本
+  visual/                  视觉验证（只读）：抓帧、描轮廓、数值分析、静态预览服务
+  route/                   Provider / 网关探针（只读，except store-go-credential 会写凭据）
 ```
+
+### `vendor/visual/`（6 个，只读）
+
+| 脚本 | 作用 |
+| --- | --- |
+| `capture-frames.mjs` | 用无头 Chrome + CDP 在固定时间点截图（自己用 `node:net` 实现了 WebSocket，无外部依赖） |
+| `trace-whale.mjs` | 对**真实渲染像素**描轮廓并打印 ASCII + 形状指标（圆头 / 分叉尾 = 鲸鱼，而非一团） |
+| `analyze-frames.mjs` | 数值分析帧序列：颜色分布、蓝色像素纵向范围、纸/水区位置 |
+| `frame-colors.mjs` | 诊断「喷溅」分类，报告分区占比与上半区主色 |
+| `check-whale-shape.mjs` | 只渲染鲸鱼轮廓并给出形状指标（长宽比、质量分布、是否有尾缺口），不靠人眼验收 |
+| `serve-dir.mjs` | 极小的静态文件服务，供本地预览（ESM 需要 http 才能加载） |
+
+### `vendor/route/`（8 个）
+
+| 脚本 | 作用 | 副作用 |
+| --- | --- | --- |
+| `verify-live-routes.mjs` | 走运行中 DSH 自己的 Remote 网关（cookie 鉴权），列出它当前服务的 provider 路由 | 只读 |
+| `market-verify.mjs` | 确认 dsh-market 客户端 bundle 进了实时 GUI boot manifest 且真被宿主提供 | 只读 |
+| `e2e-opencode-go.mjs` | 每条 OpenCode Go 路由跑一次受限 prompt，跑完恢复 profile 原先的默认模型 | **会发真实请求、会改默认模型** |
+| `probe-opencode-go.mjs` | 用本机 opencode 凭据探 OpenCode Go 端点（只打状态码/model id/短回复，不打印 key） | 网络 |
+| `probe-go-protocols.mjs` | 三种 wire protocol 各发一个真实请求 | 网络 |
+| `probe-go-session-header.mjs` | 试哪个 session 头被网关接受 | 网络 |
+| `fetch-go-docs.mjs` | 抓 OpenCode Go 文档页并打印模型/端点表 | 网络（只 GET） |
+| `store-go-credential.mjs` | 把本机 opencode 的 key 以 ref 形式写进 DSH 凭据库 | **会写 `<DSH_HOME>/.credentials.yaml`** |
 
 ## 构建与落盘是两步
 
@@ -73,15 +99,56 @@ node vendor/asar/verify.mjs <原版> <改动后> --expect 11
 
 实测输出（2026-10-06）：`比较 11470 个归档内条目、1497 个 unpacked 条目` + `OK：逐字节一致`。
 
-## 待归拢（`D:\Z1848\harness-ds\tools\`，共 23 个脚本）
+## 归拢状态（源在 `D:\Z1848\harness-ds\tools\`，共 23 个脚本）
 
-已归拢 5 个（上表去掉「待归拢」的项）。剩余 18 个分三类：
+**23/23 已全部归拢**，`../tools/` 只剩历史副本（保留原位未删，见下方「为什么没删」）。
 
-| 类别 | 脚本 | 风险 |
-| --- | --- | --- |
-| 构建链 | `patch-main.mjs`、`patch-preload.mjs`、`patch-session-controller.mjs`、`bundle-whale.mjs`、`build-whale.mjs` | 生成产物 |
-| 视觉验证 | `capture-frames.mjs`、`trace-whale.mjs`、`analyze-frames.mjs`、`frame-colors.mjs`、`check-whale-shape.mjs`、`serve-dir.mjs` | 只读 |
-| 其它线的探针 | `e2e-opencode-go.mjs`、`verify-live-routes.mjs`、`probe-go-protocols.mjs`、`probe-go-session-header.mjs`、`probe-opencode-go.mjs`、`market-verify.mjs`、`fetch-go-docs.mjs`、`store-go-credential.mjs` | 只读（`store-go-credential` 会写凭据） |
+对照：3 个 asar 工具 → `asar/`；`install-whale`/`build-whale`/`bundle-whale` + 3 个 patcher → `whale/`；
+6 个视觉 → `visual/`；8 个 Provider 探针 → `route/`。其中 `whale/build.mjs` 是**重写**过的
+（原来 `build-whale.mjs` 把步骤和路径写死在脚本里，现在改成按 `patches/*.yml` 声明驱动），
+`vendor/lib/harness.mjs` 是新增的共享底座。
+
+**为什么没删 `../tools/`**：`D:\Z1848\harness-ds\.probe\` 与 `whale-motion\` 里的素材、以及
+`README-whale-splash.md` 的历史描述都还引用得到它们；在 T1 真正落盘并验收通过之前，
+保留一份能独立跑通的旧副本是回退手段。删除单独作为一步，等 T1 验收后再做。
 
 归拢时按同样四条要求做：去掉 `../` 相对依赖、「写安装包」类先过进程守卫、
 与 `patches/*.yml` 对接、归拢后跑一次自检。
+
+### 第三批（2026-10-06）：视觉验证与 Provider 探针，14 个
+
+`visual/` 6 个 + `route/` 8 个。侦察发现这 14 个**没有一个**用
+`path.resolve(here, '..')` 推工作区根，所以与所在目录无关，可以整目录搬
+（唯一例外是 `serve-dir.mjs` 的 `path.resolve(process.argv[2] ?? '.')`，那是它本来的语义）。
+
+搬迁时改的三处：
+
+1. **DSH 凭据库改走 `$DSH_HOME`**：`e2e-opencode-go.mjs`、`verify-live-routes.mjs`、
+   `market-verify.mjs`、`store-go-credential.mjs` 原本写死 `join(homedir(), '.dsh', ...)`，
+   用 `P.home` 替代——`DSH_HOME` 被改过时原来的写法会读错库。
+2. **保留不动**：`join(homedir(), '.local', 'share', 'opencode', 'auth.json')`
+   出现在 4 个 route 脚本里。那是 **OpenCode CLI 自己的**凭据库，不是 DSH 的路径，
+   不能跟着 `DSH_HOME` 走。
+3. **环境变量收口**：`HOST` 统一尊重 `DSH_WEB_URL`；`e2e-opencode-go.mjs` 的
+   `CWD` 由写死的 `D:\Z1848\harness-ds\.probe-workspace` 改为 `DSH_UP_T_E2E_CWD ?? join(WORKSPACE, '.probe-workspace')`。
+
+### 每个新脚本的冒烟结果（2026-10-06，全部实跑）
+
+| 脚本 | 命令 | 结果 |
+| --- | --- | --- |
+| `visual/check-whale-shape.mjs` | 无参 | exit 0，`VERDICT: tail notch present (reads as flukes)`、bbox aspect 1.59、左/右质量 59.8% / 40.2% |
+| `visual/analyze-frames.mjs` | `../.probe/frames` | exit 0，7 帧全部解析（`frame-0_22.png` whale=8.43% paper=51.82%） |
+| `visual/trace-whale.mjs` | `frame-0_35.png --cols 60 --rows 24` | exit 0，whale px 35288 (8.40%)、bbox 385x192、长轴 −5.7° |
+| `visual/frame-colors.mjs` | `frame-0_35.png` | exit 0，主色 `rgb(248,248,248) 43.41%` |
+| `visual/serve-dir.mjs` | `../.probe/dist 8198` | `GET /renderer/pendant.html` → 200 `text/html` 1106 B（与磁盘大小一致） |
+| `route/verify-live-routes.mjs` | 无参 | exit 0，`llm/listProviders -> 200`，5 个 provider（4 个 opencode-go 分组 + deepseek-official / deepseek-account） |
+| `route/market-verify.mjs` | 无参 | exit 0，`boot rev: 2660d19acdb1`、dshmarket 在 `application` 批（15 条）、`GET .../client.js -> 200 724114 bytes` |
+| `route/fetch-go-docs.mjs` | 无参 | `status 200` + 文档正文 |
+
+**未实跑**（有真实副作用或需外部条件，只做了 `node --check`）：
+`route/e2e-opencode-go.mjs`（会发真实 prompt 并改默认模型）、
+`route/probe-opencode-go.mjs` / `probe-go-protocols.mjs` / `probe-go-session-header.mjs`（会真的请求外部 API）、
+`route/store-go-credential.mjs`（会写凭据库）、`visual/capture-frames.mjs`（需要无头 Chrome + 一个活着的预览 URL）。
+
+`node --check` 14/14 通过。
+
