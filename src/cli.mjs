@@ -27,6 +27,7 @@ import {
 } from './asar.mjs';
 import { runPrecheck, PROBE_PROFILE } from './precheck.mjs';
 import { runUpgradeCheck, reapplyPlan } from './upgrade.mjs';
+import { runAccept, printAccept } from './accept.mjs';
 
 const TAG = { error: 'FAIL', warn: 'WARN', info: 'INFO', ok: 'OK  ' };
 
@@ -34,7 +35,7 @@ const TAG = { error: 'FAIL', warn: 'WARN', info: 'INFO', ok: 'OK  ' };
 const VALUE_OPTS = new Map([
   ['-m', 'message'], ['--message', 'message'],
   ['--out', 'out'], ['--limit', 'limit'], ['--file', 'file'],
-  ['--profile-json', 'profileJson'], ['--keep', 'keep'],
+  ['--profile-json', 'profileJson'], ['--keep', 'keep'], ['--url', 'url'],
 ]);
 
 function parseArgs(argv) {
@@ -647,6 +648,25 @@ async function cmdUpgrade({ flags }) {
   return r.ok ? 0 : 1;
 }
 
+// ───────────────────────────── accept ─────────────────────────────
+//
+// 落盘改完、重启之后要核对的东西分散在四处（L3 声明 / L0 声明 / 宿主路由 / 渲染层握手），
+// 人手里只有一张从记忆里抄来的清单。这条命令把清单变成固定的判据 —— 只读，不写盘。
+// 观感类项目标 MANUAL 且不计入退出码：把需要人眼的项算成失败，就是教人忽略失败。
+
+async function cmdAccept({ flags, opts }) {
+  const r = await runAccept({
+    hash: !flags.has('--no-hash'),
+    url: opts.url ?? process.env.DSH_WEB_URL,
+  });
+  if (flags.has('--json')) {
+    process.stdout.write(`${JSON.stringify(r, null, 2)}\n`);
+  } else {
+    console.log(printAccept(r));
+  }
+  return r.ok ? 0 : 1;
+}
+
 // ───────────────────────────── help ─────────────────────────────
 
 function usage() {
@@ -669,9 +689,12 @@ function usage() {
   asar ls [正则]          列安装包条目（无正则时按顶层目录汇总）
   asar cat <路径>         读出安装包里单个条目的内容（--out 落盘）
   asar grep <正则>        在安装包内容里检索（只扫文本类条目）
+  accept                  重启后验收：L3/L0 声明、宿主路由、渲染层握手一次问完
+                          （只读；观感类项标 MANUAL 且不计入退出码）
 
 选项
   --json                  机器可读输出
+  --url <地址>            accept：探针地址（默认 $DSH_WEB_URL 或 http://127.0.0.1:19387）
   --no-hash               doctor / upgrade：跳过 121MB 安装包的 sha256（更快；upgrade 会退回按大小比较）
   --stage                 upgrade：把需要重打的声明真的构建到 state/staged/app.asar
                           （只写 state/，不碰安装目录，Harness 开着也能跑）
@@ -708,6 +731,7 @@ async function main() {
     case 'upgrade': case 'up': return cmdUpgrade(parsed);
     case 'precheck': case 'pre': return cmdPrecheck(parsed);
     case 'asar': return cmdAsar(parsed);
+    case 'accept': return cmdAccept(parsed);
     case 'help': case '--help': case '-h': usage(); return 0;
     default:
       console.error(`未知命令：${cmd}\n`);

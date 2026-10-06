@@ -409,6 +409,11 @@ await checkAsync('action 路由：GET 无头也答一句（好让人用浏览器
   assert.equal(j.ok, true);
   assert.ok(Array.isArray(j.actions) && j.actions.length > 0);
   assert.ok(j.actions.includes('doctor') && j.actions.includes('snapshotCreate'));
+  // 验收是重启之后要用的那一个，而且**只读**：它不该被标成写盘类（否则界面会先弹一次确认，
+  // 而「确认要验收吗」这种问题会教人习惯性点掉确认框 —— 那个习惯迟早会点掉一个真的写操作）。
+  assert.ok(j.actions.includes('accept'), '重启后验收必须挂在界面上');
+  assert.equal(mod.ACTIONS.accept.writes, false, 'accept 只读，不得标成写盘类');
+  assert.deepEqual(Array.from(mod.ACTIONS.accept.argv({})), ['accept']);
 });
 
 await checkAsync('action 路由：specs 表完整，且写盘类操作都标了 writes（界面据此二次确认）', async () => {
@@ -422,7 +427,7 @@ await checkAsync('action 路由：specs 表完整，且写盘类操作都标了 
     assert.equal(typeof s.writes, 'boolean', `${s.name} 的 writes 必须是布尔`);
   }
   const byName = Object.fromEntries(specs.map((s) => [s.name, s]));
-  for (const name of ['doctor', 'upgrade', 'precheck', 'snapshotList', 'snapshotCreate', 'upgradeStage']) {
+  for (const name of ['doctor', 'upgrade', 'precheck', 'snapshotList', 'snapshotCreate', 'upgradeStage', 'accept']) {
     assert.ok(byName[name], `specs 里缺 ${name}`);
   }
   assert.equal(byName.doctor.writes, false);

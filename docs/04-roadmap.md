@@ -149,8 +149,9 @@
 **目标**：改造本身可复现、可审计、可回滚，升级后能快速重打。
 
 **当前状态**
-- ✅ 本项目已交付：`env` / `doctor` / `snapshot create|list|diff|restore|prune` / `baseline write` / `precheck` / `asar ls|cat|grep` / `upgrade`。
+- ✅ 本项目已交付：`env` / `doctor` / `snapshot create|list|diff|restore|prune` / `baseline write` / `precheck` / `asar ls|cat|grep` / `upgrade` / `accept`。
 - ✅ **升级检测已交付**（`dsht upgrade`）：把 `state/baseline.json` 与现场比对，一次回答「升级发生了没有 / 哪些 L3 声明需要重打 / 哪些只是从未落盘 / 重打前哪份原版素材已过期 / L0 声明有没有与现场漂移」。
+- ✅ **重启后验收已交付**（`dsht accept`）：把「改完重启之后到底成没成」这件事变成一条只读命令 —— L3 声明、L0 声明、宿主路由（`/dsh-up-t/status.json` 在不在、`/dsh-up-t/action` 是 200 还是 404）、渲染层握手（`/dsh-up-t/seen` 的 `bundle` / `capsule` 两条通道）各自判一次，每条失败都带一句修法。**三种结论分开**：`FAIL`（没成）/ `SKIP`（这次没拿到证据）/ `MANUAL`（只有人眼能判，不计入退出码）—— 把「没测到」折成「没过」会让人去修一个不存在的故障，把需要人眼的项算成失败则是教人忽略失败。设置页上也有这个按钮（`重启后验收`）。
 - ✅ L3 改动的声明式描述已落地：`patches/*.yml` + `vendor/whale/build.mjs`（构建到暂存位）+ `vendor/whale/install.mjs`（落盘 + 逐项核对）。
 - ✅ `../tools/` 的 23 个脚本**已全部归拢**到 `vendor/`（asar 三件套、构建链 6 个、视觉验证 6 个、Provider 探针 8 个）；`../tools/` 保留为历史副本，等 T1 验收后再删。见 `vendor/README.md`。
 
@@ -187,6 +188,7 @@
 - [x] 能检查 L0 声明与现场 `cordis.patch.yml` 是否漂移
 - [x] 已用「篡改基线版本号」的模拟升级跑通重打分支（报告正确、退出码 1、基线原样还原）
 - [ ] 用**真实**的一次 Harness 升级走一遍：升级 → `dsht upgrade` → 重打 → 落盘 → 复验
+- [x] `dsht accept` 把重启后的验收变成一条只读命令（L3/L0 声明 + 宿主路由 + 渲染层握手；FAIL/SKIP/MANUAL 三种结论分开，观感类不计入退出码）
 
 ### M1 的验收标准
 

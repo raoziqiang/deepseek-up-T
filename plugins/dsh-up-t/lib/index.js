@@ -353,6 +353,16 @@ export const ACTIONS = {
     json: true,
     timeoutMs: 600000,
   },
+  accept: {
+    label: '重启后验收',
+    hint: 'L3/L0 声明、宿主路由、渲染层握手一次问完（只读；观感类项要你自己看）',
+    writes: false,
+    // 不给 --json：这条命令的价值是那份人能读的报告（哪几项没过 + 每项的修法），
+    // 面板本来就是渲染 stdout 文本的。
+    argv: () => ['accept'],
+    json: false,
+    timeoutMs: 300000,
+  },
   precheck: {
     label: '组合预检',
     hint: '用隔离探针家跑一次权威 dump（会写 state/probe-home）',
