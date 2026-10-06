@@ -170,6 +170,78 @@ const setCharmEnabled = async (enabled) => {
 	else destroyCharm();
 	return enabled;
 };
+/** The replay window matches the welcome window, so the splash looks native. */
+const REPLAY_SIZE = { width: 600, height: 700 };
+/** Safety net only: the replay page closes its own window when it is done. */
+const REPLAY_MAX_MS = 2e4;
+let charmReplayWindow;
+let charmReplayGuard;
+/** Play the startup animation once, in a short-lived non-interactive window. */
+const replaySplash = async () => {
+	if (charmReplayWindow !== void 0 && !charmReplayWindow.isDestroyed()) charmReplayWindow.destroy();
+	charmReplayWindow = void 0;
+	if (charmReplayGuard !== void 0) {
+		clearTimeout(charmReplayGuard);
+		charmReplayGuard = void 0;
+	}
+	const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+	const window = new BrowserWindow({
+		width: REPLAY_SIZE.width,
+		height: REPLAY_SIZE.height,
+		x: Math.round(area.x + Math.max(0, (area.width - REPLAY_SIZE.width) / 2)),
+		y: Math.round(area.y + Math.max(0, (area.height - REPLAY_SIZE.height) / 2)),
+		frame: false,
+		transparent: true,
+		hasShadow: false,
+		resizable: false,
+		maximizable: false,
+		minimizable: false,
+		fullscreenable: false,
+		skipTaskbar: true,
+		focusable: false,
+		alwaysOnTop: true,
+		show: false,
+		backgroundColor: "#00000000",
+		webPreferences: {
+			nodeIntegration: false,
+			contextIsolation: true,
+			sandbox: true,
+			webSecurity: true
+		}
+	});
+	charmReplayWindow = window;
+	window.setAlwaysOnTop(true, "screen-saver");
+	window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+	window.webContents.on("will-navigate", (event) => event.preventDefault());
+	const clear = () => {
+		if (charmReplayWindow === window) charmReplayWindow = void 0;
+		if (charmReplayGuard !== void 0) {
+			clearTimeout(charmReplayGuard);
+			charmReplayGuard = void 0;
+		}
+	};
+	window.once("closed", clear);
+	window.once("ready-to-show", () => {
+		if (!window.isDestroyed()) {
+			window.showInactive();
+			window.moveTop();
+		}
+	});
+	try {
+		await window.loadFile(join(app.getAppPath(), "renderer", "replay.html"));
+	} catch (error) {
+		console.error("desktop charm: replay failed", error);
+		if (!window.isDestroyed()) window.destroy();
+		clear();
+		return;
+	}
+	// The page closes itself once it is done; this only guarantees a window that
+	// can never stick around (a renderer that never finishes, a thrown error).
+	charmReplayGuard = setTimeout(() => {
+		charmReplayGuard = void 0;
+		if (!window.isDestroyed()) window.destroy();
+	}, REPLAY_MAX_MS);
+};
 /** Install the charm's IPC handlers exactly once per process. */
 let charmHandlersInstalled = false;
 const installCharmHandlers = () => {
@@ -219,8 +291,10 @@ const installCharmHandlers = () => {
 			return true;
 		}
 		if (action === "toggle-splash") {
-			// Ask the main window to replay the splash in its own renderer.
-			mainWindow?.webContents.send(CHARM_IPC.changed, "replay");
+			// The splash lives in the welcome window, not the main window -- asking
+			// mainWindow to replay it was a no-op, because nothing in that
+			// renderer listens for it. Play it for real in its own window instead.
+			await replaySplash();
 			return true;
 		}
 		return false;
@@ -296,7 +370,7 @@ replaceOnce(
 replaceOnce(
   'quit teardown',
   '\t\tif (welcomeWindow !== void 0 && !welcomeWindow.isDestroyed()) welcomeWindow.hide();\n\t\tif (mainWindow !== void 0 && !mainWindow.isDestroyed()) mainWindow.hide();',
-  '\t\tif (welcomeWindow !== void 0 && !welcomeWindow.isDestroyed()) welcomeWindow.hide();\n\t\tif (mainWindow !== void 0 && !mainWindow.isDestroyed()) mainWindow.hide();\n\t\tdestroyCharm();',
+  '\t\tif (welcomeWindow !== void 0 && !welcomeWindow.isDestroyed()) welcomeWindow.hide();\n\t\tif (mainWindow !== void 0 && !mainWindow.isDestroyed()) mainWindow.hide();\n\t\tdestroyCharm();\n\t\tif (charmReplayWindow !== void 0 && !charmReplayWindow.isDestroyed()) charmReplayWindow.destroy();',
 )
 
 // ── 5. Let the settings UI read and change the preference ────────────────────

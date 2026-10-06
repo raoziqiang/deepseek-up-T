@@ -9,7 +9,7 @@
 - `dsh-whale-widget@0.3.18` 已装为 **L1 插件**：Web 右下角余额小鲸鱼、气泡点击序列、音效、角色、动图。
 - 数据目录：`.dsh/whale-audio`、`.dsh/whale-bubble-imgs`、`.dsh/whale-roles`（多数为空）。
 - **动画仍未落盘**：`app.asar` 与 `app.asar.whale-backup` 的 sha256 一致（`doctor` 可验）。
-- **待落盘的暂存包已就绪且已验证**：`state/staged/app.asar`（121,416,085 B，11 条目按声明改动，其余 11,466 条目逐字节一致）。
+- **待落盘的暂存包已就绪且已验证**：`state/staged/app.asar`（121,421,944 B，**13** 条目按声明改动，其余 11,466 条目逐字节一致）。
 
 ## 主战场
 
@@ -29,7 +29,7 @@
 - [ ] 鲸鱼启动动画落盘：**运行 `install-whale.cmd`**（先完全退出 Harness，见下方操作清单）
 - [x] 把主题/气泡等偏好从 asar 侧迁到 `dsh-whale-widget` 的 L1 设置 —— **侦察后结论是「本来就不该这么做」**：`dsh-whale-widget` 0.3.18 的 `package.json` 只声明 `dsh.bundle.patch`，**没有任何 `Config` schema**，它的偏好本来就不在 asar 里，而是落在 `$DSH_HOME\.dshw-size.json` / `.dshw-turn.json` / `.dshw-usage.json`（设备本地，随用随写）。四层改造面（L0–L3）管的是**组合与代码**，不管这层用户数据。⇒ 这条待办的前提是错的，撤销；真要改默认值应改 widget 自己的默认值（L1 包内），而不是「迁到 L1 设置」（见下方记录）。
 - [x] 桌面挂件窗口的**开关**（设置 →「通用」里那一行）—— 2026-10-06 完成：出货 Harness 有整套挂件机制，却没有任何代码调用 `window.dshWhaleCharm`，于是 `whale-charm.json` 永远是 `enabled: false`、挂件永不出现且不报错。开关改由 L1 插件 `dsh-up-t` 提供（`settings.general.item`），**不碰安装包、硬刷新即生效**。见下方记录与 [plugins/dsh-up-t/README.md](../../plugins/dsh-up-t/README.md)。
-- [ ] 桌面挂件菜单的「Replay animation」目前是空操作（`"replay"` 发给主窗口，而启动画面在欢迎窗口）—— 要修必须改安装包（打通主进程作用域），单独一步。
+- [x] 桌面挂件菜单的「Replay animation」原本是空操作（`"replay"` 发给主窗口，而启动画面在欢迎窗口）—— 2026-10-06 已修：改 `vendor/whale/patch-main.mjs`，让主进程**自己**开一个短命 replay 窗口（`REPLAY_MAX_MS = 2e4` 安全网），新增 `renderer/replay.html` + `renderer/replay.js` 两个 `insert`（`expect_diff_entries` 11 → 13），`test/splash.test.mjs` 19 → **23** 条。见下方记录。**已构建核对，尚未落盘** —— 随下一次 `install-whale.cmd` 一起进安装包。
 - [x] 把 T1 的**手写素材**搬进仓库 —— 2026-10-06 完成：10 个文件（39 KB）进了 `vendor/whale/materials/`
       （`renderer/` 六件、`lib/preload-charm.cjs`、`whale-animation.js` 的 ESM 源、离线预览页、挂件设置页残留物），
       声明里的 `source:` 一并改指仓库内。**验收方式不是「能跑」，而是「产物一字未变」**：
@@ -83,9 +83,10 @@
   `renderer/pendant.css`、`renderer/pendant.js`、`lib/preload-charm.cjs`、`lib/welcome/whale-animation.js`）。
 - **引用完整性**已单独核对（`node test\assets.test.mjs`）：这两页 HTML 引用的每个本地资源都真的在归档里，
   且替换页没有丢掉原版加载过的东西（见下方「登录窗口页面」那条记录 —— 这正是它抓出来的）。
-- 启动窗口那两段脚本**已经在假浏览器里真跑过一遍**（`node test\splash.test.mjs`，19 条断言）：
+- 启动窗口那几段脚本**已经在假浏览器里真跑过一遍**（`node test\splash.test.mjs`，**23** 条断言）：
   从归档里取脚本、按页面同样的顺序执行、推进整条时间线、模拟拖动/键盘/主题翻转/存储被禁，
-  并检查**每一个画布参数都是有限数** —— 这一条专治「不报错但白屏」。
+  并检查**每一个画布参数都是有限数** —— 这一条专治「不报错但白屏」。replay 那一节在归档里还没有
+  `renderer/replay.js` 时（也就是落盘之前）**只跳过它**，不谎报失败。
 - 脚本的守卫路径**已实测**：Harness 运行中运行它 → 打印 `[STOP]`、`exit 2`、**不动任何文件**。
 - `install.mjs` 自己在落盘后还会**按声明逐项比对差异集合**，多一条少一条都判失败并提示回滚；
   原版备份 `app.asar.whale-backup` 在落盘前已存在且与当前 `app.asar` 逐字节一致。
@@ -247,3 +248,32 @@
   中文 `rem` 注释会把后续行嚼成 `'K]' is not recognized as an internal or external command` 之类的假错误，
   而且退出码会是 0（看起来像成功）。现在该文件是纯 ASCII + 中文说明放在本 README 里。
   （顺带：LF 行尾在这个文件上实测没问题，坏的是字节而不是行尾。）
+
+### 2026-10-06 · 「Replay animation」原来是空操作（消息发给了一个不存在的收件人）
+
+- **症状**：挂件右键菜单里的「Replay animation」点了没反应，**而且不报错** —— 没有异常、没有日志、
+  没有失败回调。一个安静到极点的 bug。
+- **根因**：`patch-main.mjs` 里那句 `mainWindow?.webContents.send(CHARM_IPC.changed, "replay")`。
+  `CHARM_IPC.changed` 的监听方是**启动画面**，而启动画面跑在**欢迎窗口**（`renderer/welcome.html`）里；
+  `mainWindow` 是主窗口。字符串发出去了，没有收件人。`?.` 又顺手吃掉了「窗口不在」这一种失败，
+  于是「发失败」也不可见。
+- **改了什么**：
+  - `vendor/whale/patch-main.mjs` 新增 `replaySplash()`：主进程**自己**开一个 600×700、无边框、
+    透明、不可交互、`skipTaskbar`、`alwaysOnTop` 的短命窗口，
+    `loadFile(join(app.getAppPath(), "renderer", "replay.html"))`，`ready-to-show` 时 `showInactive()`；
+    菜单项改成 `await replaySplash()`。
+  - 安全网 `REPLAY_MAX_MS = 2e4`：20 秒后无条件销毁 —— 动画卡住也不会留一个隐形窗口挡着点击。
+  - 应用退出时在 `destroyCharm()` 之后补 destroy 这个窗口。
+  - 新增素材 `renderer/replay.html`（966 B）+ `renderer/replay.js`（2144 B）⇒ `patches/T1-whale-splash.yml`
+    的 `verify.expect_diff_entries` 11 → **13**，`syntax_check` 加上 `renderer/replay.js`。
+  - `test/splash.test.mjs` 19 → **23** 条：新增 replay 一节，且**允许它缺席**（归档里没有
+    `renderer/replay.js` 就跳过节、打印一句，其余照跑 —— 落盘前也能全绿，但不把「没测到」折成「过了」）。
+- **为什么**：这是唯一一处「用户点得到、却什么都不会发生」的入口。而且它只能靠改安装包修 ——
+  修法是打通主进程作用域，不是 L1 插件能兜住的。
+- **怎么验**：`node test/run.mjs` → 10/10 套；`node test/splash.test.mjs` → 23/23；
+  `node vendor/whale/build.mjs` → exit 0、`13 个条目按声明改动，其余 11466 个条目逐字节一致`、
+  8 个 JS 产物全部 `node --check` 通过、产物 121,421,944 B。
+  剩下的只有**肉眼**：落盘重启后右键挂件 → Replay animation，应看到动画重播一次后自己消失。
+- **怎么撤**：`node vendor/whale/install.mjs --rollback`；或 git 回到本提交之前（声明与素材一起走）。
+- **教训**：`?.` 与 `send()` 都不会告诉你「收件人不存在」。凡是要跨窗口投递的消息，
+  值得在发送处问一句「谁在听」—— 或者干脆像这里一样，由发消息的人自己把事做完。

@@ -39,13 +39,19 @@ target:
       source: ../../.probe/session-controller.js
       patcher: vendor/whale/patch-session-controller.mjs
 
-    # ── 新增条目（7 个）──
+    # ── 新增条目（9 个）──
     - path: renderer/whale.css
       action: insert
       source: ../vendor/whale/materials/renderer/whale.css
     - path: renderer/whale-splash.js
       action: insert
       source: ../vendor/whale/materials/renderer/whale-splash.js
+    - path: renderer/replay.html
+      action: insert
+      source: ../vendor/whale/materials/renderer/replay.html   # 挂件菜单「Replay animation」用的短命窗口
+    - path: renderer/replay.js
+      action: insert
+      source: ../vendor/whale/materials/renderer/replay.js
     - path: renderer/pendant.html
       action: insert
       source: ../vendor/whale/materials/renderer/pendant.html
@@ -64,10 +70,11 @@ target:
       bundler: vendor/whale/bundle.mjs
 
 verify:
-  expect_diff_entries: 11
+  expect_diff_entries: 13
   syntax_check:
     - lib/welcome/whale-animation.js
     - renderer/whale-splash.js
+    - renderer/replay.js
     - renderer/pendant.js
     - lib/main.js
     - lib/preload-app.cjs

@@ -42,7 +42,7 @@ target:
       bundler: vendor/whale/bundle.mjs   # 插入前先过一遍打包器
 
 verify:
-  expect_diff_entries: 11           # 必填：asar-verify --expect 的期望值
+  expect_diff_entries: 13           # 必填：asar-verify --expect 的期望值（当前 T1 声明的值是 13）
   syntax_check:                     # 落盘前逐项 node --check
     - lib/main.js
 
@@ -105,7 +105,7 @@ notes: |
   这不是 bug，是「声明即声称」这条语义在如实工作。要提建议就写完先别放这里。
 
 > 状态：**L3 已闭环、L0 有 4 份声明、现场与声明全部一致。**
-> - L3：`node vendor/whale/build.mjs` 产出 `state/staged/app.asar`（11 条目按声明改动，
+> - L3：`node vendor/whale/build.mjs` 产出 `state/staged/app.asar`（13 条目按声明改动，
 >   其余 11,466 条目逐字节一致），再 `node vendor/whale/install.mjs --yes` 落盘（需先退出 Harness）。
 > - L0：4 份声明全部 `OK 声明与现场一致`。`dsht upgrade` 会区分「被升级覆盖」与「从未落盘」。
 > - 当前声明文件：`T1-whale-splash.yml`（L3）、`T2-enable-ralph.yml`、

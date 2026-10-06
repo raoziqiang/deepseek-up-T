@@ -67,7 +67,7 @@ MIME 表覆盖 html/js/mjs/css/svg/png/json。ESM 必须经 http 才能加载，
 
 ## 什么时候不该用它们
 
-- **问「代码逻辑对不对」**：用 `test/splash.test.mjs`（19 条，假 DOM，秒级、无需 Chrome）。
+- **问「代码逻辑对不对」**：用 `test/splash.test.mjs`（23 条，假 DOM，秒级、无需 Chrome）。
 - **问「设置页会不会白屏」**：用 `test/settings.test.mjs`（真 React + 迷你 hook 主机）。
 - 上面两个测试是**断言**（红了就是坏了）；本目录这些脚本是**取证的仪器**（打印数字给人看）。
   能写成断言的就别留在仪器里。

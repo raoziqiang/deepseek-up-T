@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'">
+    <title>DSH Whale</title>
+    <link rel="stylesheet" href="whale.css">
+    <script src="../lib/welcome/whale-animation.js" defer></script>
+    <script src="replay.js" defer></script>
+  </head>
+  <body>
+    <!--
+      The splash, on demand: this page is loaded into a short-lived 600x700
+      frameless window (same size as the real welcome window) when the desktop
+      charm's "Replay animation" menu item is chosen. It reuses #whale-stage and
+      whale.css, so the replay is the same layer the startup animation uses --
+      and it closes its own window when the whale has settled.
+    -->
+    <canvas id="whale-stage" aria-hidden="true"></canvas>
+  </body>
+</html>

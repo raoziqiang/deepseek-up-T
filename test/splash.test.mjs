@@ -1,7 +1,7 @@
-// deepseek-up-T :: 启动界面那两段脚本（whale-animation.js + whale-splash.js）的离线行为级单测
+// deepseek-up-T :: 启动界面那几段脚本（whale-animation.js + whale-splash.js + replay.js）的离线行为级单测
 //
 // 为什么要有它：
-// 这两段脚本是 T1 里**唯一从来没有被执行过**的代码 —— 它们只有 `node --check`
+// 这几段脚本是 T1 里**唯一从来没有被执行过**的代码 —— 它们只有 `node --check`
 // （语法对不对）和逐字节核对（装进去的是不是这一份）。语法正确与「跑起来不抛」之间
 // 隔着一整类失败：
 //   · 打包（vendor/whale/bundle.mjs 把 ESM 包成经典脚本）可能漏掉某个导出，
@@ -17,7 +17,9 @@
 //   ② 时间线真的推进（每一帧都画了东西，跑到末尾真的交出了挂件）；
 //   ③ 所有传给画布的坐标都是有限数（NaN 是 canvas 最典型的静默失败）；
 //   ④ 拖动 / 键盘 / 主题翻转 / 位置记忆真的改到了该改的状态；
-//   ⑤ 三条降级路径（减动效、没有画布、存储被禁）都不抛异常。
+//   ⑤ 三条降级路径（减动效、没有画布、存储被禁）都不抛异常；
+//   ⑥ 挂件菜单那条「Replay animation」真的重播（replay.js 会淡出并关掉自己的窗口 ——
+//      以前主进程把 'replay' 发给主窗口，而启动画面在欢迎窗口里，那是个空操作）。
 //
 // 脚本取自**暂存包**（将要落盘的那一份），没有就退到**在用安装包**，两者都没有就 SKIP
 // —— 和 test/assets.test.mjs 一样：读不到产物不是「通过」，但也不该谎报失败。
@@ -39,6 +41,9 @@ const P = resolvePaths();
 
 const ANIMATION_ENTRY = 'lib/welcome/whale-animation.js';
 const SPLASH_ENTRY = 'renderer/whale-splash.js';
+// 第三段是后来才加进声明的（挂件菜单里的 “Replay animation”）：它**可以缺席** ——
+// 在用的安装包里还没有它的时候，只跳过 replay 那一节，其余断言照跑。
+const REPLAY_ENTRY = 'renderer/replay.js';
 
 const results = [];
 const RUNS = []; // 每次沙箱运行记一笔，最后横向看有没有哪一次是靠异常收场的
@@ -66,6 +71,7 @@ function loadScripts() {
     if (!fs.existsSync(s.file)) continue;
     let animation = null;
     let splash = null;
+    let replay = null;
     try {
       animation = readAsarEntry(s.file, ANIMATION_ENTRY);
       splash = readAsarEntry(s.file, SPLASH_ENTRY);
@@ -73,7 +79,12 @@ function loadScripts() {
       continue;
     }
     if (!animation || !splash) continue;
-    return { label: s.label, file: s.file, animation, splash };
+    try {
+      replay = readAsarEntry(s.file, REPLAY_ENTRY); // 可选，缺席不算失败
+    } catch {
+      replay = null;
+    }
+    return { label: s.label, file: s.file, animation, splash, replay };
   }
   return null;
 }
@@ -89,9 +100,16 @@ if (found === null) {
 
 const ANIMATION_SRC = found.animation.toString('utf8');
 const SPLASH_SRC = found.splash.toString('utf8');
+// replay.js 缺席时 REPLAY_SRC 为 null，replay 那一节整体跳过（见文件末尾）。
+const REPLAY_SRC = found.replay ? found.replay.toString('utf8') : null;
 console.log(`脚本来源 ${found.label}  ${found.file}`);
 console.log(`        ${ANIMATION_ENTRY}  ${found.animation.length} 字节`);
 console.log(`        ${SPLASH_ENTRY}  ${found.splash.length} 字节`);
+console.log(
+  found.replay
+    ? `        ${REPLAY_ENTRY}  ${found.replay.length} 字节`
+    : `        ${REPLAY_ENTRY}  —— 缺席，跳过 replay 那一节`,
+);
 
 // ── 假 canvas 2d 上下文 ───────────────────────────────────────────────
 //
@@ -372,6 +390,7 @@ function makePage({
   innerWidth = 600,
   innerHeight = 700,
   devicePixelRatio = 2,
+  script = 'splash', // 'splash' = 欢迎窗口那两段；'replay' = 挂件重播页那一段
 } = {}) {
   const body = makeElement('body', { rect: { width: innerWidth, height: innerHeight, left: 0, top: 0 } });
   const documentElement = makeElement('html');
@@ -473,10 +492,20 @@ function makePage({
     parseFloat, parseInt, isFinite, isNaN, Promise, RegExp,
   });
 
+  // replay.js 会调 window.close() 关掉自己那个短命窗口；真实关窗归主进程，
+  // 这里只数次数 —— 断言「它确实打算自己收场」，而不是等外面的安全网。
+  let closeCalls = 0;
+  sandbox.close = () => {
+    closeCalls += 1;
+  };
+
   vm.createContext(sandbox);
-  const context = { filename: SPLASH_ENTRY };
   vm.runInContext(ANIMATION_SRC, sandbox, { filename: ANIMATION_ENTRY });
-  vm.runInContext(SPLASH_SRC, sandbox, context);
+  if (script === 'replay') {
+    vm.runInContext(REPLAY_SRC, sandbox, { filename: REPLAY_ENTRY });
+  } else {
+    vm.runInContext(SPLASH_SRC, sandbox, { filename: SPLASH_ENTRY });
+  }
 
   const page = {
     sandbox,
@@ -500,6 +529,10 @@ function makePage({
     },
     get cancelCalls() {
       return cancelCalls;
+    },
+    /** replay.js 调了几次 window.close()。 */
+    get closes() {
+      return closeCalls;
     },
     get now() {
       return clock;
@@ -741,6 +774,66 @@ await check('存储被禁（企业策略 / 隐私模式）：挂件仍在，拖�
   assert.deepEqual(Array.from(p.errors), []);
   assert.deepEqual(Array.from(p.warns), []);
 });
+
+// ── ⑤-bis 挂件菜单里的「Replay animation」：renderer/replay.js ────────────
+//
+// 这段脚本只干三件事：把动画播一遍、淡出、**关掉自己那个短命窗口**。
+// 在它之前，主进程把 'replay' 发给主窗口，而启动画面跑在欢迎窗口里 ——
+// 那是个空操作，菜单点了没反应。所以这一节盯的就是「它真的会自己收场」：
+// 窗口既不立刻消失（那样等于没播），也不赖着不走（那样要等主进程的安全网）。
+
+if (REPLAY_SRC === null) {
+  console.log(`  skip  ${REPLAY_ENTRY} 不在${found.label}里 —— 跳过 Replay 那一节`);
+} else {
+  await check('replay.js 是经典脚本，动画时长只在它自己这一份里', () => {
+    assert.ok(
+      !/^\s*(?:import|export)\s/m.test(REPLAY_SRC),
+      'replay.js 里出现了 ESM 语句 —— 它是以 <script defer> 经典脚本加载的，会整段语法报错',
+    );
+    const m = /const DURATION_MS = (\d+)/.exec(REPLAY_SRC);
+    assert.ok(m, 'replay.js 里找不到 DURATION_MS —— 时长被搬到别处，就会有两个真相');
+    const dur = Number(m[1]);
+    assert.ok(dur > 0 && dur <= 20000, `DURATION_MS=${dur} 不合理（主进程的安全网是 20s）`);
+  });
+
+  await check('Replay：动画跑完自己淡出，关窗排进定时器而不是立刻关', () => {
+    const p = makePage({ script: 'replay' });
+    assert.equal(p.closes, 0, '动画还没开始，窗口就被关了');
+    runToEnd(p);
+    assert.deepEqual(Array.from(p.errors), []);
+    assert.ok(p.stage.classList.contains('is-done'), '跑完没有进入淡出状态（缺 is-done）—— 窗口会「啪」一下消失');
+    assert.ok(p.timeouts.length >= 1, '一个定时器都没排 —— 窗口永远不会自己关，只能等主进程的安全网');
+    assert.equal(p.closes, 0, 'window.close() 是同步调的 —— 淡出那 520ms 根本没播');
+    for (const t of p.timeouts.slice()) t.fn(); // slice：定时器里再排定时器也不会边跑边长
+    assert.equal(p.closes, 1, '定时器到点后没有恰到好处地关一次窗');
+    assert.ok(
+      (p.winListeners.pagehide || []).length === 1,
+      '没有注册 pagehide 清理 —— 窗口被强杀时动画还在跑',
+    );
+    p.dispatchWindow('pagehide'); // 不抛异常即可
+  });
+
+  await check('Replay + 减动效：直接画一张静止的鲸鱼，然后关窗', () => {
+    const p = makePage({ script: 'replay', reduce: true });
+    assert.equal(p.rafCalls, 0, '减动效时不该起动画帧循环');
+    assert.ok(Array.from(p.stageCtx.ops).includes('bezierCurveTo'), '静止那一帧没有画鲸鱼');
+    assert.equal(p.stageCtx.bad.length, 0, '静止那一帧里有非有限数坐标 —— 真浏览器会一声不吭什么都不画');
+    assert.ok(p.stage.classList.contains('is-done'), '减动效时没有淡出就走');
+    assert.equal(p.closes, 0, '减动效时窗口立刻就关了 —— 那张静止的鲸鱼没人看得见');
+    for (const t of p.timeouts.slice()) t.fn();
+    assert.equal(p.closes, 1);
+    assert.deepEqual(Array.from(p.errors), []);
+  });
+
+  await check('Replay 页连画布都没有：安静退出，不建节点、不排定时器、不关窗', () => {
+    const p = makePage({ script: 'replay', withCanvas: false });
+    assert.equal(p.created.length, 0);
+    assert.equal(p.rafCalls, 0);
+    assert.equal(p.timeouts.length, 0);
+    assert.equal(p.closes, 0);
+    assert.equal(p.errors.length, 0);
+  });
+}
 
 // ── ⑥ 收尾：没有一次运行是靠异常收场的 ────────────────────────────────────
 

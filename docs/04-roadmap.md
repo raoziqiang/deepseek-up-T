@@ -15,11 +15,17 @@
 - `dsh-whale-widget@0.3.18` 已装（L1），提供 Web 右下角余额小鲸鱼、气泡、音效、角色。
 - `.dsh/whale-audio`、`.dsh/whale-bubble-imgs`、`.dsh/whale-roles` 是它的数据目录（目前多为空）。
 - **动画尚未落盘**（`app.asar` 与备份 sha256 一致，见 P2 / P1）。
-- 启动窗口那两段脚本**已有行为级离线单测**（`test/splash.test.mjs`，19 条断言）：用 `node:vm` 造假浏览器，
-  把归档里的 `lib/welcome/whale-animation.js` 与 `renderer/whale-splash.js` 按页面同样的顺序真跑一遍，
-  推进整条时间线，模拟拖动/键盘/主题翻转/存储被禁，并检查**每个画布参数都是有限数**（NaN 是 canvas 最典型的静默失败）。
+- 启动窗口那几段脚本**已有行为级离线单测**（`test/splash.test.mjs`，**23** 条断言）：用 `node:vm` 造假浏览器，
+  把归档里的 `lib/welcome/whale-animation.js`、`renderer/whale-splash.js` 与 `renderer/replay.js` 按页面同样的顺序真跑一遍，
+  推进整条时间线，模拟拖动/键盘/主题翻转/存储被禁，并检查**每个画布参数都是有限数**（NaN 是 canvas 最典型的静默失败）；
+  `replay.js` 在归档里缺席时（尚未落盘的旧版本）只跳过 replay 那一节，其余照跑 —— 读不到产物不算「通过」，也不谎报失败。
 - 桌面挂件的**开关**已由 L1 插件 `dsh-up-t` 提供（设置 →「通用」里那一行），硬刷新即生效，不碰安装包。
-- **手写素材已入库**：`vendor/whale/materials/`（10 个文件 / 39 KB）。搬进去之后重建验证过 ——
+- 挂件菜单的「Replay animation」曾是**空操作**：主进程把字符串 `"replay"` 发给**主窗口**，而启动画面跑在
+  **欢迎窗口**里 —— 没有收件人，点了没反应也不报错。2026-10-06 已修（详见 `tracks/T1-appearance/README.md`）：
+  新增 `renderer/replay.html` + `renderer/replay.js`（`patches/T1-whale-splash.yml` 的 `verify.expect_diff_entries` 11 → **13**），
+  `vendor/whale/patch-main.mjs` 新增 `replaySplash()` 真开一个短命无框窗口（600×700、不可交互、`REPLAY_MAX_MS = 2e4` 安全网），
+  `test/splash.test.mjs` 19 → 23 条钉住「动画播完自己收场，不赖着不走」。**已构建核对但尚未落盘** —— 随下一次 `install-whale.cmd` 一起进安装包。
+- **手写素材已入库**：`vendor/whale/materials/`（**12 个文件 / 53 KB**，后两件就是上面的 replay）。搬进去之后重建验证过 ——
   产物与搬家前 **sha256 完全相同**（搬家前后各构建一次比对）。`action: patch` 的三份原版缓存仍不入库
   （从任意一份 `app.asar` 可原样重抽，且构建时逐字节校验）。
 
@@ -153,7 +159,10 @@
    而「浏览器里那段脚本到底跑了没有」只有渲染层自己说了算 —— `/dsh-up-t/seen` 收它这一句，
    并把 `capsule`（注入行）与 `bundle`（ModuleLoader）**分开记**，因为
    「胶囊在、设置页不在」和反过来是两种不同的故障。
-4. ⏳ 重启 DSH 后确认胶囊与设置页真的出现（操作通道与握手都是宿主半侧新增的，必须重启才存在）。
+4. ✅ 重启 DSH 后确认胶囊与设置页真的出现（操作通道与握手都是宿主半侧新增的，必须重启才存在）
+   —— 2026-10-06 10:48 重启后 `dsht accept` 实测：操作通道 7 个动作在线、心跳 `stage=ready`（4 条路由）、
+   `/dsh-up-t/status.json` → 200、渲染层 `capsule` 与 `bundle` 两条握手都到（各带时间戳，`client.count=2`）。
+   只剩「用眼睛看一遍」那 7 项（不计入退出码）。
 
 **验收**：界面上出现自建面板；刷新/热重载后仍在；Harness 升级后仍在。
 
@@ -171,7 +180,7 @@
 - ✅ **落盘链路可以离线演练**（`install.mjs --yes --to <临时目标>` / `install-whale.cmd /dry`）：把暂存包复制到临时目标，在**不退出 Harness、不动在用安装包**的前提下跑同一段声明核对；`--to` 落在安装目录里一律拒绝，`--to` 指向在用 asar 时按真落盘处理（不给它开后门绕过守卫）。回归测试 `test/install.test.mjs`（26 条）钉住构建确定性、演练核对、三条拒绝路径，并用 sha256 证明全程在用安装包未变。
 - ✅ **渲染层脚本也有离线行为级单测**：`test/capsule.test.mjs`（16 条）用假 DOM + 假 `fetch` 把左下角胶囊（`plugins/dsh-up-t/assets/client.js`）真跑一遍 —— 挂载四条路径、幂等、握手、状态与数字、点击/拖动/右键隐藏、四种降级、存储被禁时仍可用，以及「所有运行里 `client failed` 一次都没响」。它当场抓到 `localStorage` 读取没包 `try`（存储被禁时胶囊在但点不动、无报错）。
 - ✅ **构建产物的引用完整性有独立检查**：`test/assets.test.mjs`（28 条）。`vendor/asar/verify.mjs` 的逐字节核对只能回答「是不是按声明改了」，回答不了「改对了没有」—— 手写的替换素材没有锚点保护。于是把三条不变量单独钉住：引用的资源必须存在、替换页不许丢掉原版引用过的资源、替换页的 CSP 不许变严。它当场抓到 `renderer/welcome.html`（DSH 的欢迎/登录窗口页面）被换成预览页后**丢掉了应用自己的 React 启动脚本**（窗口会打开但里面全空），坏版本原文留在 `test/fixtures/` 当永久反例。
-- ✅ **启动窗口那两段脚本也有离线行为级单测**：`test/splash.test.mjs`（19 条）用 `node:vm` 造一个假浏览器，把归档里的 `lib/welcome/whale-animation.js` 与 `renderer/whale-splash.js` 按页面里同样的顺序真跑一遍（推进整条时间线、模拟拖动/键盘/主题翻转/存储被禁），并检查**每个画布参数都是有限数** —— NaN 是 canvas 最典型的静默失败。此前对这两段代码只有 `node --check` 与逐字节核对，两者都不回答「跑起来对不对」。
+- ✅ **启动窗口那三段脚本也有离线行为级单测**：`test/splash.test.mjs`（**23** 条）用 `node:vm` 造一个假浏览器，把归档里的 `lib/welcome/whale-animation.js`、`renderer/whale-splash.js` 与 `renderer/replay.js` 按页面里同样的顺序真跑一遍（推进整条时间线、模拟拖动/键盘/主题翻转/存储被禁），并检查**每个画布参数都是有限数** —— NaN 是 canvas 最典型的静默失败。此前对这几段代码只有 `node --check` 与逐字节核对，两者都不回答「跑起来对不对」。replay 那 4 条钉的是修「Replay 空操作」时最容易再犯的错：页面只能有一个时长真相（`DURATION_MS` 必须存在且 ≤ 主进程 20 s 安全网）、动画跑完**自己**淡出关窗、减动效与「页面里没有画布」两种输入都要**安静**收场（不建节点、不排定时器、不关窗）。
 - ✅ **设置页那一页与挂件开关那一行也真的被渲染过一遍**：`test/settings.test.mjs`（41 条）分两层 ——
   **显示层**用外壳真实提供的 `react@18.3.1` + `react-dom/server` 渲染成 HTML（证明 `require("react")`
   真解析得到、组件在真 React 下不抛错、aria 与中英文案全对），**行为层**用自写迷你 hook 主机
@@ -204,11 +213,11 @@
 | 里程碑 | 内容 | 状态 |
 | --- | --- | --- |
 | **M0** | 项目骨架 + 环境基线 + `doctor` / `snapshot` / `baseline` | ✅ 已完成 |
-| **M1** | 权威组合预检 `precheck` + 只读安装包工具 `asar` + T3 会话搜索开启 | 🚧 代码与配置已落地，**待重启验收** |
+| **M1** | 权威组合预检 `precheck` + 只读安装包工具 `asar` + T3 会话搜索开启 | ✅ 2026-10-06 重启后验收：4 份 L0 声明与现场一致（`dsht upgrade` 全 OK）；只剩「按会话内容搜索真能命中」要你亲手搜一次（见下方 M1 验收） |
 | **M2** | T5 `../tools/` 归拢进 `vendor/`（构建链闭环）+ T1 鲸鱼动画落盘 | 🚧 构建链**已闭环**；只剩「退出 Harness 后落盘」这一步 |
-| **M3** | T2 新增 Provider + T4 自建 Web 插件样板 | 🚧 T4 样板**已落地**（L1 插件 + 设置页 + 操作按钮 + 桌面挂件开关，待重启验收）；T2 新增 Provider 卡在**需要用户给出目标**（baseURL + key，或 MCP 服务器） |
+| **M3** | T2 新增 Provider + T4 自建 Web 插件样板 | 🚧 T4 样板**已落地并重启验收**（L1 插件 + 设置页 + 操作按钮 + 桌面挂件开关；10:48 重启后操作通道与两条握手通道实测在线）；T2 新增 Provider 卡在**需要用户给出目标**（baseURL + key，或 MCP 服务器） |
 | **M4** | 升级重打自动化 | 🚧 检测 + **半自动重打**（`upgrade --stage`）+ **离线演练落盘**（`--to`）已交付；自动落盘**不做**（要人挑时间，见 `docs/03-workflow.md`） |
-| **M5** | T2/T3 落地批次：启用 `tool-ralph`、会话标题更长、上下文阈值核实、关闭产品埋点、写项目 skill | ✅ **已全部落盘**（ralph / 标题 / 埋点开关 / skill，待重启验收）；阈值核实结论是**维持不动**；灵枢记忆策略已梳理（三个插件机制正交，都不动） |
+| **M5** | T2/T3 落地批次：启用 `tool-ralph`、会话标题更长、上下文阈值核实、关闭产品埋点、写项目 skill | ✅ **已全部落盘并重启验收**（ralph / 标题 / 埋点开关 / skill；10:48 重启后 `dsht upgrade` 报 4 份 L0 声明全部 OK）；阈值核实结论是**维持不动**；灵枢记忆策略已梳理（三个插件机制正交，都不动） |
 
 ### M4 的验收标准
 
@@ -232,8 +241,8 @@
 ### M2 的验收标准
 
 - [x] `vendor/whale/build.mjs` 能按 `patches/*.yml` 构建暂存包，且**不碰安装目录**
-- [x] 构建后自检：`11 个条目按声明改动，其余 11466 个条目逐字节一致`
-- [x] 7 个 JS 产物全部通过 `node --check`（这是旧产物栽跟头的地方）
+- [x] 构建后自检：`13 个条目按声明改动，其余 11466 个条目逐字节一致`（数字随声明走：加进 replay 两件后 11 → 13）
+- [x] 8 个 JS 产物全部通过 `node --check`（这是旧产物栽跟头的地方）
 - [x] 与旧产物交叉比对证明**确定性构建**（差异恰好 2 个预期条目）
 - [ ] **完全退出 Harness 后**执行 `node vendor/whale/install.mjs --yes`，重启能看到动画
       （这一步需要窗口：托盘图标也要退出）
