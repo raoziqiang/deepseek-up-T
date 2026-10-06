@@ -92,6 +92,14 @@
 - ✅ 已用 `cordis_inspect_query`（client `Slots`）把**实时**槽位树读出来并归档到 `tracks/T4-webgui/README.md`：
   24 个 `replaceRisk: none` 的加法座位 + 替换座位清单 + list 槽位统一注册签名 + `main` / `tool.call.toolview` 的已占用键。
   ⚠️ 同一次侦察的副产品：`Config/listConfigs` 的 `status: inactive` **不等于关掉**（`tool-fs`/`tool-pwsh` 都报 `inactive` 却正常工作），别据此判断插件是否启用。
+- ✅ **槽位不只适合挂整页**：`plugins/dsh-up-t` 除了一整页 `settings.section`，还在 `settings.general.item` 里挂了一行
+  **「桌面鲸鱼挂件」开关**（`id: whale-charm`、`order: 60`，形状照抄 `dsh-client-ui-theme/lib/client.js:1603`）。
+  顺带接上了一座**出货 Harness 里没人调用的桥**：整套挂件机制（无框透明窗口 + 28 行 preload + 5 条 IPC）都在，
+  但全归档搜不到一处调用 `window.dshWhaleCharm` ⇒ `whale-charm.json` 永远是 `enabled: false`，挂件永不出现且不报错。
+  这一行由 L1 插件提供 ⇒ 随 profile 目录走、**硬刷新即生效、连落盘都不需要**。
+  难点不在渲染而在**把「用不了」的几种原因分开说清楚**（桥不在 / 被拒 / 切换失败要回原位 / busy / 卸载撤监听 /
+  `charm-changed` 通道里的字符串 `"replay"` 不是状态），`test/plugin.test.mjs` 用 9 条断言逐条钉住（46 → **55** 条）。
+  见 `tracks/T4-webgui/README.md` 第十步记录与 `tracks/T1-appearance/README.md`。
 - 插件声明方式（可直接照抄 `dsh-better-sidebar`）：
 
 ```json
@@ -179,7 +187,7 @@
 | **M0** | 项目骨架 + 环境基线 + `doctor` / `snapshot` / `baseline` | ✅ 已完成 |
 | **M1** | 权威组合预检 `precheck` + 只读安装包工具 `asar` + T3 会话搜索开启 | 🚧 代码与配置已落地，**待重启验收** |
 | **M2** | T5 `../tools/` 归拢进 `vendor/`（构建链闭环）+ T1 鲸鱼动画落盘 | 🚧 构建链**已闭环**；只剩「退出 Harness 后落盘」这一步 |
-| **M3** | T2 新增 Provider + T4 自建 Web 插件样板 | 🚧 T4 样板**已落地**（L1 插件 + 设置页，待重启验收）；T2 新增 Provider 卡在**需要用户给出目标**（baseURL + key，或 MCP 服务器） |
+| **M3** | T2 新增 Provider + T4 自建 Web 插件样板 | 🚧 T4 样板**已落地**（L1 插件 + 设置页 + 操作按钮 + 桌面挂件开关，待重启验收）；T2 新增 Provider 卡在**需要用户给出目标**（baseURL + key，或 MCP 服务器） |
 | **M4** | 升级重打自动化 | 🚧 检测 + **半自动重打**（`upgrade --stage`）+ **离线演练落盘**（`--to`）已交付；自动落盘**不做**（要人挑时间，见 `docs/03-workflow.md`） |
 | **M5** | T2/T3 落地批次：启用 `tool-ralph`、会话标题更长、上下文阈值核实、关闭产品埋点、写项目 skill | ✅ **已全部落盘**（ralph / 标题 / 埋点开关 / skill，待重启验收）；阈值核实结论是**维持不动**；灵枢记忆策略已梳理（三个插件机制正交，都不动） |
 

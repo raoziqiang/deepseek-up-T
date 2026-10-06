@@ -28,12 +28,15 @@
 - [x] 清理 `app.asar.tmp` 残留（115.8 MB）——**已确认是坏构建**（见下「记录」），已删除
 - [ ] 鲸鱼启动动画落盘：**运行 `install-whale.cmd`**（先完全退出 Harness，见下方操作清单）
 - [x] 把主题/气泡等偏好从 asar 侧迁到 `dsh-whale-widget` 的 L1 设置 —— **侦察后结论是「本来就不该这么做」**：`dsh-whale-widget` 0.3.18 的 `package.json` 只声明 `dsh.bundle.patch`，**没有任何 `Config` schema**，它的偏好本来就不在 asar 里，而是落在 `$DSH_HOME\.dshw-size.json` / `.dshw-turn.json` / `.dshw-usage.json`（设备本地，随用随写）。四层改造面（L0–L3）管的是**组合与代码**，不管这层用户数据。⇒ 这条待办的前提是错的，撤销；真要改默认值应改 widget 自己的默认值（L1 包内），而不是「迁到 L1 设置」（见下方记录）。
+- [x] 桌面挂件窗口的**开关**（设置 →「通用」里那一行）—— 2026-10-06 完成：出货 Harness 有整套挂件机制，却没有任何代码调用 `window.dshWhaleCharm`，于是 `whale-charm.json` 永远是 `enabled: false`、挂件永不出现且不报错。开关改由 L1 插件 `dsh-up-t` 提供（`settings.general.item`），**不碰安装包、硬刷新即生效**。见下方记录与 [plugins/dsh-up-t/README.md](../../plugins/dsh-up-t/README.md)。
+- [ ] 桌面挂件菜单的「Replay animation」目前是空操作（`"replay"` 发给主窗口，而启动画面在欢迎窗口）—— 要修必须改安装包（打通主进程作用域），单独一步。
 
 ## 验收
 
 1. 启动 Harness 时实际播放画卷→鲸鱼→挂件动画。
-2. `node src/cli.mjs doctor` 中原版备份与当前 `app.asar` 的 sha256 **不再一致**（证明确实落盘了）。
-3. 回滚：`node vendor/whale/install.mjs --rollback`，或 `node src/cli.mjs snapshot restore <id>`（仅覆盖 profile 控制面）。
+2. 设置 →「通用」里出现「桌面鲸鱼挂件」开关；打开后桌面上出现小鲸鱼（可拖动、右键有菜单），关掉即消失。
+3. `node src/cli.mjs doctor` 中原版备份与当前 `app.asar` 的 sha256 **不再一致**（证明确实落盘了）。
+4. 回滚：`node vendor/whale/install.mjs --rollback`，或 `node src/cli.mjs snapshot restore <id>`（仅覆盖 profile 控制面）。
 
 ## 落盘操作清单（T1）——为什么是「你点，而不是我点」
 
@@ -84,6 +87,41 @@
 **出问题怎么退**：`node vendor\whale\install.mjs --rollback`（从备份恢复，恢复后自带逐字节核对）。
 
 **记录**
+
+### 2026-10-06 · 桌面挂件：整套机制都在，唯独没有人打开它
+
+- **症状**：同样**没有任何症状**。启动画面里那截「画卷 → 鲸鱼 → 挂件」的落地动画，会停在鲸鱼上，
+  桌面上不会有那个常驻的小挂件；没有报错、没有日志、`doctor` 全绿。
+- **怎么发现的**：给 T1 找离线证据时逐个读那 7 个插入文件。读 `renderer/pendant.js` 时看到它
+  整段依赖 `window.dshPendant`，于是顺着查「谁建的这个窗口、谁打开的这个开关」，一路读到主进程。
+- **事实**：出货的 Harness **已经有整套挂件机制** ——
+  主进程 `showCharm()`（`lib/main.js:7835`）建一个 128px 无框透明 always-on-top 窗口，加载
+  `renderer/pendant.html`（配 `lib/preload-charm.cjs`，暴露 `window.dshPendant`：拖动 + 右键菜单）；
+  `installCharmHandlers()`（`:7908`）注册 4 条 IPC；启动时 `:12367` `if (readCharmState().enabled) showCharm()`；
+  主应用 preload（`lib/preload-app.cjs:880`）还暴露了 `window.dshWhaleCharm = { state(), set(bool), onChange(fn) }`，
+  主进程侧有对应 handler（`:12165`，`win32` 才有）。
+- **根因**：**整个安装包里没有任何代码调用那座桥。** 全归档 + `app.asar.unpacked` 里搜
+  `dshWhaleCharm` / `charm-state`，命中的只有 preload 的暴露处。于是 `userData/whale-charm.json`
+  永远是默认的 `enabled: false`，`showCharm()` 永远不被调用 —— 「设计意图实现了、出口忘了接」。
+  设计意图的残留物还在仓库外：`.probe\build\client\whale-charm-settings.js`（一个 ESM 形态的
+  Cordis 客户端插件，`settings.general.item` 里那一行开关），但它不在这 11 条声明里，从来没被打进安装包。
+- **修法（不碰安装包）**：把这一行加在**已有的 L1 插件** `plugins/dsh-up-t` 的客户端半侧
+  （`settings.general.item`、`replaceRisk: none`），而不是新增 asar 声明。这样它随 profile 目录走，
+  Harness 升级不覆盖；而且客户端 bundle 是**按 mtime 重读**的 ⇒ **硬刷新即生效，连落盘都不需要**。
+  这正是四层判据「能用 L0/L1 表达的绝不去动 L3」带来的直接好处。
+- **为什么这不算「顺手改了别的东西」**：这一行只是把一个**已经存在但没人调用的官方桥**接到界面上，
+  不加任何新机制；关掉它挂件就没了，与出货 Harness 的默认行为一致。
+- **怎么验的**：`test\plugin.test.mjs` 的 9 条新断言（46 → **55** 条）钉住它的**失败路径**：
+  桥不在（Web 形态）、桥在但调用被拒（非 Windows 没有那两个 IPC handler）、切换失败必须把开关放回原位
+  并留下 `console.warn`、切换中不可连点、卸载要撤掉监听，以及「`charm-changed` 通道里的字符串
+  `"replay"` 不是状态」（把它当状态会让开关在挂件其实开着的时候显示成关）。
+- **已知但故意没修**：挂件右键菜单的「Replay animation」把 `"replay"` 发给**主窗口**，
+  而鲸鱼启动画面只存在于**欢迎窗口**（`welcome.html` + `renderer/whale-splash.js`）——
+  `welcomeWindow` 与 `installCharmHandlers` 不在同一个函数作用域内，所以这条消息没有收件人。
+  要修得打通主进程作用域，属于必须改安装包的独立一步。
+- **教训**：**「机制齐备」和「有人用它」是两件事。** 这次的缺陷不在任何一处代码里，
+  而在「少了一处调用」—— grep 一个 API 名，命中的全是它的定义与暴露处、没有一处使用处时，
+  那通常不是「文档没写」，而是**出口真的忘了接**。
 
 ### 2026-10-06 · 登录窗口页面被换成了「预览页」：替换素材没有锚点保护
 

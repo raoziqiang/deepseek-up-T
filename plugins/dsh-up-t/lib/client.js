@@ -431,7 +431,241 @@
         return h("div", { style: { padding: "4px 0" } }, children);
       }
 
-      var inject = ["slots"];
+      // ── 桌面鲸鱼挂件的开关 ────────────────────────────────────────────
+      //
+      // 为什么这一行必须存在：出货的 Harness **已经**有整套挂件机制（主进程建一个 128px 的
+      // 无框窗口、加载 renderer/pendant.html、lib/preload-charm.cjs 暴露 window.dshPendant、
+      // 主应用侧 preload 暴露 window.dshWhaleCharm），但**没有任何地方调用那个桥** ——
+      // 于是 userData/whale-charm.json 永远是 enabled:false，挂件窗口永远不出现，且不报错。
+      // 我们把它接在 L1 插件里（而不是再改一次安装包）：能用 L0/L1 表达的绝不去动 L3。
+      //
+      // 槽位选 settings.general.item（list 槽位、replaceRisk: none）：它只有一个开关，
+      // 和「外观」「字号」是同一类偏好，不该单占一整页。注册形状照抄同槽位真实注册者
+      // （dsh-client-ui-theme/lib/client.js:1603）：name 必须写，store/locale/inject 可选。
+      var CHARM_BRIDGE = "dshWhaleCharm";
+
+      function bridgeOf() {
+        try {
+          return typeof window !== "undefined" && window ? window[CHARM_BRIDGE] : undefined;
+        } catch (e) {
+          return undefined;
+        }
+      }
+
+      function localeId(ctx) {
+        try {
+          var service = ctx && typeof ctx.get === "function" ? ctx.get("locale") : null;
+          if (service && typeof service.getLocale === "function") {
+            var locale = service.getLocale();
+            if (locale && typeof locale.id === "string") return locale.id;
+          }
+        } catch (e) { /* 取不到就当英文 */ }
+        try {
+          if (typeof document !== "undefined" && document.documentElement) {
+            return document.documentElement.lang || "en";
+          }
+        } catch (e) { /* 同上 */ }
+        return "en";
+      }
+
+      function charmCopy(id) {
+        if (typeof id === "string" && id.indexOf("zh") === 0) {
+          return {
+            title: "桌面鲸鱼挂件",
+            desc: "把启动动画里的小鲸鱼挂到桌面上，可以拖到任意位置；在它上面点右键有菜单。",
+            on: "已开启",
+            off: "已关闭",
+            hint: "开启后立刻出现；关掉它就消失。",
+            loading: "正在读取挂件状态…",
+            unavailable: "这个窗口里没有挂件通道 —— 只有 Harness 桌面版（Windows）才有。",
+            rejected: "挂件通道拒绝了这个请求",
+            failed: "切换失败，请看控制台。",
+          };
+        }
+        return {
+          title: "Desktop whale charm",
+          desc: "Float the little whale from the splash on your desktop and drag it anywhere. Right-click it for a menu.",
+          on: "On",
+          off: "Off",
+          hint: "It appears as soon as you turn it on, and disappears when you turn it off.",
+          loading: "Reading charm state…",
+          unavailable: "No charm bridge in this window — Harness desktop (Windows) only.",
+          rejected: "The charm bridge rejected this request",
+          failed: "Could not toggle the charm. See the console.",
+        };
+      }
+
+      var SWITCH_BASE = {
+        padding: "4px 14px",
+        borderRadius: "999px",
+        border: "1px solid currentColor",
+        background: "transparent",
+        color: "inherit",
+        cursor: "pointer",
+        fontSize: "0.9em",
+        minWidth: "5.5em",
+      };
+
+      /**
+       * 纯展示组件：所有输入都从 props 来，不碰 hooks、不碰桥。
+       * 导出 `exports.__charmView` 只为离线单测能用假 React 直接调用它
+       * （ModuleLoader 只读 apply/inject，多出来的键没有副作用）。
+       */
+      function CharmRowView(props) {
+        var copy = props.copy || charmCopy("en");
+        var usable = props.available === true;
+        var enabled = props.enabled === true;
+        var disabled = !usable || props.busy === true;
+        var status = null;
+        if (!usable) status = props.why || copy.unavailable;
+        else if (props.failed === true) status = copy.failed;
+
+        return h(
+          "div",
+          {
+            "data-dsh-up-t": "charm",
+            style: {
+              display: "flex",
+              alignItems: "center",
+              gap: "12px",
+              justifyContent: "space-between",
+              padding: "4px 0",
+            },
+          },
+          h(
+            "div",
+            { style: { minWidth: 0 } },
+            h("div", { style: { fontWeight: 600 } }, copy.title),
+            h("div", { style: { fontSize: "0.88em", opacity: 0.7 } }, status || copy.desc),
+            h(
+              "div",
+              { style: { fontSize: "0.82em", opacity: 0.5 } },
+              usable ? copy.hint : "",
+            ),
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              role: "switch",
+              "aria-checked": enabled,
+              "aria-label": copy.title,
+              "data-on": enabled ? "true" : "false",
+              "data-available": usable ? "true" : "false",
+              disabled: disabled,
+              style: Object.assign(
+                {},
+                SWITCH_BASE,
+                enabled ? { background: "rgba(63,185,80,0.18)" } : {},
+                disabled ? { opacity: 0.55, cursor: "default" } : {},
+              ),
+              onClick: function () {
+                if (!disabled && typeof props.onToggle === "function") props.onToggle();
+              },
+            },
+            enabled ? copy.on : copy.off,
+          ),
+        );
+      }
+
+      function makeCharmRow(ctx) {
+        return function CharmRow() {
+          var copy = charmCopy(localeId(ctx));
+          var state = React.useState({ phase: "loading", enabled: false, why: null, failed: false, busy: false });
+          var s = state[0];
+          var setS = state[1];
+
+          React.useEffect(function () {
+            var bridge = bridgeOf();
+            if (!bridge || typeof bridge.state !== "function" || typeof bridge.set !== "function") {
+              setS({ phase: "unavailable", enabled: false, why: copy.unavailable, failed: false, busy: false });
+              return undefined;
+            }
+            var alive = true;
+            bridge.state().then(
+              function (value) {
+                if (alive) setS({ phase: "ready", enabled: value === true, why: null, failed: false, busy: false });
+              },
+              function (error) {
+                // 桥在，但调用被拒 —— 非 Windows 平台根本没有这两个 handler。这也是「用不了」，
+                // 但原因和「桥不在」不同，要如实分开说，别让人去查一个不存在的开关。
+                if (alive) {
+                  setS({
+                    phase: "unavailable",
+                    enabled: false,
+                    why: copy.rejected + "（" + String(error && error.message ? error.message : error) + "）",
+                    failed: false,
+                    busy: false,
+                  });
+                }
+              },
+            );
+            var off = null;
+            if (typeof bridge.onChange === "function") {
+              try {
+                off = bridge.onChange(function (value) {
+                  // 同一条通道还会送来挂件菜单的请求（字符串 "replay"）。只有布尔值是状态；
+                  // 把 "replay" 当成状态会让开关在挂件其实开着的时候显示成关。
+                  if (typeof value === "boolean") {
+                    setS({ phase: "ready", enabled: value, why: null, failed: false, busy: false });
+                  }
+                });
+              } catch (e) {
+                off = null;
+              }
+            }
+            return function () {
+              alive = false;
+              if (typeof off === "function") off();
+            };
+          }, []);
+
+          function toggle() {
+            var bridge = bridgeOf();
+            if (!bridge || typeof bridge.set !== "function") return;
+            var want = s.enabled !== true;
+            setS({ phase: s.phase, enabled: want, why: s.why, failed: false, busy: true });
+            bridge.set(want).then(
+              function (value) {
+                setS({
+                  phase: "ready",
+                  enabled: typeof value === "boolean" ? value : want,
+                  why: null,
+                  failed: false,
+                  busy: false,
+                });
+              },
+              function (error) {
+                setS({
+                  phase: "ready",
+                  enabled: s.enabled === true,
+                  why: null,
+                  failed: true,
+                  busy: false,
+                });
+                try {
+                  console.warn("dsh-up-t: 切换桌面挂件失败", error);
+                } catch (e) { /* 控制台不可用也不影响界面 */ }
+              },
+            );
+          }
+
+          if (s.phase === "loading") {
+            return h("div", { style: { opacity: 0.6, padding: "4px 0" } }, copy.loading);
+          }
+          return h(CharmRowView, {
+            copy: copy,
+            available: s.phase === "ready",
+            enabled: s.enabled === true,
+            busy: s.busy === true,
+            failed: s.failed === true,
+            why: s.why,
+            onToggle: toggle,
+          });
+        };
+      }
+
+      var inject = ["slots", "locale"];
 
       // 握手：告诉宿主「渲染层的这个 bundle 真的跑到了这里」。
       // 这一步只能由渲染层自己说 —— 宿主知道自己注册了路由（心跳的 ready），
@@ -467,10 +701,28 @@
             );
           });
         }, "dsh-up-t: settings.section");
+
+        // 桌面鲸鱼挂件的开关。它随 L1 插件一起走，所以不用落盘、不用重打安装包，
+        // 硬刷新就能出现 —— 这正是「能在 L1 做的绝不动 L3」带来的好处。
+        ctx.effect(function () {
+          return ctx.slots.inject("settings.general.item", function () {
+            return ctx.slots.register(
+              {
+                name: "settings.general.item",
+                id: "whale-charm",
+                order: 60,
+              },
+              makeCharmRow(ctx),
+            );
+          });
+        }, "dsh-up-t: settings.general.item");
       }
 
       exports.apply = apply;
       exports.inject = inject;
+      // 只为离线单测导出：ModuleLoader 只读 apply/inject，多出来的键没有副作用。
+      exports.__charmView = CharmRowView;
+      exports.__charmCopy = charmCopy;
       return module.exports;
     },
   });

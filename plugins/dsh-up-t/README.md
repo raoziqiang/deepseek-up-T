@@ -9,6 +9,10 @@
 不会遮蔽任何自带界面）。这一页是 T4 那条线的正题：**用 Slot 系统挂自有面板**。
 左下的胶囊走的是更轻的注入通道，两者互不依赖 —— 胶囊是「通道可用」的证明，设置页是「槽位可用」的证明。
 
+第三处是个**开关**：设置 →「通用」里多一行「桌面鲸鱼挂件」（`settings.general.item` 槽位，同样是
+`replaceRisk: none`）。它把出货 Harness 里那条**没有任何出口**的 `window.dshWhaleCharm` 桥接上 ——
+没有它，挂件窗口永远不会出现（详见下面「★ 桌面鲸鱼挂件开关」）。
+
 ```
 up-T · 44.0.0        ← 灰点：安装包与原版备份大小相同（很可能未被改造）
 up-T · 44.0.0        ← 绿点：大小不同（已被改造）
@@ -140,6 +144,59 @@ up-T · ?             ← 黄点：没有原版备份可比 / 宿主没回应
 在那之前 `GET` 打不通，界面显示「操作通道由宿主半侧提供…重启后回到本页即可」，
 而不是一直转圈。客户端半侧改完仍然只需硬刷新。
 
+## ★ 桌面鲸鱼挂件开关：接上一条没有出口的通道
+
+出货的 Harness **已经**有整套挂件机制：主进程建一个 128px 的无框透明窗口、加载
+`renderer/pendant.html`（配 `lib/preload-charm.cjs`，它暴露 `window.dshPendant` 负责拖动与菜单），
+主应用侧 preload 还暴露了 `window.dshWhaleCharm = { state(), set(bool), onChange(fn) }`，
+状态存在 `userData/whale-charm.json`，启动时 `if (readCharmState().enabled) showCharm()`。
+
+**但整个安装包里没有任何代码调用那座桥。** 全归档 + `app.asar.unpacked` 里搜 `dshWhaleCharm` /
+`charm-state`，命中的只有 preload 的暴露处。于是：
+
+- `whale-charm.json` 永远是默认的 `enabled: false`；
+- `showCharm()` 永远不被调用；
+- 挂件窗口永远不出现，**而且不报任何错** —— 这是「设计意图实现了、出口忘了接」的典型形态。
+
+设计意图的残留物还在仓库外（`../.probe/build/client/whale-charm-settings.js`，一个 ESM 形态的
+Cordis 客户端插件），但它不在这 11 条声明里，所以从来没被打进安装包。
+
+**我们把这行开关加在已有的 L1 插件里**，而不是新增一条 asar 声明、也不是新开一个插件包。
+理由就是四层改造面的判据：能用 L0/L1 表达的绝不去动 L3。好处很直接 ——
+dsh-up-t 已经装好了，它的客户端 bundle 由宿主**按 mtime 重读**，所以这一行**硬刷新就出现，
+连落盘都不需要**。
+
+注册形状照抄同槽位真实注册者（`dsh-client-ui-theme/lib/client.js:1603`）：
+`{ name: "settings.general.item", id: "whale-charm", order: 60 }` —— 通用页的条目不自带 `label`
+（行自己渲染标题），所以第二项没有 `label` 是**有意**的，被断言钉住。
+
+这一行的失败路径比它自己重要，全部有断言：
+
+| 情况 | 行为 |
+| --- | --- |
+| 桥不在（Web 形态 / 普通浏览器里打开） | 禁用开关 + 说「只有 Harness 桌面版才有」，**不给一个点上去没反应的开关** |
+| 桥在但调用被拒（非 Windows 没有那两个 IPC handler） | 同样按「用不了」处理，并把拒绝原因原样带上 —— 不然人会去查一个根本不存在的东西 |
+| 切换失败 | 开关回到原来的位置（**不许悄悄翻过去**），界面说「切换失败，请看控制台」，`console.warn` 里留下可查的那一条 |
+| 正在切换 | 标 `busy`、按钮禁用，免得连点 |
+| 卸载 | 调 `onChange` 返回的 disposer，不把监听留在桥里 |
+
+还有一条**不是状态的状态**：`charm-changed` 这条通道同时用来送挂件菜单的请求（字符串 `"replay"`）。
+把 `"replay"` 当成状态，会让开关在挂件其实开着的时候显示成关 —— 这种错不报错，只是骗人。
+所以 `onChange` 回调**只认布尔值**，这条也有断言。
+
+语言按 `ctx.get('locale')` 切（所以 `inject` 从 `["slots"]` 变成 `["slots", "locale"]`），
+文案中英两套都在 `__charmCopy()` 里。
+
+### 已知：挂件菜单的「Replay animation」还是空的
+
+挂件窗口右键菜单里那三项，`reset` 与 `close` 都由主进程处理；`toggle-splash` 却把
+`"replay"` 发给**主窗口**，而鲸鱼启动画面只存在于**欢迎窗口**（`welcome.html`
+与 `renderer/whale-splash.js`）。主进程里 `welcomeWindow` 与 `installCharmHandlers` 不在同一个
+函数作用域内，所以这个消息没有收件人 —— 点它什么也不会发生。
+
+**不修**：修它要打通主进程的作用域（把欢迎窗口的引用交给 charm handler），
+属于必须改安装包的独立一步。先在这里记下来，免得以后把它当成 bug 重新发现一遍。
+
 ## ★ 三条不能违反的约束（都是别人踩过的坑）
 
 1. **不能用对象级 `inject: ['webServer', …]`。**
@@ -181,7 +238,7 @@ window.__ModuleLoader__.load({
     Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
     var React = require("react");        // React 在外壳冻结的平台模块表里，无需声明
     // …组件定义…
-    var inject = ["slots"];              // Cordis **服务名**数组（不是槽位名）
+    var inject = ["slots", "locale"];    // Cordis **服务名**数组（不是槽位名）；locale 只用来选文案
     function apply(ctx) {
       ctx.effect(function () {
         return ctx.slots.inject("settings.section", function () {
@@ -194,6 +251,15 @@ window.__ModuleLoader__.load({
           }, UpTSection);
         });
       }, "dsh-up-t: settings.section");
+      // 第二个槽位：设置 →「通用」里的那一行开关（list 槽位，同样不遮蔽自带 UI）
+      ctx.effect(function () {
+        return ctx.slots.inject("settings.general.item", function () {
+          return ctx.slots.register(
+            { name: "settings.general.item", id: "whale-charm", order: 60 },
+            makeCharmRow(ctx),
+          );
+        });
+      }, "dsh-up-t: settings.general.item");
     }
     exports.apply = apply;
     exports.inject = inject;
@@ -267,7 +333,7 @@ node src\cli.mjs precheck --profile-json state\candidate\package.json
 
 ```powershell
 cd D:\Z1848\harness-ds\deepseek-up-T
-node test\plugin.test.mjs    # 46 条断言：心跳（apply + ready 两枚、trail、route 清单）、注入行、四条路由、操作守卫与真 spawn、specs 的 writes 标记、握手通道（GET 只读 / 缺头 403 / 两条通道分开记 / bundle 恰好握一次）、客户端 bundle 形态与按钮、设置页的心跳行与握手状态、判定的三态与「拿不到 ≠ 不同」（含 `findInstall` 跳过 0 字节候选的回归测试）、清理
+node test\plugin.test.mjs    # 55 条断言：心跳（apply + ready 两枚、trail、route 清单）、注入行、四条路由、操作守卫与真 spawn、specs 的 writes 标记、握手通道（GET 只读 / 缺头 403 / 两条通道分开记 / bundle 恰好握一次）、客户端 bundle 形态与两个槽位的注册、设置页的按钮与心跳行、**挂件开关的九种情形**（中英文案、桥不在、可用、失败可重试、busy 不可连点、挂载读状态、`"replay"` 不当状态、桥的返回值说了算、切换失败要留告警）、判定的三态与「拿不到 ≠ 不同」（含 `findInstall` 跳过 0 字节候选的回归测试）、清理
 node test\capsule.test.mjs   # 16 条断言：在假 DOM + 假 fetch 里把 assets/client.js 真跑一遍 —— 挂载（complete / loading / 无 body / 重试）、幂等、握手、状态渲染与数字、点击展开与拖动、右键隐藏与持久化、四种降级文案、存储被禁时依然可用，以及「全程一次都没有 `client failed`」
 node src\cli.mjs doctor      # bundles 全部可解析
 node src\cli.mjs precheck    # 组合可用

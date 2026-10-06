@@ -535,10 +535,20 @@ function makeReactStub() {
  */
 let clientFetch = () => Promise.reject(new Error('offline'));
 
-function runClientBundle({ withLoader = true, confirm } = {}) {
+/**
+ * bundle 里的 `console.warn` 也解析到 vm 沙箱。渲染层的告警本来就该被看见 ——
+ * 但那应该在断言里被看见，而不是弄脏测试输出，所以把它收进这个数组。
+ */
+let clientWarnings = [];
+
+function runClientBundle({ withLoader = true, confirm, bridge } = {}) {
   let captured = null;
+  clientWarnings = [];
   const win = withLoader ? { __ModuleLoader__: { load: (spec) => (captured = spec) } } : {};
   if (confirm) win.confirm = confirm;
+  // 桌面挂件的桥（window.dshWhaleCharm）。它是主应用 preload 暴露的，不是本插件的代码，
+  // 所以测试里必须自己放进去 —— 少了它，那一行应当降级而不是崩。
+  if (bridge !== undefined) win.dshWhaleCharm = bridge;
   const sandbox = {
     window: win,
     Symbol,
@@ -550,7 +560,12 @@ function runClientBundle({ withLoader = true, confirm } = {}) {
     setInterval: () => 0,
     clearInterval: () => {},
     fetch: (...args) => clientFetch(...args),
-    console,
+    console: {
+      log: console.log,
+      info: () => {},
+      warn: (...args) => clientWarnings.push(args.map(String).join(' ')),
+      error: (...args) => clientWarnings.push(args.map(String).join(' ')),
+    },
   };
   vm.createContext(sandbox);
   vm.runInContext(CLIENT_SRC, sandbox, { filename: 'plugins/dsh-up-t/lib/client.js' });
@@ -586,15 +601,16 @@ check('bundle 以 id="dsh-up-t" 注册，factory 导出 Cordis 客户端插件',
   assert.equal(typeof clientExports.apply, 'function');
   // 注意：vm 里造出来的数组与宿主 realm 不同源，所以只能用 Array.isArray + Array.from 比较。
   assert.equal(Array.isArray(clientExports.inject), true);
-  assert.deepEqual(Array.from(clientExports.inject), ['slots'], '客户端半侧必须 inject slots');
+  assert.deepEqual(Array.from(clientExports.inject), ['slots', 'locale'], '客户端半侧必须 inject slots 与 locale');
   assert.equal(clientExports[Symbol.toStringTag], 'Module');
 });
 
-check('apply() 只向 settings.section 注册一个条目，形态正确', () => {
+check('apply() 向两个槽位各注册一个条目：设置页 + 桌面挂件开关', () => {
   const ctx = {
     effect(fn) {
       assert.equal(typeof fn(), 'function', 'ctx.effect 必须返回 disposer');
     },
+    get: () => undefined,
     slots: {
       inject(key, cb) {
         clientState.injectKeys.push(key);
@@ -607,8 +623,8 @@ check('apply() 只向 settings.section 注册一个条目，形态正确', () =>
     },
   };
   clientExports.apply(ctx);
-  assert.deepEqual(clientState.injectKeys, ['settings.section']);
-  assert.equal(clientState.registers.length, 1);
+  assert.deepEqual(clientState.injectKeys, ['settings.section', 'settings.general.item']);
+  assert.equal(clientState.registers.length, 2);
   const { entry, component } = clientState.registers[0];
   assert.equal(entry.name, 'settings.section');
   assert.equal(entry.id, 'dsh-up-t');
@@ -617,6 +633,15 @@ check('apply() 只向 settings.section 注册一个条目，形态正确', () =>
   assert.equal(typeof entry.inject, 'function');
   assert.equal(Object.keys(entry.inject()).length, 0, 'business share 应为空对象');
   assert.equal(typeof component, 'function');
+
+  // 第二项是桌面挂件开关：走 settings.general.item（list 槽位、replaceRisk: none），
+  // 不写 label —— 与同槽位真实注册者 dsh-client-ui-theme 一致（行自己渲染标题）。
+  const charm = clientState.registers[1];
+  assert.equal(charm.entry.name, 'settings.general.item');
+  assert.equal(charm.entry.id, 'whale-charm');
+  assert.equal(charm.entry.order, 60, '排在「外观」(10)/「字号」(11) 之后');
+  assert.equal(charm.entry.label, undefined, '通用页的条目不自带 label');
+  assert.equal(typeof charm.component, 'function');
 });
 
 check('设置页组件能渲染出 loading 态（不抛、返回元素树）', () => {
@@ -661,22 +686,31 @@ function makeScriptedReact() {
 }
 
 /** 用给定的 React 与 window.confirm 造一份客户端实例，并取到注册的设置页组件。 */
-function makeClient({ confirm } = {}) {
+function makeClient({ confirm, bridge } = {}) {
   const scripted = makeScriptedReact();
-  const b = runClientBundle({ confirm });
+  const b = runClientBundle({ confirm, bridge });
   const exp = b.factory((name) => {
     if (name === 'react') return scripted.React;
     throw new Error(`客户端 bundle 出现了未声明的 require：${name}`);
   });
   const registers = [];
-  exp.apply({
+  const ctx = {
     effect: (fn) => fn(),
+    // 语言服务：renderer 侧就是这么问语言的（inject 里有 locale）。
+    // 这里给 zh-CN，好让断言能钉住中文文案本身，而不是只钉住「有字」。
+    get: (key) => (key === 'locale' ? { getLocale: () => ({ id: 'zh-CN' }) } : undefined),
     slots: {
       inject: (key, cb) => cb(),
       register: (entry, component) => { registers.push({ entry, component }); return () => {}; },
     },
-  });
-  return { scripted, component: registers[0].component };
+  };
+  exp.apply(ctx);
+  return {
+    scripted,
+    registers,
+    component: registers[0].component,
+    charm: registers[1] && registers[1].component,
+  };
 }
 
 /** 元素树的遍历：children 里既有元素、也有数组（h("div", …, [a, b]) 是常态）。 */
@@ -929,6 +963,190 @@ check('findInstall：0 字节的 app.asar 是「拿不到」，不是「大小�
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+// ── 桌面挂件开关（settings.general.item）────────────────────────────
+//
+// 这一段守的是一整条**静默链**：出货的 Harness 有挂件窗口、有 IPC、有 window.dshWhaleCharm，
+// 却没有任何地方调用它 —— 于是 whale-charm.json 永远是 enabled:false，挂件永不出现、不报错。
+// 开关接上之后，最该被钉住的又是它的降级：桥不在（网页版/普通浏览器）、平台没有 handler
+// （调用被拒）都必须说清楚，而不是给一个点上去没反应的开关。
+
+const CHARM_ZH = clientExports.__charmCopy('zh-CN');
+const CHARM_EN = clientExports.__charmCopy('en');
+
+check('挂件开关：中英文案都在，语言按 zh 前缀切', () => {
+  assert.equal(CHARM_ZH.title, '桌面鲸鱼挂件');
+  assert.equal(CHARM_EN.title, 'Desktop whale charm');
+  assert.match(CHARM_ZH.unavailable, /桌面版/);
+  assert.match(CHARM_EN.unavailable, /desktop/);
+});
+
+check('挂件开关：桥不在时禁用 + 说明原因（不许给一个点了没反应的开关）', () => {
+  const el = clientExports.__charmView({
+    copy: CHARM_ZH,
+    available: false,
+    enabled: false,
+    why: null,
+    onToggle: () => { throw new Error('禁用的开关不该被调用'); },
+  });
+  assert.equal(el.props['data-dsh-up-t'], 'charm');
+  const buttons = collect(el, 'button');
+  assert.equal(buttons.length, 1);
+  assert.equal(buttons[0].props.role, 'switch');
+  assert.equal(buttons[0].props.disabled, true);
+  assert.equal(buttons[0].props['aria-checked'], false);
+  assert.equal(buttons[0].props['data-available'], 'false');
+  assert.match(JSON.stringify(el), /桌面版/);
+});
+
+check('挂件开关：可用时是可点的开关，状态由 data-on / aria-checked 表达', () => {
+  const on = clientExports.__charmView({ copy: CHARM_ZH, available: true, enabled: true, onToggle: () => {} });
+  const off = clientExports.__charmView({ copy: CHARM_ZH, available: true, enabled: false, onToggle: () => {} });
+  const bOn = collect(on, 'button')[0];
+  const bOff = collect(off, 'button')[0];
+  assert.equal(bOn.props['aria-checked'], true);
+  assert.equal(bOn.props['data-on'], 'true');
+  assert.equal(bOn.props.disabled, false);
+  assert.equal(bOff.props['aria-checked'], false);
+  assert.equal(bOff.props['data-on'], 'false');
+  assert.match(JSON.stringify(on), /已开启/);
+  assert.match(JSON.stringify(off), /已关闭/);
+});
+
+check('挂件开关：失败时说失败（仍可再点），正在切换时不可连点', () => {
+  let clicks = 0;
+  const failed = clientExports.__charmView({
+    copy: CHARM_ZH,
+    available: true,
+    enabled: false,
+    failed: true,
+    onToggle: () => { clicks += 1; },
+  });
+  assert.match(JSON.stringify(failed), /切换失败/);
+  const b = collect(failed, 'button')[0];
+  assert.equal(b.props.disabled, false, '失败之后必须还能再试一次');
+  b.props.onClick({});
+  assert.equal(clicks, 1);
+
+  const busy = clientExports.__charmView({
+    copy: CHARM_ZH,
+    available: true,
+    enabled: false,
+    busy: true,
+    onToggle: () => { throw new Error('正在切换时不该再发一次请求'); },
+  });
+  const bb = collect(busy, 'button')[0];
+  assert.equal(bb.props.disabled, true);
+  bb.props.onClick({});
+});
+
+await checkAsync('挂件开关：挂载时读一次状态，并把布尔状态收进来；卸载时撤掉监听', async () => {
+  const seen = { state: 0, listeners: [], off: false };
+  const bridge = {
+    state: () => { seen.state += 1; return Promise.resolve(false); },
+    set: () => Promise.resolve(true),
+    onChange: (fn) => { seen.listeners.push(fn); return () => { seen.off = true; }; },
+  };
+  const client = makeClient({ bridge });
+  assert.ok(client.charm, '必须注册了挂件那一项');
+  const loading = client.charm();
+  assert.match(JSON.stringify(loading), /正在读取/, '还没读到状态时要说「正在读取」');
+  assert.equal(client.scripted.effects.length, 1, '挂载时必须自己去读一次状态');
+  const off = client.scripted.effects[0]();
+  assert.equal(typeof off, 'function', 'effect 必须返回清理函数');
+  await flush();
+  assert.equal(seen.state, 1);
+  const ready = client.scripted.setCalls.find((c) => c.next && c.next.phase === 'ready');
+  assert.ok(ready, '读到状态后必须落到 ready 态');
+  assert.equal(ready.next.enabled, false);
+  off();
+  assert.equal(seen.off, true, '卸载时不许把监听留在桥里');
+});
+
+await checkAsync('挂件开关：onChange 只认布尔值 —— "replay" 是挂件菜单的请求，不是状态', async () => {
+  const listeners = [];
+  const bridge = {
+    state: () => Promise.resolve(false),
+    set: () => Promise.resolve(true),
+    onChange: (fn) => { listeners.push(fn); return () => {}; },
+  };
+  const client = makeClient({ bridge });
+  client.charm();
+  client.scripted.effects[0]();
+  await flush();
+  client.scripted.reset();
+  assert.equal(listeners.length, 1, '必须订阅一次变化');
+  // 挂件菜单的「Replay animation」走的正是这条通道。把字符串当状态，
+  // 会让开关在挂件其实开着的时候显示成关 —— 这种错不会报错，只会骗人。
+  listeners[0]('replay');
+  assert.equal(client.scripted.setCalls.length, 0, '字符串不是状态，绝不能翻转开关');
+  listeners[0](true);
+  assert.equal(client.scripted.setCalls.length, 1);
+  assert.equal(client.scripted.setCalls[0].next.enabled, true);
+  assert.equal(client.scripted.setCalls[0].next.why, null);
+});
+
+await checkAsync('挂件开关：点一下 → 调桥的 set，并用桥的返回值落定（不是自己猜）', async () => {
+  const seen = { set: [] };
+  const bridge = {
+    state: () => Promise.resolve(false),
+    set: (value) => { seen.set.push(value); return Promise.resolve(value); },
+    onChange: () => () => {},
+  };
+  const client = makeClient({ bridge });
+  client.charm();
+  client.scripted.setStates([{ phase: 'ready', enabled: false, why: null, failed: false, busy: false }]);
+  const el = client.charm();
+  assert.equal(typeof el.type, 'function', 'ready 态渲染的是纯展示组件');
+  assert.equal(typeof el.props.onToggle, 'function');
+  client.scripted.reset();
+  el.props.onToggle();
+  assert.deepEqual(seen.set, [true], '关 → 开');
+  assert.ok(client.scripted.setCalls.some((c) => c.next && c.next.busy === true), '等待期间要标 busy，免得人连点');
+  await flush();
+  const done = client.scripted.setCalls[client.scripted.setCalls.length - 1];
+  assert.equal(done.next.enabled, true);
+  assert.equal(done.next.busy, false);
+});
+
+await checkAsync('挂件开关：桥在但调用被拒（非 Windows 平台没有 handler）→ 按「用不了」并带上原因', async () => {
+  const bridge = {
+    state: () => Promise.reject(new Error('No handler registered for dsh-desktop:charm-state')),
+    set: () => Promise.resolve(true),
+    onChange: () => () => {},
+  };
+  const client = makeClient({ bridge });
+  client.charm();
+  client.scripted.effects[0]();
+  await flush(); await flush();
+  const call = client.scripted.setCalls.find((c) => c.next && c.next.phase === 'unavailable');
+  assert.ok(call, '被拒也是「用不了」，不能一直停在「正在读取」');
+  assert.match(call.next.why, /No handler registered/);
+});
+
+await checkAsync('挂件开关：切换失败时不许把开关悄悄翻过去', async () => {
+  const bridge = {
+    state: () => Promise.resolve(false),
+    set: () => Promise.reject(new Error('boom')),
+    onChange: () => () => {},
+  };
+  const client = makeClient({ bridge });
+  client.charm();
+  client.scripted.setStates([{ phase: 'ready', enabled: false, why: null, failed: false, busy: false }]);
+  const el = client.charm();
+  client.scripted.reset();
+  el.props.onToggle();
+  await flush();
+  const done = client.scripted.setCalls[client.scripted.setCalls.length - 1];
+  assert.equal(done.next.failed, true);
+  assert.equal(done.next.enabled, false, '失败时开关必须回到原来的位置');
+  assert.equal(done.next.busy, false);
+  // 界面上只写一句「切换失败，请看控制台」——所以控制台里必须有东西可看。
+  assert.ok(
+    clientWarnings.some((w) => /切换桌面挂件失败/.test(w) && /boom/.test(w)),
+    `切换失败必须留下可查的告警，实际：${JSON.stringify(clientWarnings)}`,
+  );
 });
 
 check('package.json 声明了 dsh.client.platform=web 且导出 ./client', () => {
