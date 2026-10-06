@@ -21,7 +21,7 @@ dsh-memory、better-sidebar、whale-widget，4 个 experimental（Agent Teams、
 
 | 抓手 | 位置 | 现状 |
 | --- | --- | --- |
-| `tool-ralph` | base 行 `disabled: true` | ⏳ **声明与预检已就绪**（`patches/T2-enable-ralph.yml`，预检 0 问题、只改 1 行），只差落盘；等用户决定 |
+| `tool-ralph` | base 行 `disabled: true` | ✅ **已落盘**（2026-10-06，现场 `cordis.patch.yml` 第 12 条，重启后生效）；预检 0 问题、只改 1 行，row-key 合并已实测验证 |
 | `session-query-sqlite` | base `openAt: never` | ✅ 已由 T3 打开（会话全文搜索） |
 | `llm-pi-ai.providers` | 已用 | 加 Provider = 加一节 |
 | `dsh-mcp-client` | 宿主包存在 | MCP 接入能力在手，未启用 |
@@ -34,7 +34,7 @@ dsh-memory、better-sidebar、whale-widget，4 个 experimental（Agent Teams、
 
 - [ ] 新增 Provider：往 `llm-pi-ai.providers` 加一节（`apiKeyEnv` + `api` + `baseURL` + `models`）
 - [ ] 接入 MCP server，把外部工具变成本地 DSH 工具
-- [ ] **落盘 `tool-ralph`**（声明与预检已就绪，等用户决定）
+- [x] **落盘 `tool-ralph`** —— 2026-10-06 完成（用户确认后落盘），见下方记录
 - [ ] 写自有 skill
 - [ ] 调 Agent 行为：`personaPrefix`、`agent-presets`、`subagent.maxDepth`
 
