@@ -29,6 +29,7 @@ dsh-memory、better-sidebar、whale-widget，4 个 experimental（Agent Teams、
 | `spill-policy` | `maxInlineTokens: 12500` | 大结果落盘阈值 |
 | `dsh-tool-web` | `searchTimeoutMs: 60000` | 联网搜索与抓取 |
 | `system-prompt` | `personaPrefix: ''` | 部署人格，可覆盖 |
+| `product-analytics` | base `enabled: true`（界面无开关） | ✅ **已落盘关闭**（2026-10-06，经用户确认），见下方记录 |
 
 ## 待办
 
@@ -36,6 +37,7 @@ dsh-memory、better-sidebar、whale-widget，4 个 experimental（Agent Teams、
 - [ ] 接入 MCP server，把外部工具变成本地 DSH 工具
 - [x] **落盘 `tool-ralph`** —— 2026-10-06 完成（用户确认后落盘），见下方记录
 - [x] **写自有 skill** —— 2026-10-06 完成：`.dsh/skills/deepseek-up-t/SKILL.md` + 两条 junction + 离线单测 9/9，见下方记录
+- [x] **关闭桌面端产品埋点** —— 2026-10-06 完成（经用户确认后落盘），见下方记录
 - [ ] 调 Agent 行为：`personaPrefix`、`agent-presets`、`subagent.maxDepth`
 
 ## 验收
@@ -172,3 +174,57 @@ node src/cli.mjs baseline write
 但至少在两分钟内没有生效。所以「新根会被运行时接住」这条**本机尚未验证**，
 要等一次重启（或更长的探测窗口）才能确认；在此之前，skill 的**格式合规性**是离线钉死的，
 **可发现性**不是。这条结论写在这里，避免以后把它当成已验证的事实。
+
+### 2026-10-06 · 关闭桌面端产品埋点（经用户确认后落盘）
+
+**为什么这是本项目该管的事**：`@deepseek-ai/dsh-client-product-analytics` 的 README 原文是
+「桌面端默认通过现有 OTel 产品导出器上报指定交互，**不提供用户操作入口**」，
+而 `product-analytics` 的 `enabled` **默认 true**。也就是说：这是一项**默认开启、
+界面上关不掉**的行为，而它恰好只是一个普通配置行 ⇒ 正好落在 L0 改造面上。
+
+**上报什么**（README 摘要）：公共字段 `device_id` / `user_id` / `os_version` / `app_version`；
+事件有欢迎页曝光、消息提交（`msg_type` / 模型 / 显式思考强度 / `run_mode`）、模型与思考强度切换、
+插件开关与安装结果、会话分叉。**API key、账户令牌、提示词和模型回复都不是事件字段**；
+采集**不修改模型请求**（对 KV Cache 无影响）；普通 Web 客户端不装配这两个服务。
+
+**这是一次「用户的选择」，不是工程判断**：所以这份声明在用户拍板之前
+**刻意以「未应用的提案」形态在 `patches/` 里躺了一段时间**。副作用值得记下来——
+`dsht upgrade` 把它如实报成「现场 cordis.patch.yml 里没有这一条」并**退出码 1**。
+那不是 bug：`patches/` 里的声明是**权威描述**（claim），不是建议；放进去就等于声称
+「现场应该是这样」。这条语义以后要记住：**只想提建议时别放 `patches/`。**
+
+**怎么落的**（严格走六步环）：
+
+1. `node src/cli.mjs snapshot create -m "T2 关闭产品埋点 改动前"`
+   → `20261006-084554-T2-关闭产品埋点-改动前`。
+2. `precheck --patch patches/T2-product-analytics-off.yml` 已在前面验过：退出码 0、问题 0、
+   `~ 条目 product-analytics` / `- enabled: true` / `+ enabled: false`。
+3. 追加到 `$DSH_HOME/profiles/desktop/cordis.patch.yml` 末尾。
+   **落盘前后的字节事实**：8130 B / 206 行 → **9138 B / 221 行**，行尾 LF，
+   **首三字节 `23 20 59`（`# Y`）⇒ 无 BOM**（用 `AppendAllText` + `UTF8Encoding($false)`）。
+4. `node src/cli.mjs precheck` → **退出码 0、问题 0**。
+   注意它报的是「与上一次预检相比：组合结果完全一致」——这是**对的**，
+   因为上一次预检就是带 `--patch` 的候选预检，两者本就该相同。
+5. 直接查组合结果 `state/probe-dump.txt:530-535` 确认：
+   ```
+   - id: product-analytics
+     name: '@deepseek-ai/dsh-client-product-analytics'
+     disabled: !!js ctx.get('profileContext')?.name !== 'desktop'
+     config:
+       enabled: false
+       appVersion: !!js process.env.DSH_CLIENT_VERSION
+   ```
+   `appVersion` 被保留 ⇒ 印证了「**patch 按 id 整体替换该行 config**」这条规则，
+   也说明声明里把 `appVersion` 一起写出来是必需的（只写 `enabled` 会把它抹掉）。
+6. `node src/cli.mjs baseline write` → **13 个 bundle / 14 条 patch**。
+   随后 `upgrade` 的四份 L0 声明**全部 `OK 声明与现场一致`**，漂移消失。
+
+**关掉之后会发生什么**：不读取埋点身份、不接收新事件；
+但**导出器仍然挂载**，已入队的事件仍可能被导出（README 明说「关闭只停止新采集，
+不清空导出器队列」）。**不影响 `session-telemetry-otel`**——那是**独立策略**
+（`mode: FEEDBACK_ONLY`），只在用户显式提交反馈后才导出。
+整进程一键退出另有环境变量通道 `DSH_TELEMETRY_DISABLED`（任何非空值，含 `'0'`/`'false'`），
+但它需要改启动方式，而本次只改配置。
+
+**怎么撤**：`node src/cli.mjs snapshot restore 20261006-084554-T2-关闭产品埋点-改动前`
+——注意它同样需要重启 DSH 才失效，`cordis.patch.yml` 没有热重载。

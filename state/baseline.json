@@ -1,12 +1,12 @@
 {
-  "capturedAt": "2026-10-06T15:21:00.665Z",
+  "capturedAt": "2026-10-06T15:46:20.173Z",
   "project": "deepseek-up-T",
   "home": "C:\\Users\\Z1848\\.dsh",
   "profile": "desktop",
   "profileDir": "C:\\Users\\Z1848\\.dsh\\profiles\\desktop",
   "installDir": "D:\\Program Files (x86)\\deepseekharness",
   "dshVersion": "44.0.0",
-  "nodeVersion": "v24.21.0",
+  "nodeVersion": "v24.19.0",
   "bundles": [
     "@deepseek-ai/dsh-base",
     "@deepseek-ai/dsh-web-app",
@@ -28,7 +28,7 @@
     "asarFiles": 12967,
     "asarPackages": 529,
     "asarDshPackages": 503,
-    "patchEntries": 13
+    "patchEntries": 14
   },
   "summary": {
     "error": 0,
@@ -77,14 +77,14 @@
       "id": "cordis.patch.yml",
       "level": "info",
       "ok": true,
-      "detail": "7.9KB  C:\\Users\\Z1848\\.dsh\\profiles\\desktop\\cordis.patch.yml"
+      "detail": "8.9KB  C:\\Users\\Z1848\\.dsh\\profiles\\desktop\\cordis.patch.yml"
     },
     {
       "group": "组合层",
       "id": "patch 顶层为数组",
       "level": "error",
       "ok": true,
-      "detail": "是（13 个条目）"
+      "detail": "是（14 个条目）"
     },
     {
       "group": "组合层",
@@ -105,7 +105,7 @@
       "id": "!!js 表达式",
       "level": "info",
       "ok": true,
-      "detail": "1 处"
+      "detail": "2 处"
     },
     {
       "group": "组合层",
@@ -168,14 +168,14 @@
       "id": "patch 引用的包可解析",
       "level": "error",
       "ok": true,
-      "detail": "13 个包全部可解析"
+      "detail": "14 个包全部可解析"
     },
     {
       "group": "解析",
       "id": "patch 中仅安装包提供的包",
       "level": "warn",
       "ok": false,
-      "detail": "@deepseek-ai/dsh-client-ui-chat, @deepseek-ai/dsh-client-ui-settings-account, @deepseek-ai/dsh-agent-preset-registry"
+      "detail": "@deepseek-ai/dsh-client-ui-chat, @deepseek-ai/dsh-client-ui-settings-account, @deepseek-ai/dsh-agent-preset-registry, @deepseek-ai/dsh-client-product-analytics"
     }
   ]
 }
