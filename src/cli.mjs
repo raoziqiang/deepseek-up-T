@@ -603,6 +603,23 @@ async function cmdUpgrade({ flags }) {
   };
   console.log(`\n结论：${VERDICT[r.verdict] ?? r.verdict}`);
 
+  // 暂存产物。它跟「升级检测」是两件事：升级检测比的是「在用安装包 vs 基线」，
+  // 而暂存包根本不在那个比较里 ⇒ 「构建了但没落盘」会完全不可见（这件事上个月真的发生过：
+  // 一份含重播修复的暂存包在磁盘上等了一整天，而报告一直是「没检测到任何变化」）。
+  if (r.staged && (r.staged.status === 'pending' || r.staged.status === 'behind')) {
+    const s = r.staged;
+    const d = s.deltaBytes;
+    const size = d === null || d === 0 ? '' : `（${d > 0 ? '大' : '小'} ${Math.abs(d)} 字节）`;
+    console.log(`\n暂存产物：${s.why}${size}`);
+    console.log(`  ${s.file}`);
+    if (s.status === 'pending') {
+      console.log('  它还没进安装目录 —— 落盘要先把 Harness 完全退出（托盘 → Quit）：');
+      console.log('    node vendor/whale/install.mjs --yes');
+    } else {
+      console.log('  别拿它落盘：先 node vendor/whale/build.mjs 重新构建。');
+    }
+  }
+
   if (r.needsReapply.length) {
     console.log(`\n已被升级覆盖、需要重打的声明（${r.needsReapply.length}）：${r.needsReapply.join(', ')}`);
   }

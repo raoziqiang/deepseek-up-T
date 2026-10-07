@@ -11,6 +11,7 @@ import {
 } from './paths.mjs';
 import { scanPatch, isEmptyArray, looksLikePackage } from './cordis.mjs';
 import { readAsarHeader, asarPackageIndex, asarStats } from './asar.mjs';
+import { stagedFacts, stagedLine } from './staged.mjs';
 
 export const GROUPS = ['环境', '组合层', '运行时', '解析', '安装包'];
 
@@ -238,6 +239,25 @@ export async function runDoctor({ hash = true } = {}) {
   add('安装包', '无残留 app.asar.tmp', 'warn', !tmpStat,
     tmpStat ? `残留 ${human(tmpStat.size)}（${P.asarTmp}）` : '无残留',
     '残留通常是上次重打包未落盘。DSH 运行时占用会阻止替换，需先退出 Harness 再落盘。');
+
+  // 暂存产物：回答「我改的东西构建出来了没有、落盘了没有」。
+  // 这一条曾经只存在于人的记忆里 —— 一份含重播修复的暂存包在磁盘上等了一整天，
+  // 而报告里一个字都没说（它比的是「在用安装包 vs 原版备份」，暂存包根本不在比较里）。
+  // 判定表在 src/staged.mjs，与左下角胶囊/设置页那份**逐字相同**（有对照测试钉住）。
+  const staged = stagedFacts(P);
+  if (!exists(P.stagedFile)) {
+    add('安装包', '暂存包', 'info', true, '还没构建过（state/staged/app.asar 不存在）',
+      '改完声明后 `node vendor/whale/build.mjs`，或 `dsht upgrade --stage`。');
+  } else if (staged.status === 'pending') {
+    add('安装包', '暂存包', 'info', true, stagedLine(staged),
+      '落盘要先把 Harness 完全退出（托盘 → Quit）：node vendor/whale/install.mjs --yes');
+  } else if (staged.status === 'behind') {
+    add('安装包', '暂存包', 'warn', false, stagedLine(staged),
+      '先重新构建（node vendor/whale/build.mjs）再落盘 —— 拿旧产物落盘会把后来的修复冲掉。');
+  } else {
+    // same-size / differs / unavailable 都是「说不了更多」的状态，照实说，不许升级成结论。
+    add('安装包', '暂存包', 'info', true, stagedLine(staged), null);
+  }
 
   const proc = probeProcess();
   if (!proc.supported) {

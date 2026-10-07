@@ -74,6 +74,9 @@ export function resolvePaths() {
     stateDir: path.join(PROJECT_ROOT, 'state'),
     snapshotsDir: path.join(PROJECT_ROOT, 'state', 'snapshots'),
     baselineFile: path.join(PROJECT_ROOT, 'state', 'baseline.json'),
+    // 按声明构建出来的产物。它**不是**安装包层的一部分：落盘要等人把 Harness 完全退出，
+    // 所以「它比在用安装包新」是一种常态（详见 src/staged.mjs）。
+    stagedFile: path.join(PROJECT_ROOT, 'state', 'staged', 'app.asar'),
     // 我们自己写的 L1 插件在 apply() 里落一枚心跳。它是「重启到底有没有把我的插件装进去」
     // 的唯一**文件级**证据 —— 否则只能靠肉眼看界面。
     pluginRuntimeDir: path.join(PROJECT_ROOT, 'plugins', 'dsh-up-t', '.runtime'),

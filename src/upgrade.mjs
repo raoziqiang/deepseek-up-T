@@ -25,6 +25,7 @@ import {
 } from './paths.mjs';
 import { readAsarHeader, listAsarPaths, readAsarEntry } from './asar.mjs';
 import { readPatchDecl, unquote } from './patchdecl.mjs';
+import { stagedFacts } from './staged.mjs';
 
 const indentOf = (line) => (line.match(/^\s*/) ?? [''])[0].length;
 
@@ -355,6 +356,10 @@ export async function runUpgradeCheck({ hash = true } = {}) {
     hasBaseline: Boolean(baseline),
     baselineFile: P.baselineFile,
     baselineCapturedAt: baseline?.capturedAt ?? null,
+    // 暂存产物（state/staged/app.asar）的现状。它与「升级有没有发生」是两件独立的事实：
+    // 升级检测比的是「在用安装包 vs 基线」，而暂存包根本不在那个比较里 ——
+    // 于是「我改的东西构建出来了但还没落盘」曾经在报告里完全不可见。
+    staged: stagedFacts(P),
     current: {
       dshVersion: cur.dshVersion,
       asarBytes: cur.asarBytes,
