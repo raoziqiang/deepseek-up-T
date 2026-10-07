@@ -1,15 +1,19 @@
 # patches/T1-whale-splash.yml
 #
 # T1（外观与体验）的第一次 L3 改造声明。
-# 状态：已构建（产物在 deepseek-up-T/state/staged/app.asar），**尚未落盘** —— 落盘需要先退出 Harness。
+# 状态：**已落盘**（2026-10-06 晚：完全退出 Harness → install-whale.cmd → 重启）。
+#   现场安装包 app.asar 121,421,984 B（sha256 2c6d8b4bf4716498…），与 state/staged/app.asar 逐字节相同；
+#   原版备份 app.asar.whale-backup 121,348,951 B（983ca71114e6dfd3…）完好保留，回滚：install.mjs --rollback。
 #
 # 素材分两类（这一点决定了「一份全新 clone 能不能构建」）：
 #   · **本项目手写的素材**在 `vendor/whale/materials/`（welcome/pendant 两页、动画模块源、挂件 preload），
 #     已入库 —— 它们是手写的，丢了就重新写吧。
-#   · **`action: patch` 的原版素材**（下面三条 `../../.probe/*`）是**从安装包里抽出来的上游原文**，
-#     不入库（体积大、且属于安装包内容）：它们可以从任何一份 app.asar 原样重抽
+#   · **`action: patch` 的原版素材**（下面三条 `../../.probe/*`）是**从原版归档抽出来的上游原文**，
+#     不入库（体积大、且属于安装包内容）：它们可以从任何一份原版 app.asar 原样重抽
 #     （`node vendor/asar/list.mjs --get <归档内路径> <目标>`），而且构建时会逐字节校验
-#     它们与当前归档是否一致 —— 不一致就报错（见 build.mjs 里那句「原版素材与归档不一致」）。
+#     它们与 `--from` 归档是否一致 —— 不一致就报错（见 build.mjs 里那句「原版素材与归档不一致」）。
+#     注意：落盘后**别从已改造的安装包里重抽**（那里面躺着的是打过补丁的代码）——
+#     无升级时从 app.asar.whale-backup 抽，真实升级后才从新安装包抽。
 #
 # 执行器：vendor/whale/build.mjs（构建）+ vendor/whale/install.mjs（落盘/回滚）
 # 两者都从这个文件读 verify.expect_diff_entries 与 target.entries，

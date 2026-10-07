@@ -14,7 +14,7 @@
 - `vendor/whale/build.mjs`（由 `../tools/build-whale.mjs` 重写而来，改为按 `patches/T1-whale-splash.yml` 声明驱动）已经能「生成 → 语法检查 → 重打包 → 逐字节核对」，产物 `state/staged/app.asar`。
 - `dsh-whale-widget@0.3.18` 已装（L1），提供 Web 右下角余额小鲸鱼、气泡、音效、角色。
 - `.dsh/whale-audio`、`.dsh/whale-bubble-imgs`、`.dsh/whale-roles` 是它的数据目录（目前多为空）。
-- **动画尚未落盘**（`app.asar` 与备份 sha256 一致，见 P2 / P1）。
+- **动画已落盘**（2026-10-06 晚：`app.asar` 121,421,984 B，sha256 与 `state/staged/app.asar` 一致；原版备份完好，见 P2 / P1）。
 - 启动窗口那几段脚本**已有行为级离线单测**（`test/splash.test.mjs`，**23** 条断言）：用 `node:vm` 造假浏览器，
   把归档里的 `lib/welcome/whale-animation.js`、`renderer/whale-splash.js` 与 `renderer/replay.js` 按页面同样的顺序真跑一遍，
   推进整条时间线，模拟拖动/键盘/主题翻转/存储被禁，并检查**每个画布参数都是有限数**（NaN 是 canvas 最典型的静默失败）；
@@ -24,7 +24,7 @@
   **欢迎窗口**里 —— 没有收件人，点了没反应也不报错。2026-10-06 已修（详见 `tracks/T1-appearance/README.md`）：
   新增 `renderer/replay.html` + `renderer/replay.js`（`patches/T1-whale-splash.yml` 的 `verify.expect_diff_entries` 11 → **13**），
   `vendor/whale/patch-main.mjs` 新增 `replaySplash()` 真开一个短命无框窗口（600×700、不可交互、`REPLAY_MAX_MS = 2e4` 安全网），
-  `test/splash.test.mjs` 19 → 23 条钉住「动画播完自己收场，不赖着不走」。**已构建核对但尚未落盘** —— 随下一次 `install-whale.cmd` 一起进安装包。
+  `test/splash.test.mjs` 19 → 23 条钉住「动画播完自己收场，不赖着不走」。**已构建核对，并于 2026-10-06 晚落盘**（`expect_diff_entries` 13 条已是现场实况）。
 - **手写素材已入库**：`vendor/whale/materials/`（**12 个文件 / 53 KB**，后两件就是上面的 replay）。搬进去之后重建验证过 ——
   产物与搬家前 **sha256 完全相同**（搬家前后各构建一次比对）。`action: patch` 的三份原版缓存仍不入库
   （从任意一份 `app.asar` 可原样重抽，且构建时逐字节校验）。
@@ -214,7 +214,7 @@
 | --- | --- | --- |
 | **M0** | 项目骨架 + 环境基线 + `doctor` / `snapshot` / `baseline` | ✅ 已完成 |
 | **M1** | 权威组合预检 `precheck` + 只读安装包工具 `asar` + T3 会话搜索开启 | ✅ 2026-10-06 重启后验收：4 份 L0 声明与现场一致（`dsht upgrade` 全 OK）；只剩「按会话内容搜索真能命中」要你亲手搜一次（见下方 M1 验收） |
-| **M2** | T5 `../tools/` 归拢进 `vendor/`（构建链闭环）+ T1 鲸鱼动画落盘 | 🚧 构建链**已闭环**；只剩「退出 Harness 后落盘」这一步 |
+| **M2** | T5 `../tools/` 归拢进 `vendor/`（构建链闭环）+ T1 鲸鱼动画落盘 | ✅ 2026-10-06 晚全部完成：构建链闭环 + 落盘（12 项自动判定全过；观感那一眼归你） |
 | **M3** | T2 新增 Provider + T4 自建 Web 插件样板 | 🚧 T4 样板**已落地并重启验收**（L1 插件 + 设置页 + 操作按钮 + 桌面挂件开关；10:48 重启后操作通道与两条握手通道实测在线）；T2 新增 Provider 卡在**需要用户给出目标**（baseURL + key，或 MCP 服务器） |
 | **M4** | 升级重打自动化 | 🚧 检测 + **半自动重打**（`upgrade --stage`）+ **离线演练落盘**（`--to`）已交付；自动落盘**不做**（要人挑时间，见 `docs/03-workflow.md`） |
 | **M5** | T2/T3 落地批次：启用 `tool-ralph`、会话标题更长、上下文阈值核实、关闭产品埋点、写项目 skill | ✅ **已全部落盘并重启验收**（ralph / 标题 / 埋点开关 / skill；10:48 重启后 `dsht upgrade` 报 4 份 L0 声明全部 OK）；阈值核实结论是**维持不动**；灵枢记忆策略已梳理（三个插件机制正交，都不动） |
@@ -229,6 +229,9 @@
 - [x] 已用「篡改基线版本号」的模拟升级跑通重打分支（报告正确、退出码 1、基线原样还原）
 - [x] 落盘这一步本身可离线演练并核对（`install.mjs --to`；`test/install.test.mjs` 26 条，且在 Harness 开着时也能跑）
 - [ ] 用**真实**的一次 Harness 升级走一遍：升级 → `dsht upgrade` → 重打 → 落盘 → 复验
+      （**已知坑，届时注意**：升级会整体替换 `app.asar`，而 `install.mjs` 对已存在的备份**保留不刷新**，
+      所以升级后 `build.mjs` 的默认 `--from` 指向的是**旧版备份** ⇒ 届时要显式 `--from <新安装包>` 重抽素材重打，
+      或先刷新备份。素材过期的检测基准此时**恰好**指回新安装包，会如实报出这三条过期——那是真警报，不是误报）
 - [x] `dsht accept` 把重启后的验收变成一条只读命令（L3/L0 声明 + 宿主路由 + 渲染层握手；FAIL/SKIP/MANUAL 三种结论分开，观感类不计入退出码）
 
 ### M1 的验收标准
@@ -244,6 +247,7 @@
 - [x] 构建后自检：`13 个条目按声明改动，其余 11466 个条目逐字节一致`（数字随声明走：加进 replay 两件后 11 → 13）
 - [x] 8 个 JS 产物全部通过 `node --check`（这是旧产物栽跟头的地方）
 - [x] 与旧产物交叉比对证明**确定性构建**（差异恰好 2 个预期条目）
-- [ ] **完全退出 Harness 后**执行 `node vendor/whale/install.mjs --yes`，重启能看到动画
+- [x] **完全退出 Harness 后**执行 `node vendor/whale/install.mjs --yes`（实际走的是等价的双击 `install-whale.cmd`），重启能看到动画 —— 2026-10-06 晚完成；`dsht accept` 的「T1 鲸鱼启动动画已落盘」「app.asar 已被改造」均过
       （这一步需要窗口：托盘图标也要退出）
 - [x] `app.asar.tmp` 残留已确认是坏构建并删除，`doctor` 警告 3 → 2
+- [x] 落盘后的稳态自检：`dsht upgrade` 不再误报「原版素材过期」——素材过期的对照基准已改为与 `build.mjs` 默认 `--from` 同源（无升级时 = 原版备份），`test/upgrade.test.mjs` 用「已改造安装包 + 完好备份 + 已刷新基线」的稳态模拟钉住（2026-10-06 晚修）

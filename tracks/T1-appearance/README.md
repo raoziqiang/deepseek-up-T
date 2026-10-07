@@ -8,8 +8,8 @@
 - 构建与落盘工具已归拢到 `vendor/whale/`（`build.mjs`、`install.mjs` + 三个 patcher + `bundle.mjs`），声明在 `patches/T1-whale-splash.yml`。
 - `dsh-whale-widget@0.3.18` 已装为 **L1 插件**：Web 右下角余额小鲸鱼、气泡点击序列、音效、角色、动图。
 - 数据目录：`.dsh/whale-audio`、`.dsh/whale-bubble-imgs`、`.dsh/whale-roles`（多数为空）。
-- **动画仍未落盘**：`app.asar` 与 `app.asar.whale-backup` 的 sha256 一致（`doctor` 可验）。
-- **待落盘的暂存包已就绪且已验证**：`state/staged/app.asar`（121,421,944 B，**13** 条目按声明改动，其余 11,466 条目逐字节一致）。
+- **动画已落盘**（2026-10-06 晚）：安装包 `app.asar` 121,421,984 B（sha256 `2c6d8b4bf4716498…`），与 `state/staged/app.asar` 逐字节相同；原版备份 121,348,951 B（`983ca71114e6dfd3…`）完好保留，随时可回滚（`install.mjs --rollback`）。`dsht accept` 12 项自动判定全过。
+- 暂存包 `state/staged/app.asar`（121,421,984 B，**13** 条目按声明改动，其余 11,466 条目逐字节一致）—— 落盘时 `install.mjs` 拿同一判据自检过（verify --expect 13）。
 
 ## 主战场
 
@@ -26,10 +26,10 @@
 ## 待办
 
 - [x] 清理 `app.asar.tmp` 残留（115.8 MB）——**已确认是坏构建**（见下「记录」），已删除
-- [ ] 鲸鱼启动动画落盘：**运行 `install-whale.cmd`**（先完全退出 Harness，见下方操作清单）
+- [x] 鲸鱼启动动画落盘 —— 2026-10-06 晚完成（完全退出 Harness → 双击 `install-whale.cmd` → 重启）。`dsht accept` 里「T1 鲸鱼启动动画已落盘」「app.asar 已被改造」均过；观感那一眼（启动画卷 → 鲸鱼 → 挂件动画）仍归你，见下方「验收」。
 - [x] 把主题/气泡等偏好从 asar 侧迁到 `dsh-whale-widget` 的 L1 设置 —— **侦察后结论是「本来就不该这么做」**：`dsh-whale-widget` 0.3.18 的 `package.json` 只声明 `dsh.bundle.patch`，**没有任何 `Config` schema**，它的偏好本来就不在 asar 里，而是落在 `$DSH_HOME\.dshw-size.json` / `.dshw-turn.json` / `.dshw-usage.json`（设备本地，随用随写）。四层改造面（L0–L3）管的是**组合与代码**，不管这层用户数据。⇒ 这条待办的前提是错的，撤销；真要改默认值应改 widget 自己的默认值（L1 包内），而不是「迁到 L1 设置」（见下方记录）。
 - [x] 桌面挂件窗口的**开关**（设置 →「通用」里那一行）—— 2026-10-06 完成：出货 Harness 有整套挂件机制，却没有任何代码调用 `window.dshWhaleCharm`，于是 `whale-charm.json` 永远是 `enabled: false`、挂件永不出现且不报错。开关改由 L1 插件 `dsh-up-t` 提供（`settings.general.item`），**不碰安装包、硬刷新即生效**。见下方记录与 [plugins/dsh-up-t/README.md](../../plugins/dsh-up-t/README.md)。
-- [x] 桌面挂件菜单的「Replay animation」原本是空操作（`"replay"` 发给主窗口，而启动画面在欢迎窗口）—— 2026-10-06 已修：改 `vendor/whale/patch-main.mjs`，让主进程**自己**开一个短命 replay 窗口（`REPLAY_MAX_MS = 2e4` 安全网），新增 `renderer/replay.html` + `renderer/replay.js` 两个 `insert`（`expect_diff_entries` 11 → 13），`test/splash.test.mjs` 19 → **23** 条。见下方记录。**已构建核对，尚未落盘** —— 随下一次 `install-whale.cmd` 一起进安装包。
+- [x] 桌面挂件菜单的「Replay animation」原本是空操作（`"replay"` 发给主窗口，而启动画面在欢迎窗口）—— 2026-10-06 已修：改 `vendor/whale/patch-main.mjs`，让主进程**自己**开一个短命 replay 窗口（`REPLAY_MAX_MS = 2e4` 安全网），新增 `renderer/replay.html` + `renderer/replay.js` 两个 `insert`（`expect_diff_entries` 11 → 13），`test/splash.test.mjs` 19 → **23** 条。见下方记录。**已构建核对，并于 2026-10-06 晚随落盘进安装包**（`expect_diff_entries` 已是 13 条实况）。
 - [x] 把 T1 的**手写素材**搬进仓库 —— 2026-10-06 完成：10 个文件（39 KB）进了 `vendor/whale/materials/`
       （`renderer/` 六件、`lib/preload-charm.cjs`、`whale-animation.js` 的 ESM 源、离线预览页、挂件设置页残留物），
       声明里的 `source:` 一并改指仓库内。**验收方式不是「能跑」，而是「产物一字未变」**：
@@ -50,6 +50,9 @@
 4. 回滚：`node vendor/whale/install.mjs --rollback`，或 `node src/cli.mjs snapshot restore <id>`（仅覆盖 profile 控制面）。
 
 ## 落盘操作清单（T1）——为什么是「你点，而不是我点」
+
+> **2026-10-06 晚已执行过一遍**（落盘 + 重启 + `baseline write` 都走完了）。这一节留在这里，
+> 作为**重装 / 升级后重打 / 回滚**的操作清单 —— 步骤不变，只是不再有「等你做」的含义。
 
 **这一步必须由你在 Harness 关闭的状态下执行**，原因不是权限，而是**因果**：
 
