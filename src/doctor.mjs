@@ -345,7 +345,7 @@ export async function runDoctor({ hash = true } = {}) {
       asarFiles: asarStatsValue?.files ?? null,
       asarPackages: asarIndex ? asarIndex.size : null,
       asarDshPackages: asarIndex
-        ? [...asarIndex.values()].filter((p) => p.startsWith('/dsh/node_modules/')).length
+        ? [...asarIndex.values()].filter((p) => p.startsWith('dsh/node_modules/')).length
         : null,
       patchEntries: patchScan?.entries.length ?? null,
     },

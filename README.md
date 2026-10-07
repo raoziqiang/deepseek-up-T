@@ -133,6 +133,13 @@ deepseek-up-T/
     堵掉两条真隐患 —— 省略 `--out` 时会在安装目录里造出 `doctor` 专门报的 `app.asar.tmp` 残留
     （那份曾经是一块坏构建，主进程一加载就 SyntaxError），以及 `--out` 指向原版备份等于烧掉
     唯一一条回头路。两种写法现在都在打开归档之前被拒绝。
+  - ✅ **只读读归档的那条路也有回归测试**：`test/asar-cli.test.mjs`（19 条）。`src/asar.mjs` 与
+    `dsht asar ls|cat|grep` 是读「真正在跑的那份代码」的唯一方式，此前一条测试都没有、且已经
+    出过一次静默错答（`listAsarPaths()` 带前导斜杠 ⇒ 按声明查归档的 10 个条目全部报「找不到」）。
+    这一轮补测试的同时修掉四个真问题：`grep` 的路径带前导斜杠（**粘不进 `asar cat`**）、
+    `listAsarPaths` 的输出顺序随 DFS 变（`--limit` 截出来的是哪 N 条不稳定）、`walkAsar`/`asarStats`
+    拿到 `readAsarHeader()` 的整个返回值时**静默吐 0 个条目**、带 `g` 标志的正则在 `grep` 里因
+    `lastIndex` 变成「第一次命中、第二次不命中」。前两项现在两端一致，后两项从静默改成响亮报错。
 
 > ⚠️ `cordis.patch.yml` 与 profile `package.json` 的改动**不会热重载**，必须重启 DSH 才生效；
 > `app.asar` 的改动必须**连托盘一起退出 Harness** 才能落盘。重启后请按

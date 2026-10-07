@@ -207,7 +207,7 @@
   真解析得到、组件在真 React 下不抛错、aria 与中英文案全对），**行为层**用自写迷你 hook 主机
   跑 `useEffect` 里的数据流（拉状态、30 秒轮询、桥的 `state()`/`onChange`、失败回退、卸载撤监听）。
   此前 `test/plugin.test.mjs` 用 stub 的 React 只钉住了槽位注册的**形状**，组件函数从未被调用过 ——
-  「形状对」与「渲染过」之间的那类失败（白屏且无报错）照不到。全套 **13 套**测试。
+  「形状对」与「渲染过」之间的那类失败（白屏且无报错）照不到。全套 **14 套**测试。
 - ✅ **「构建了但忘了落盘」现在终端也会自己报出来**：`doctor` 的「安装包」段与 `upgrade` 的报告末尾各有一条
   `暂存包`（五态：`pending` 待落盘 / `behind` 暂存更旧别用 / `same-size` / `differs` 判不出方向 /
   `unavailable` 拿不到）。判定表在 `src/staged.mjs`，与 `plugins/dsh-up-t/lib/index.js` 那份
@@ -245,6 +245,26 @@
   残留（那一份曾经是一块坏构建，主进程一加载就 SyntaxError）；`--out` 指向原版备份更是等于烧掉
   唯一一条回头路。现在两种都直接拒绝并给出该怎么写。
 
+- ✅ **只读读归档的那条路自己也有回归测试了**（2026-10-07）：`test/asar-cli.test.mjs`（**19 条**）。
+  `src/asar.mjs` + `dsht asar ls|cat|grep` 此前**一条测试都没有**，而它是本项目读「**真正在跑的那份代码**」的
+  唯一方式（asar 内的包、`profiles/node_modules/@deepseek-ai/*` 的 junction 构建树、源码仓库，三者可能是
+  三个版本），并且**已经出过一次静默错答** —— `listAsarPaths()` 曾返回带前导斜杠的 `/lib/main.js`，
+  于是「按声明查归档里有没有」的 10 个条目全部报「归档里找不到」，而它们其实都在。三层：① 纯函数打在
+  测试文件**自己序列化**的几 KB 合成归档上（两头对不上就会失败），覆盖头部三种坏形态的报错、`walkAsar`
+  的起点、`unpacked` 条目回落到 `<归档>.unpacked/`、`grep` 的行号/后缀白名单/`limit`/`maxBytes`；
+  ② CLI 的退出码与输出（`ls` 的汇总与 `--json`、`cat` 的目录与不存在条目、`grep` 无命中退 1、
+  非法正则/未知子命令/归档不存在退 2）；③ 真实 `app.asar` 只读抽查 12,976 个条目。
+  **当场修出四个真问题**：① `grepAsarContent` 的命中路径带前导斜杠，与 `listAsarPaths` 不一致，
+  `asar grep` 打印出来的路径**粘不进 `asar cat`**（现在两端统一成声明里那种写法，并加了一条
+  「grep 出来的路径必须真的能 cat」的测试）；② `listAsarPaths` 的顺序是 DFS 栈序，改一次归档内容
+  `--limit` 截出来的就是另外 N 条（改为字典序，输出稳定）；③ `walkAsar` / `asarStats` 拿到
+  `readAsarHeader()` 的**整个返回值**（而不是它的 `.header`）时**静默吐 0 个条目** —— 又是一个
+  「什么都没找到」的假答案，现在直接报错并把 `.header` 这件事说出来；④ 带 `g` 标志的正则在
+  `grepAsarContent` 里会因 `lastIndex` 变成「第一次命中、第二次不命中」，现在统一去掉 `g`/`y`。
+  第 ③ 条正是**写这套测试时我自己踩的**：`listAsarPaths(h)` 写成了传整个返回值，测试报「条目数 0」——
+  于是顺手把这类错误从静默改成响亮。`doctor` 的 `asar 内包数 529（其中 DSH 插件 503）` 在
+  `asarPackageIndex` 改为无前导斜杠后逐字未变（改的是比较的另一端）。
+
 - ✅ `../tools/` 的 23 个脚本**已全部归拢**到 `vendor/`（asar 三件套、构建链 6 个、视觉验证 6 个、Provider 探针 8 个）；`../tools/` 保留为历史副本，等 T1 验收后再删。见 `vendor/README.md`。
 - ✅ **归拢后的说明书补齐**：新增 `vendor/visual/README.md`（6 个脚本的用法 / 依赖 / 副作用 / 回答不了什么），
   `vendor/README.md` 的 `visual/` 一节改为指向它。同一轮修掉一条真缺陷：
@@ -263,6 +283,7 @@
 7. ✅ **唯一一条回头路的演练 + 回归测试**（2026-10-07）：`--rollback --to <临时目标>`，以及用 `DSH_UP_T_INSTALL_DIR` 换安装目录后真跑一遍回滚（见上）；三条路（演练落盘 / 演练回滚 / 真回滚）都收进双击脚本 `install-whale.cmd`。
 8. ✅ **快照回滚的离线单测**（2026-10-07）：`test/snapshot-restore.test.mjs`（12 条），顺带修掉 `f.src` 绝对路径、越界写入、同秒 id 覆盖三个真缺陷，并让 `diff` 与 `restore` 对同一行说同一句话。
 9. ✅ **`vendor/asar/` 三件套的回归测试 + `write.mjs` 的三条「写哪儿」守卫**（2026-10-07）：`test/asar-tools.test.mjs`（15 条），顺带堵住「输出落进安装目录」与「覆盖原版备份」两条真隐患（见上）。
+10. ✅ **只读读归档那条路（`src/asar.mjs` + `dsht asar ls|cat|grep`）的回归测试**（2026-10-07）：`test/asar-cli.test.mjs`（19 条），顺带修掉四个真问题 —— grep 路径带前导斜杠（粘不进 `cat`）、`listAsarPaths` 输出顺序随 DFS 变、`walkAsar`/`asarStats` 拿错参数时静默吐 0、带 `g` 的正则在 grep 里漏报（见上）。
 
 **验收**：在一台干净的机器上，`doctor` → 应用补丁 → 落盘 → 复验，全程无需人工记忆任何步骤。
 

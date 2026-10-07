@@ -12,7 +12,7 @@ error: profile "desktop" is managed exclusively by the Electron application
 ```
 
 守卫就在安装包的 `@deepseek-ai/dsh/lib/bin.js` 里（用
-`dsht asar cat /dsh/node_modules/@deepseek-ai/dsh/lib/bin.js` 可读到原文）：
+`dsht asar cat dsh/node_modules/@deepseek-ai/dsh/lib/bin.js` 可读到原文）：
 
 ```js
 function rejectElectronProfile(program, profile) {

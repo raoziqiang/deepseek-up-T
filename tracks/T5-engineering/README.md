@@ -95,6 +95,10 @@ node vendor/whale/install.mjs --yes    # 需要先完全退出 Harness
 - [x] **`vendor/asar/` 三件套自己也有回归测试了** —— 2026-10-07 完成：`test/asar-tools.test.mjs`（15 条），
       三层（自造合成归档 / 三条「写哪儿」守卫 / 真实归档只读往返）；顺带给 `write.mjs` 加上
       「输出不许落进安装目录」「不许写原版备份」两条拒绝规则，见下方记录。
+- [x] **只读读归档的那条路（`src/asar.mjs` + `dsht asar ls|cat|grep`）也有回归测试了** —— 2026-10-07 完成：
+      `test/asar-cli.test.mjs`（19 条），三层（纯函数打在自造合成归档上 / CLI 退出码与输出 / 真实归档只读抽查）；
+      顺带修掉四个真问题（grep 路径带前导斜杠粘不进 `cat`、`listAsarPaths` 输出顺序随 DFS 变、
+      `walkAsar`/`asarStats` 拿错参数时静默吐 0、带 `g` 的正则在 grep 里漏报），见下方记录。
 
 ## 验收
 
@@ -1143,6 +1147,54 @@ bbox aspect 1.59、`tail columns 2-run = 53`、左/右质量 59.8% / 40.2%）。
 
 **怎么验**：`node test/asar-tools.test.mjs` → **15/15**；`node test/run.mjs` → **13/13 套**
 （发现式总入口自动收进去）；手工复验三条拒绝路径的 stderr 文案与在用安装包 sha256 未变。
+
+### 2026-10-07 · 只读读归档的那条路（`src/asar.mjs` + `dsht asar ls|cat|grep`）第一次被测到
+
+**为什么**
+照上一节那条判据（「没有自动调用者」与「没有测试」是同一件事的两面）继续过一遍剩下的工具，
+`src/asar.mjs` 与 `dsht asar ls|cat|grep` **一条测试都没有**。而它有两个特殊性：
+① 它是本项目读「**真正在跑的那份代码**」的**唯一**方式 —— asar 内的包、`profiles/node_modules/@deepseek-ai/*`
+（junction 到本地构建树）、源码仓库三者可能是**三个版本**，只有归档里那份是运行中的 Electron 加载的；
+② 它**已经出过一次静默错答**：`listAsarPaths()` 曾经返回带前导斜杠的 `/lib/main.js`，于是
+「拿声明里的键去查归档里有没有」10 个条目**全部**报「归档里找不到」，而它们其实都在。
+一个只在被读的时候说错话的工具，比不存在的工具更危险：它会把人引去修一个不存在的问题。
+
+**做了什么**：`test/asar-cli.test.mjs`（**19 条**），三层：
+- ① 纯函数（`readAsarHeader` / `walkAsar` / `listAsarPaths` / `findAsarNode` / `asarDataStart` /
+  `readAsarEntry` / `grepAsarContent` / `asarStats` / `asarPackageIndex`）打在**本文件自己序列化**的
+  几 KB 合成归档上（与 `src/asar.mjs` 的读法互证）：头部两种坏形态（截断 / 布局不符）必须报错、
+  `walkAsar` 从 `header` 而不是 `header.files` 起步、`unpacked` 条目回落到 `<归档>.unpacked/`、
+  `grep` 的行号与后缀白名单（`.bin` 内有命中也不扫）、`limit` 是硬上限、`maxBytes` 跳过超大条目、
+  目录数用**测试自己递归数一遍**对账。
+- ② CLI（`--file <合成归档>`）的退出码与输出：`ls` 无正则的汇总与 `--json`、`ls <正则>` 的
+  「匹配 N / 总数」、`cat --out` 落盘逐字节相同、`cat` 一个目录/不存在的条目/缺参数都退 2、
+  `grep` 无命中退 1（与「命令失败」区分）、非法正则/未知子命令/归档不存在都退 2 并说清原因。
+- ③ 真实 `app.asar` 只读抽查：12,976 个条目路径全部无前导斜杠、`asarStats` 的文件数与
+  `listAsarPaths` 长度一致、根 `package.json` 可解析、`grep "managed exclusively"` 命中那句
+  desktop profile 独占守卫、且**grep 报出的路径必须真的能 `asar cat`**。
+
+**★ 当场修出四个真问题**
+1. **`grepAsarContent` 的命中路径带前导斜杠** ⇒ `asar grep` 打印出来的路径**粘不进 `asar cat`**
+   （虽然 `cat` 两种写法都收，但输出与 `asar ls`/声明/暂存树的写法不一致）。现在两端统一成
+   `lib/main.js` 那种写法，并加了一条「grep → cat 这条链必须走得通」的测试。
+2. **`listAsarPaths` 的顺序是 DFS 栈序** ⇒ 归档内容一变，`asar ls <正则> --limit N` **截出来的是另外 N 条**。
+   改为字典序（调用方只用来建 Set、数长度，排序对它们没有影响）。
+3. **`walkAsar` / `asarStats` 拿到 `readAsarHeader()` 的整个返回值**（而不是它的 `.header`）时
+   **静默吐 0 个条目**。又是一个「什么都没找到」的假答案。现在直接抛错，并把「要传 `.header`」这句话说出来。
+   **这一条正是我写这套测试时自己踩的**：`listAsarPaths(h)` 传了整个返回值，测试报「条目数 0」——
+   于是顺手把这类错误从静默改成响亮。
+4. **带 `g` 标志的正则在 `grepAsarContent` 里会漏报**：`lastIndex` 有状态，同一段文本里
+   「第一次命中、第二次不命中」。现在统一去掉 `g`/`y` 标志，并有一条断言「带 `g` 与不带 `g` 结果必须一致」。
+
+**顺带的一致性改动**：`asarPackageIndex` 的值也改成无前导斜杠，`src/doctor.mjs` 里比较的另一端
+（数 DSH 插件的 `p.startsWith('/dsh/node_modules/')`）同步改掉 —— 复验 `dsht doctor` 仍逐字是
+`asar 内包数 529（其中 DSH 插件 503）`。**期望值要量出来**：合成归档里 `^lib/` 匹配数与目录数、
+`grep NEEDLE` 的命中数、`ls <正则>` 的路径顺序，我第一版**四处都推算错了**（5 写成 6、目录 9 写成 4、
+命中 3 写成 4、顺序以为按路径排）。
+
+**怎么验**：`node test/asar-cli.test.mjs` → **19/19**；`node test/run.mjs` → **14/14 套**；
+手工复验 `dsht doctor`（0 错误 2 警告、503 DSH 插件）与真发现场 `dsht asar grep "managed exclusively"`
+（输出 `dsh/node_modules/@deepseek-ai/dsh/lib/bin.js:36`，无前导斜杠、可直接粘进 `asar cat`）。
 
 
 

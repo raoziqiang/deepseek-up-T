@@ -51,9 +51,20 @@ export function readAsarHeader(asarPath) {
  *
  * 注意：asar 头的根节点本身就是目录节点，即 header.files 是「名字 → 子节点」的映射，
  * 而不是一个目录节点。因此游标必须从 header 起步，不能从 header.files 起步。
+ *
+ * 传进来的若不是头对象（例如把 `readAsarHeader()` 的整个返回值 `{ header, jsonLen, pickleSize }`
+ * 当成了头），**必须报错而不是吐 0 个条目** —— 一个「什么都没找到」的静默答案会让人
+ * 去修不存在的问题（本模块已经因为前导斜杠吃过一次这种亏）。
  */
 export function* walkAsar(header) {
-  if (!header?.files) return;
+  if (!header?.files) {
+    const got = header === null ? 'null' : Array.isArray(header) ? 'array' : typeof header;
+    throw new Error(
+      `walkAsar 需要一个 asar 头对象（形如 { files: { ... } }），收到的是 ${got}`
+      + `${got === 'object' ? `，字段：${Object.keys(header ?? {}).join(', ') || '(无)'}` : ''}。`
+      + '注意 readAsarHeader() 返回的是 { header, jsonLen, pickleSize }，要传它的 .header。',
+    );
+  }
   const stack = [[header, '']];
   while (stack.length) {
     const [node, prefix] = stack.pop();
@@ -74,12 +85,12 @@ export function* walkAsar(header) {
 // 因此包索引必须同时覆盖 `/<任意>/node_modules/<name>/package.json`。
 const PKG_RE = /(?:^|\/)node_modules\/((?:@[^/]+\/)?[^/]+)\/package\.json$/;
 
-/** 索引 asar 内所有 package.json 的包名 → 该 package.json 在归档内的路径 */
+/** 索引 asar 内所有 package.json 的包名 → 该 package.json 在归档内的路径（无前导斜杠） */
 export function asarPackageIndex(header) {
   const index = new Map();
   for (const { path } of walkAsar(header)) {
     const m = PKG_RE.exec(path);
-    if (m && !index.has(m[1])) index.set(m[1], path);
+    if (m && !index.has(m[1])) index.set(m[1], path.replace(/^\//, ''));
   }
   return index;
 }
@@ -103,9 +114,13 @@ export function findAsarNode(header, entryPath) {
  *
  * 去掉前导 `/` 是刻意的：声明、暂存树、`asar-verify` 的问题串全都用 `lib/main.js`
  * 这种写法，只有这里若保留 `/lib/main.js` 就会让「按声明查归档里有没有」全部落空。
+ *
+ * 按字典序排：遍历顺序是 DFS 的栈序（改了归档内容就会变），拿它当输出顺序会让
+ * 「`asar ls <正则> --limit N` 截出来的是哪 N 条」在不同时候不一样；排一下才是稳定的一段。
+ * 调用方（`doctor` / `upgrade` / `assets`）只用来建 Set、数长度，排序对它们没有影响。
  */
 export function listAsarPaths(header) {
-  return [...walkAsar(header)].map((e) => e.path.replace(/^\//, ''));
+  return [...walkAsar(header)].map((e) => e.path.replace(/^\//, '')).sort();
 }
 
 /** 文件数据区的起点：16 字节头 + JSON 头（等价于 8 + pickleSize）。 */
@@ -161,9 +176,15 @@ const TEXT_EXT = /\.(m?[jt]s|cjs|json|ya?ml|md|txt|html|css|svg|map|xml|toml|sh|
  * 在归档内容里检索正则，返回 `{ path, line, text }`。
  * 只扫文本后缀且不超过 `maxBytes` 的条目；命中数达到 `limit` 即停。
  * 用途：确认某个字符串**到底出自哪份产物**（源码仓库、junction 构建树、还是 asar）。
+ *
+ * `path` 无前导斜杠，与 `listAsarPaths()` 一致 —— grep 出来的路径要能直接
+ * 复制去 `asar cat`，也要与 `patches/*.yml` 里写的键同形。
+ * 带 `g`/`y` 的正则一律去掉该标志：带状态的 `lastIndex` 会让同一段文本里
+ * 「第一次命中、第二次不命中」，属于最难发现的一类静默漏报。
  */
 export function grepAsarContent(asarPath, pattern, { limit = 20, maxBytes = 4 * 1024 * 1024 } = {}) {
-  const re = pattern instanceof RegExp ? pattern : new RegExp(pattern);
+  const raw = pattern instanceof RegExp ? pattern : new RegExp(pattern);
+  const re = (raw.global || raw.sticky) ? new RegExp(raw.source, raw.flags.replace(/[gy]/g, '')) : raw;
   const { header, jsonLen, pickleSize } = readAsarHeader(asarPath);
   const base = asarDataStart(pickleSize);
   const hits = [];
@@ -185,9 +206,10 @@ export function grepAsarContent(asarPath, pattern, { limit = 20, maxBytes = 4 * 
       if (got < size) continue;
       const text = buf.toString('utf8');
       if (!re.test(text)) continue;
+      const p = entryPath.replace(/^\//, '');
       const lines = text.split('\n');
       for (let i = 0; i < lines.length; i += 1) {
-        if (re.test(lines[i])) hits.push({ path: entryPath, line: i + 1, text: lines[i].trim().slice(0, 200) });
+        if (re.test(lines[i])) hits.push({ path: p, line: i + 1, text: lines[i].trim().slice(0, 200) });
         if (hits.length >= limit) break;
       }
     }
@@ -199,9 +221,18 @@ export function grepAsarContent(asarPath, pattern, { limit = 20, maxBytes = 4 * 
 }
 
 export function asarStats(header) {
+  const { files, dirs } = countAsarNodes(header);
+  return { files, dirs };
+}
+
+/** 走一遍整棵头树数节点。根节点是目录节点本身，所以目录数要减掉根。 */
+function countAsarNodes(header) {
+  if (!header?.files) {
+    const got = header === null ? 'null' : Array.isArray(header) ? 'array' : typeof header;
+    throw new Error(`asarStats 需要一个 asar 头对象，收到的是 ${got}（readAsarHeader 的返回值要取 .header）`);
+  }
   let files = 0;
   let dirs = 0;
-  if (!header?.files) return { files, dirs };
   const stack = [header];
   while (stack.length) {
     const node = stack.pop();
