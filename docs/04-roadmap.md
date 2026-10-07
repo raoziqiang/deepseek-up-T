@@ -207,7 +207,7 @@
   真解析得到、组件在真 React 下不抛错、aria 与中英文案全对），**行为层**用自写迷你 hook 主机
   跑 `useEffect` 里的数据流（拉状态、30 秒轮询、桥的 `state()`/`onChange`、失败回退、卸载撤监听）。
   此前 `test/plugin.test.mjs` 用 stub 的 React 只钉住了槽位注册的**形状**，组件函数从未被调用过 ——
-  「形状对」与「渲染过」之间的那类失败（白屏且无报错）照不到。全套 **11 套**测试。
+  「形状对」与「渲染过」之间的那类失败（白屏且无报错）照不到。全套 **12 套**测试。
 - ✅ **「构建了但忘了落盘」现在终端也会自己报出来**：`doctor` 的「安装包」段与 `upgrade` 的报告末尾各有一条
   `暂存包`（五态：`pending` 待落盘 / `behind` 暂存更旧别用 / `same-size` / `differs` 判不出方向 /
   `unavailable` 拿不到）。判定表在 `src/staged.mjs`，与 `plugins/dsh-up-t/lib/index.js` 那份
@@ -217,6 +217,19 @@
   而当时所有报告都写着「没检测到任何变化」（升级检测比的是「在用安装包 vs 基线」，暂存包不在那个比较里）。
   而 `dsht accept` 对同一条事实**刻意更严**：它有未落盘的产物时这一项是 FAIL —— `accept` 问的是
   「改完重启之后到底成没成」，上面那些 L3 项判的是「声明有没有落」，判不了「落的是不是最新的一份」。
+
+- ✅ **快照的「创建 / 对比 / 回滚」第一次有了离线单测**：`test/snapshot-restore.test.mjs`（12 条）。
+  `snapshot.test.mjs` 一直只覆盖**删除**（保留策略凭什么不删错东西），而 `snapshot restore` 是会把
+  profile 控制面文件**覆盖**回去的那条路 —— 和 `install.mjs --rollback` 同一类：出事时才跑。
+  为了让它在系统临时目录里跑（不碰真实 `state/snapshots/`、更不碰真实 profile），
+  `createSnapshot` / `restoreSnapshot` / `diffSnapshot` 补了与 `listSnapshots` / `prune` 一致的
+  `P = resolvePaths()` 参数。顺着写测试的三条断言，修掉三个真缺陷：① 回滚原本优先用快照里记的
+  **绝对路径**（`f.src`），`DSH_HOME` 换过之后会「报成功、而现场一个字没变」，现在按文件名解析到
+  当前 profile 目录，位置不一致时打印「快照记的是 …」；② 不认识的文件名 + 记的路径在 profile 之外
+  会被跳过（快照是仓库里的普通文本，手改过的 `meta.json` 不该能指挥它往任意位置写）；
+  ③ 同一秒内建两份快照会拿到同一个 id **互相覆盖**（标签也一样时），现在自动加 `-2` 后缀。
+  另外 `diff` 与 `restore` 原本对「快照拍下时还不存在、之后才出现的文件」说两句话
+  （前者 `已改动`、后者 `skipped`），现在统一成 `快照之后才出现（回滚不会动它）`。
 
 - ✅ `../tools/` 的 23 个脚本**已全部归拢**到 `vendor/`（asar 三件套、构建链 6 个、视觉验证 6 个、Provider 探针 8 个）；`../tools/` 保留为历史副本，等 T1 验收后再删。见 `vendor/README.md`。
 - ✅ **归拢后的说明书补齐**：新增 `vendor/visual/README.md`（6 个脚本的用法 / 依赖 / 副作用 / 回答不了什么），
@@ -234,6 +247,7 @@
 5. ✅ **快照保留策略**：`snapshot prune`（默认只预演 + `--keep N` / `--keep-match GLOB` / `--yes`）。
 6. ✅ **doctor 扩展**：运行时心跳探测 —— `doctor` 现在有一条 `运行时` 段，读 `plugins/dsh-up-t/.runtime/heartbeat.json` 回答「重启到底有没有把我的插件装进去」。心跳分两步写（`apply` → `ready`），所以它还能区分「加载了」和**能用**：只走到 `apply`（`webServer` 依赖没就绪）会让 `doctor` 与设置页同时说出「界面里不会有胶囊也不会有设置页」。**做法可复用**：任何「只能靠肉眼确认」的加载事实，都值得落一枚带 pid 与时间的文件。
 7. ✅ **唯一一条回头路的演练 + 回归测试**（2026-10-07）：`--rollback --to <临时目标>`，以及用 `DSH_UP_T_INSTALL_DIR` 换安装目录后真跑一遍回滚（见上）；三条路（演练落盘 / 演练回滚 / 真回滚）都收进双击脚本 `install-whale.cmd`。
+8. ✅ **快照回滚的离线单测**（2026-10-07）：`test/snapshot-restore.test.mjs`（12 条），顺带修掉 `f.src` 绝对路径、越界写入、同秒 id 覆盖三个真缺陷，并让 `diff` 与 `restore` 对同一行说同一句话。
 
 **验收**：在一台干净的机器上，`doctor` → 应用补丁 → 落盘 → 复验，全程无需人工记忆任何步骤。
 

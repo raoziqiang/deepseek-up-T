@@ -2,6 +2,9 @@
 //
 // 这里的每一条断言都在回答同一个问题：**这个会删目录的工具，凭什么不会删错东西。**
 // 全部在系统临时目录里跑，绝不碰 state/snapshots/。
+//
+// 快照的另一半 —— **创建 / 对比 / 回滚**（`snapshot restore` 会把 profile 控制面文件覆盖回去）——
+// 在 `test/snapshot-restore.test.mjs` 里测。
 
 import fs from 'node:fs';
 import os from 'node:os';

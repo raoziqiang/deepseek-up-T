@@ -30,8 +30,18 @@ node src/cli.mjs snapshot create -m "改什么、为什么"
 
 ```powershell
 node src/cli.mjs snapshot diff <id>        # 先看差在哪
-node src/cli.mjs snapshot restore <id>     # 回滚（回滚前自动再留一份）
+node src/cli.mjs snapshot restore <id>     # 只预演：列出将被覆盖的文件，什么都不写
+node src/cli.mjs snapshot restore <id> --yes   # 真回滚（回滚前自动再留一份）
 ```
+
+两条要知道的：
+
+- **回滚写的是「当前现场」的路径，而不是快照里记下的那条绝对路径。** 同一 profile 名、但
+  `DSH_HOME` 换过之后，快照里那条路径指向的是旧家目录 —— 照着它写会「报成功、而现场一个字没变」。
+  真发生了这种情况，命令会额外打印一行「快照记的是 …」。
+- `snapshot diff` 对「快照拍下时还不存在、之后才出现的文件」说的是
+  **`快照之后才出现（回滚不会动它）`** —— 因为它和 `restore` 必须说同一句话（那边会把它算进
+  `skipped`），否则人会以为那一行会被撤回去。
 
 快照**只在收尾时清理**（`snapshot prune`，见 ⑦）：攒到几十份之后，真正要回滚的那一份会被埋在
 一堆 `…改动前` 中间，选择成本比留快照贵得多。

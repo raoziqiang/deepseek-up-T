@@ -89,6 +89,9 @@ node vendor/whale/install.mjs --yes    # 需要先完全退出 Harness
 - [x] **唯一一条回头路有了演练模式与回归测试** —— 2026-10-07 完成：`install.mjs --rollback --to <archive>`
       （不退出 Harness、不动在用安装包）+ `verifyRollback` 共用核对段；`test/install.test.mjs` 新增一节，
       用 `DSH_UP_T_INSTALL_DIR` 把安装目录换成临时目录后**真跑一遍回滚**，见下方记录。
+- [x] **另一条「出事时才跑」的路也被测到了**：`snapshot restore` —— 2026-10-07 完成：
+      `test/snapshot-restore.test.mjs`（12 条）在临时目录里跑创建/对比/回滚，顺带补上三个 `P` 参数、
+      修掉三个真缺陷（旧家目录绝对路径 / 越界写入 / 同秒 id 互相覆盖），见下方记录。
 
 ## 验收
 
@@ -1054,6 +1057,48 @@ bbox aspect 1.59、`tail columns 2-run = 53`、左/右质量 59.8% / 40.2%）。
   产物 sha256 `983ca71114e6dfd3…` 与备份相同、在用安装包未变；
   `DSH_UP_T_INSTALL_DIR=<临时目录>` 下真跑 `--rollback` → 被判成「不能从备份回滚 app.asar」，
   目标目录里的占位文件哈希未变。
+
+### 2026-10-07 · 另一条「出事时才跑」的路：`snapshot restore` 第一次被测试跑到
+
+**起因**：`test/snapshot.test.mjs` 覆盖的其实只是**删除**（`prune` / `deleteSnapshots`：这个会删目录的
+工具凭什么不会删错东西）。而 `snapshot restore` 是会把 profile 控制面文件
+（`cordis.patch.yml` / `cordis.yml` / `package.json` / `pnpm-workspace.yaml`）**覆盖**回去的那条路 ——
+和 `install.mjs --rollback` 完全同一类：平时不跑、出事才跑、跑错代价很大。
+
+**★ 为了让它在系统临时目录里跑，先补了三个 `P` 参数**：`createSnapshot` / `restoreSnapshot` /
+`diffSnapshot` 原本内部自己调 `resolvePaths()`，而 `snapshotsDir` 固定在 `PROJECT_ROOT/state/snapshots`
+下 —— 离线测就只能往**真实**快照目录里写、并且（因为回滚会写回 profile）往**真实** profile 里写。
+改成与 `listSnapshots` / `planPrune` / `deleteSnapshots` 一致的 `P = resolvePaths()` 尾参数后，
+测试传一个假的 `{ profileDir, snapshotsDir, asar, … }` 就能整条链跑在临时目录里。
+**教训：一个函数能不能被测，是它的签名决定的，不是测试决定的。**
+
+**顺着写断言，修掉三个真缺陷**（都不是新写的代码，是一直就有的）：
+
+1. **回滚原本优先用快照里记的绝对路径**：`const dest = f.src || TRACKED_FILES.find(...)?.pick(P)`。
+   同一 profile 名、但 `DSH_HOME` 换过之后，`f.src` 指向旧家目录 ⇒ 回滚**报成功，而现场一个字没变**。
+   现在改成按**文件名**解析到当前 profile 目录（`resolveDest()`），位置与快照里记的不一致时
+   在 `restored` 行里带上 `relocatedFrom`，CLI 多打一行「快照记的是 …」。
+2. **越界写入**：只有「连名字都不认识」的条目才会回退到记录路径，而现在那条路径必须落在
+   当前 profile 目录**之内**，否则跳过并说明原因。快照是仓库里的普通文本，手改过的
+   `meta.json`（或者从别处拷来的）不该能指挥这个工具往任意位置写。
+3. **同一秒内创建两份快照会拿到同一个 id**（时间戳精确到秒；标签也一样时更是必然），
+   第二份直接写进第一份的目录 ⇒ **「回滚前的那一份」被静默覆盖**。现在 `id` 已被占用时
+   自动加 `-2` / `-3` 后缀。这条正好命中这个项目最在意的那类丢失。
+
+**顺手让两处措辞对齐**：`diff` 与 `restore` 原本对「快照拍下时还不存在、之后才出现的文件」
+说两句话 —— 前者报 `已改动`（听着像会被撤回去），后者把它算进 `skipped`（根本不动）。现在
+`diff` 说的是 `快照之后才出现（回滚不会动它）`。**同一个事实的两处输出，必须能被同一句话解释。**
+
+**★ 这套测试第一版 6 条里挂了 5 条，全是我自己的期望值算错**（`makePaths()` 里派生路径写的是
+闭包外那一份 `profileDir`，所以给 `P2`/`P3`/`P4` 换目录全都没生效；`preSnapshot` 断言写成了
+`^prerestore-`，而 id 是「时间戳-标签」；asar 那两条把「文件存在且未变」错当成「拿不到」）。
+与 splash 那 6 条假失败**同源**：**期望值要量出来，不要推算** —— 尤其是「我换了目录」这种
+自己以为已经生效的前提。
+
+**怎么验**：`node test/snapshot-restore.test.mjs` → **12/12**；`node test/run.mjs` → **12/12 套**
+（新增文件被发现式总入口自动收进去）；真实现场只读复核：`snapshot diff <最新一份>` 打印四个文件的
+状态与 `app.asar：未变化`，`snapshot restore <id>`（不带 `--yes`）只列将被覆盖的文件并明说
+「此刻还没有动任何文件」，退出码 0。
 
 
 

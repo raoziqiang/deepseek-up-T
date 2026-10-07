@@ -52,9 +52,45 @@ export function listSnapshots(P = resolvePaths()) {
   return out.sort((a, b) => String(b.id).localeCompare(String(a.id)));
 }
 
-export async function createSnapshot({ label = '', quiet = false } = {}) {
-  const P = resolvePaths();
-  const id = `${stamp()}${safeLabel(label)}`;
+/** 目标路径是否在某个目录**之内**（严格：等于目录本身不算） */
+function isInside(child, parent) {
+  if (!child || !parent) return false;
+  const rel = path.relative(path.resolve(parent), path.resolve(child));
+  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
+/**
+ * 把快照里记的一个文件映射回**当前现场**的目标路径。
+ *
+ * 刻意**不优先**用快照里记的绝对路径（`f.src`）：同一 profile 名、但 `DSH_HOME` 换过之后，
+ * 那条路径指向的是旧家目录，照着写会「报成功、而现场一个字没变」。只有连名字都不认识
+ * 的条目才回退到记录的路径，并且必须落在当前 profile 目录内 —— 快照是仓库里的普通文本，
+ * 手改过或者来自别处的 meta.json 不该能指挥这个工具往任意位置写。
+ */
+function resolveDest(f, P) {
+  const tracked = TRACKED_FILES.find((t) => t.name === f.name);
+  if (tracked) {
+    const dest = tracked.pick(P);
+    const relocatedFrom = f.src && path.resolve(f.src) !== path.resolve(dest) ? f.src : null;
+    return { dest, relocatedFrom, why: null };
+  }
+  if (!f.src) return { dest: null, relocatedFrom: null, why: '无法解析目标路径' };
+  if (!isInside(f.src, P.profileDir)) {
+    return {
+      dest: null,
+      relocatedFrom: null,
+      why: `快照里记的路径不在当前 profile 目录内，拒绝写入：${f.src}`,
+    };
+  }
+  return { dest: f.src, relocatedFrom: null, why: null };
+}
+
+export async function createSnapshot({ label = '', quiet = false } = {}, P = resolvePaths()) {
+  const base = `${stamp()}${safeLabel(label)}`;
+  // 同一秒里创建两份（标签也一样）不能让第二份盖掉第一份 ——「回滚前的那一份」被静默
+  // 覆盖，正是最不该发生的那种丢失。
+  let id = base;
+  for (let n = 2; exists(path.join(P.snapshotsDir, id)); n += 1) id = `${base}-${n}`;
   const dir = path.join(P.snapshotsDir, id);
   const filesDir = path.join(dir, 'files');
   ensureDir(filesDir);
@@ -103,8 +139,7 @@ export async function createSnapshot({ label = '', quiet = false } = {}) {
   return { id, dir, meta };
 }
 
-export async function restoreSnapshot(id, { preSnapshot = true } = {}) {
-  const P = resolvePaths();
+export async function restoreSnapshot(id, { preSnapshot = true } = {}, P = resolvePaths()) {
   const dir = path.join(P.snapshotsDir, id);
   const metaPath = path.join(dir, 'meta.json');
   if (!exists(metaPath)) throw new Error(`快照不存在或已损坏：${id}`);
@@ -116,7 +151,7 @@ export async function restoreSnapshot(id, { preSnapshot = true } = {}) {
 
   let pre = null;
   if (preSnapshot) {
-    pre = await createSnapshot({ label: `prerestore-${id.slice(0, 15)}` });
+    pre = await createSnapshot({ label: `prerestore-${id.slice(0, 15)}` }, P);
   }
 
   const restored = [];
@@ -124,25 +159,30 @@ export async function restoreSnapshot(id, { preSnapshot = true } = {}) {
   for (const f of meta.files ?? []) {
     const src = path.join(dir, 'files', f.name);
     if (!exists(src)) { skipped.push({ name: f.name, why: '快照内无此文件（当时就不存在）' }); continue; }
-    const dest = f.src || TRACKED_FILES.find((t) => t.name === f.name)?.pick(P);
-    if (!dest) { skipped.push({ name: f.name, why: '无法解析目标路径' }); continue; }
+    const { dest, relocatedFrom, why } = resolveDest(f, P);
+    if (!dest) { skipped.push({ name: f.name, why }); continue; }
     ensureDir(path.dirname(dest));
     fs.copyFileSync(src, dest);
-    restored.push({ name: f.name, dest });
+    restored.push({ name: f.name, dest, relocatedFrom });
   }
 
   return { id, restored, skipped, preSnapshot: pre?.id ?? null, meta };
 }
 
 /** 对比某个快照与当前现场 */
-export async function diffSnapshot(id) {
-  const P = resolvePaths();
+export async function diffSnapshot(id, P = resolvePaths()) {
   const meta = JSON.parse(fs.readFileSync(path.join(P.snapshotsDir, id, 'meta.json'), 'utf8'));
   const rows = [];
   for (const f of meta.files ?? []) {
-    const dest = f.src || TRACKED_FILES.find((t) => t.name === f.name)?.pick(P);
+    const { dest } = resolveDest(f, P);
     if (!dest || !exists(dest)) {
       rows.push({ name: f.name, status: f.present ? '现在缺失' : '当时缺失', changed: f.present });
+      continue;
+    }
+    if (!f.present) {
+      // 快照拍下时这个文件还不存在，之后才出现 —— **回滚不会动它**（快照里没有它的内容）。
+      // 这里必须与 restoreSnapshot 说同一句话：那边把它算进 skipped。
+      rows.push({ name: f.name, status: '快照之后才出现（回滚不会动它）', changed: true });
       continue;
     }
     const nowHash = await sha256(dest);

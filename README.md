@@ -34,7 +34,8 @@ node src/cli.mjs env        # 打印本机全部环境事实与路径
 node src/cli.mjs doctor     # 体检：组合层不变量 / 插件可解析 / 安装包完整性 / 进程占用
 node src/cli.mjs snapshot create -m "改之前"   # 留快照
 node src/cli.mjs snapshot list                 # 列出快照
-node src/cli.mjs snapshot restore <id>         # 回滚（回滚前会自动再留一份）
+node src/cli.mjs snapshot restore <id>         # 只预演：列将被覆盖的文件，什么都不写
+node src/cli.mjs snapshot restore <id> --yes   # 真回滚（回滚前会自动再留一份）
 node src/cli.mjs snapshot prune                # 快照保留策略（默认只预演，--yes 才真删）
 node src/cli.mjs precheck                      # 改完 cordis.patch.yml 后、重启前，预检组合
 node src/cli.mjs baseline write                # 把当前事实固化为基线

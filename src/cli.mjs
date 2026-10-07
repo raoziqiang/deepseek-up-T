@@ -202,13 +202,18 @@ async function cmdSnapshot({ flags, positional, opts }) {
       const { rows } = await diffSnapshot(id);
       console.log(`将被覆盖的文件（快照 ${id}）：`);
       for (const r of rows) console.log(`  ${r.name}  当前状态：${r.status}`);
-      console.log('\n回滚前会自动再留一份快照。确认请加 --yes 重跑。');
+      console.log('\n回滚前会自动再留一份快照。此刻还没有动任何文件 —— 确认请加 --yes 重跑。');
       return 0;
     }
     const res = await restoreSnapshot(id);
     console.log(`已从快照 ${id} 回滚`);
     for (const r of res.restored) console.log(`  ✓ ${r.name} → ${r.dest}`);
     for (const s of res.skipped) console.log(`  · 跳过 ${s.name}：${s.why}`);
+    const moved = res.restored.filter((r) => r.relocatedFrom);
+    if (moved.length) {
+      console.log('\n注意：以下文件的当前位置与快照里记的不一样，写的是**当前现场**的位置（照着快照里那条旧路径写会「报成功、而现场没变」）：');
+      for (const r of moved) console.log(`  ${r.name}：快照记的是 ${r.relocatedFrom}`);
+    }
     if (res.preSnapshot) console.log(`\n回滚前的现场已存为快照 ${res.preSnapshot}`);
     console.log('\n注意：改动要生效需要重启 Harness（或触发 profile 重载）。');
     return 0;
