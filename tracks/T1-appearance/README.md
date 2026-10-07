@@ -76,6 +76,11 @@
 3. 重新启动 DeepSeek Harness，然后跑 `node src\cli.mjs accept` —— 它会一次问完宿主路由、渲染层握手、
    L0/L3 声明与体检，把「该转成 pass 的那几项」直接列出来。
 
+**如果装完发现不对，回头路也在这个脚本里**（2026-10-07 起）：`install-whale.cmd /rollback` 会把
+`app.asar.whale-backup` 恢复回去（同样过 Harness 守卫，所以要先托盘 Quit）；想先确认那份备份好使，
+**不用退出 Harness**：`install-whale.cmd /rollback /dry` 会把它复制到 `state\cmp\` 并逐字节核对。
+回滚之后记得跑一次 `node src\cli.mjs baseline write`，否则 `upgrade` 会把这次回滚报成「安装包被动过」。
+
 **这一步已经预先验过的东西**（所以你不用担心它是「碰运气」）：
 
 - 暂存包与声明**完全吻合**：`node vendor/asar/verify.mjs "<app.asar.whale-backup>" state\staged\app.asar --expect 13`

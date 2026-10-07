@@ -80,7 +80,7 @@ node vendor/whale/install.mjs --yes --to state/cmp/rehearsal-app.asar
 然后对临时目标跑**同一段**声明核对。两条规则：`--to` 落在安装目录里一律拒绝（那会让人以为落盘了，
 其实 Harness 读的仍是在用那份）；`--to` 指向在用 `app.asar` 时按真落盘处理，不许借它绕过 Harness 守卫。
 双击版：`install-whale.cmd /dry`。这条路径的回归由 `test/install.test.mjs` 守着
-（43 条断言，Harness 在跑时；它没在跑时是 44 条 —— 真回滚那一段多一条）。
+（56 条断言，Harness 在跑时；它没在跑时是 57 条 —— 真回滚那一段多一条）。
 
 **回滚也能先演练**（2026-10-07 起，同样不用退出 Harness）：
 
@@ -95,6 +95,11 @@ node vendor/whale/install.mjs --rollback --to state/cmp/rollback-rehearsal.asar
 真回滚**刻意不要 `--yes`**（与落盘不对称）：失败提示里印出来让人原样复制的是
 `node vendor/whale/install.mjs --rollback`，一条还要再加参数才能跑的救急命令，
 等于在最需要它的时候先失败一次。
+
+双击版把三种模式都收在一个脚本里（`install-whale.cmd`，标志顺序无关）：
+`/dry` 演练落盘、`/rollback /dry` 演练回滚、`/rollback` 真回滚 —— 出事时不必记命令，也不必记参数。
+`test/install.test.mjs` 会**真的执行这个 .cmd 的两条演练路径**（不是只读它的文本），
+并钉住它只能用 ASCII 的那条约束：`.cmd` 是这里唯一没有任何工具会去检查的产物。
 
 ## 路径约定
 
@@ -144,8 +149,10 @@ node vendor/asar/verify.mjs <原版> <改动后> --expect 13
 
 落盘链路本身的自检（构建确定性、`--to` 演练、三条拒绝路径、全程在用安装包 sha256 未变）**外加
 唯一一条回头路**（`--rollback` 的演练、真回滚跑在一个临时「安装目录」里、守卫拦下、无备份时的报错次序）：
-`node test/install.test.mjs` —— 43 条断言（Harness 在跑时）/ 44 条（没在跑时），约 4 秒，不碰安装目录。
+`node test/install.test.mjs` —— 56 条断言（Harness 在跑时）/ 57 条（没在跑时），约 6 秒，不碰安装目录。
 真回滚那一节靠 `DSH_UP_T_INSTALL_DIR` 把整个安装目录换成一个临时目录，所以跑的是同一段真回滚代码。
+最后一节**真的执行 `install-whale.cmd` 的两条演练路径**（`/dry` 与 `/rollback /dry`），
+并断言这个 `.cmd` 里没有非 ASCII 字节。
 
 构建产物**内容**的自检（引用完整性校验，**字节核对查不出来的那一类**）：
 `node test/assets.test.mjs` —— 28 条断言。它只读归档，检查被 insert/replace 的 HTML 引用的每个本地资源

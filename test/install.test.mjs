@@ -203,6 +203,51 @@ check('回滚的守卫排在复制之前',
 check('回滚的核对是一段共用代码（演练通过 == 真回滚通过）',
   (src.match(/verifyRollback\(/g) ?? []).length >= 3, '定义 1 次 + 演练与真回滚各 1 次');
 
+// ── 4c. 一键脚本（install-whale.cmd）：真的执行它，而不是只读它 ──
+// 这个文件是人出事时唯一会去双击的东西。它不是 JS，没有任何工具会检查它 ——
+// 所以既要真的跑它的演练路径，也要钉住那条只有它才会犯的错：非 ASCII 字节。
+console.log('\n── 一键脚本 install-whale.cmd ──');
+const CMD_PATH = path.join(PROJECT_ROOT, 'install-whale.cmd');
+const cmdText = readText(CMD_PATH);
+const nonAscii = [...cmdText].filter((c) => c.charCodeAt(0) > 127);
+check('一键脚本是纯 ASCII（cmd.exe 按当前代码页解析它，非 ASCII 是已知的坏法）',
+  nonAscii.length === 0, nonAscii.slice(0, 5).join(''));
+check('三种模式都在（/dry、/rollback、/test）',
+  ['/dry', '/rollback', '/test'].every((f) => cmdText.includes(f)));
+check('真回滚不给自己加 --yes（它是救急时原样要跑的那条命令）',
+  /install\.mjs" --rollback\r?\n/.test(cmdText) && !/--rollback --yes/.test(cmdText));
+check('真落盘仍然带 --yes（非 rollback 必须显式确认）', /install\.mjs" --yes\r?\n/.test(cmdText));
+check('真回滚与真落盘共用同一个 Harness 守卫（同一个 tasklist 检查在两条路之前）',
+  (cmdText.match(/IMAGENAME eq DeepSeek Harness\.exe/g) ?? []).length === 1
+  && cmdText.indexOf('IMAGENAME eq DeepSeek Harness') < cmdText.indexOf(':realRollback'));
+
+const cmdEnv = {
+  ...process.env,
+  PATH: `${path.dirname(process.execPath)}${path.delimiter}${process.env.PATH ?? ''}`,
+};
+const runCmd = (args) => spawnSync('cmd.exe', ['/c', 'install-whale.cmd', ...args], {
+  cwd: PROJECT_ROOT, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, env: cmdEnv,
+});
+const CMD_REHEARSAL = path.join(SCRATCH, 'rehearsal-app.asar');
+const CMD_RB_REHEARSAL = path.join(SCRATCH, 'rollback-rehearsal.asar');
+
+const cmdDry = runCmd(['/dry', '/test']);
+check('一键脚本 /dry /test 退出码 0（真的把批处理跑起来了）', cmdDry.status === 0,
+  `实际 ${cmdDry.status}${cmdDry.stderr ? ` · ${String(cmdDry.stderr).trim().split(/\r?\n/).slice(-1)[0]}` : ''}`);
+check('一键脚本演练产物与暂存包逐字节相同',
+  fs.existsSync(CMD_REHEARSAL) && (await sha256(CMD_REHEARSAL)) === stagedHash1);
+check('一键脚本演练说清「在用安装包没动」', /live app\.asar was NOT modified/.test(cmdDry.stdout ?? ''));
+check('一键脚本演练不要求退出 Harness（没有 [STOP]）', !/\[STOP\]/.test(cmdDry.stdout ?? ''));
+
+const cmdRbDry = runCmd(['/test', '/rollback', '/dry']);
+check('一键脚本 /rollback /dry /test（标志顺序无关）退出码 0', cmdRbDry.status === 0,
+  `实际 ${cmdRbDry.status}${cmdRbDry.stderr ? ` · ${String(cmdRbDry.stderr).trim().split(/\r?\n/).slice(-1)[0]}` : ''}`);
+check('一键脚本回滚演练产物与备份逐字节相同',
+  fs.existsSync(CMD_RB_REHEARSAL) && (await sha256(CMD_RB_REHEARSAL)) === backupHash);
+check('一键脚本回滚演练说清「在用安装包没动」', /live app\.asar was NOT modified/.test(cmdRbDry.stdout ?? ''));
+check('一键脚本回滚演练给出去掉 /dry 的真回滚命令',
+  /install-whale\.cmd \/rollback/.test(cmdRbDry.stdout ?? ''));
+
 // ── 5. 全程之后：在用安装包一个字节都没变 ──
 console.log('\n── 在用安装包 ──');
 check('全程结束后在用安装包 sha256 未变', (await sha256(P.asar)) === asarHashBefore);
@@ -211,10 +256,13 @@ check('原版备份 sha256 也未变', (await sha256(P.asarBackup)) === backupHa
 // ── 6. 不留痕 ──
 fs.rmSync(REHEARSAL, { force: true });
 fs.rmSync(RB_REHEARSAL, { force: true });
+fs.rmSync(CMD_REHEARSAL, { force: true });
+fs.rmSync(CMD_RB_REHEARSAL, { force: true });
 fs.rmSync(FAKE_INSTALL, { recursive: true, force: true });
 fs.rmSync(FAKE_NOBACKUP, { recursive: true, force: true });
 check('演练产物已清理（测试不许给真实环境留状态）',
-  !fs.existsSync(REHEARSAL) && !fs.existsSync(RB_REHEARSAL) && !fs.existsSync(FAKE_INSTALL));
+  !fs.existsSync(REHEARSAL) && !fs.existsSync(RB_REHEARSAL) && !fs.existsSync(FAKE_INSTALL)
+  && !fs.existsSync(CMD_REHEARSAL) && !fs.existsSync(CMD_RB_REHEARSAL));
 
 console.log('');
 if (bad) {
