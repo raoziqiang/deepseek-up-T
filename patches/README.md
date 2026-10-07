@@ -88,7 +88,7 @@ notes: |
 | | 写在哪 | 例子 | 升级后 |
 | --- | --- | --- | --- |
 | **L3** | `resources/app.asar` | `T1-whale-splash.yml` | **被覆盖，需要重打** |
-| **L0** | `profiles/<p>/cordis.patch.yml` | `T3-session-search.yml`、`T3-session-title.yml`、`T2-enable-ralph.yml`、`T2-product-analytics-off.yml` | **幸存，无需重打** |
+| **L0** | `profiles/<p>/cordis.patch.yml` | `T3-session-search.yml`、`T3-session-title.yml`、`T2-enable-ralph.yml`、`T2-product-analytics-off.yml`、`T2-agent-team-members.yml` | **幸存，无需重打** |
 
 - L3 声明用 `target.archive` + `entries:`，由 `vendor/whale/build.mjs` 与 `install.mjs` 执行。
 - L0 声明就是一**片段**（`- id:` / `name:` / `config:`），它记录的是「往 profile patch 里加了什么」，
@@ -96,6 +96,9 @@ notes: |
 - L0 的两个写法都被实测验证过：**给 `config`** 就是整体替换（`T3-session-title.yml` 因此把五个字段写全），
   **不给 `config`** 就完整继承 base 那一行（`T2-enable-ralph.yml` 只写 `disabled: false`，证据在
   `state/probe-dump.txt:458`）。
+- 改**别人写死的值**时，理由必须说清「原值是谁定的、为什么不合适」这两件事。
+  `T2-agent-team-members.yml` 是范例：bundle 写死 `agent-team.maxMembers: 8`，而包作者自己的默认值是
+  `16`，且该名额是**累计**的（含创建失败的成员、名字永不复用）⇒ 改它只抬天花板、不改默认行为。
 - 判据：能在 L0 表达的，**不要**写成 L3。L0 改完重启就生效，且升级不会丢。
 
 - **L0 声明是权威描述，不是提案。** `dsht upgrade` 逐行比对声明与现场，不一致就报漂移
@@ -104,10 +107,10 @@ notes: |
   形态在此存在过一段时间（用户还没决定要不要关埋点），当时 `upgrade` 每次都报漂移——
   这不是 bug，是「声明即声称」这条语义在如实工作。要提建议就写完先别放这里。
 
-> 状态：**L3 已闭环、L0 有 4 份声明、现场与声明全部一致。**
+> 状态：**L3 已闭环、L0 有 5 份声明、现场与声明全部一致。**
 > - L3：`node vendor/whale/build.mjs` 产出 `state/staged/app.asar`（13 条目按声明改动，
 >   其余 11,466 条目逐字节一致），再 `node vendor/whale/install.mjs --yes` 落盘（需先退出 Harness）。
-> - L0：4 份声明全部 `OK 声明与现场一致`。`dsht upgrade` 会区分「被升级覆盖」与「从未落盘」。
+> - L0：5 份声明全部 `OK 声明与现场一致`。`dsht upgrade` 会区分「被升级覆盖」与「从未落盘」。
 > - 当前声明文件：`T1-whale-splash.yml`（L3）、`T2-enable-ralph.yml`、
->   `T2-product-analytics-off.yml`、`T3-session-search.yml`、`T3-session-title.yml`（L0）。
->   新增声明时按同样的格式写，执行器无需改代码。
+>   `T2-product-analytics-off.yml`、`T2-agent-team-members.yml`、`T3-session-search.yml`、
+>   `T3-session-title.yml`（L0）。新增声明时按同样的格式写，执行器无需改代码。

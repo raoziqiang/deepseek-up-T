@@ -1,5 +1,5 @@
 {
-  "capturedAt": "2026-10-07T04:41:07.952Z",
+  "capturedAt": "2026-10-07T06:13:42.597Z",
   "project": "deepseek-up-T",
   "home": "C:\\Users\\Z1848\\.dsh",
   "profile": "desktop",
@@ -28,7 +28,7 @@
     "asarFiles": 12976,
     "asarPackages": 529,
     "asarDshPackages": 503,
-    "patchEntries": 14
+    "patchEntries": 15
   },
   "summary": {
     "error": 0,
@@ -77,14 +77,14 @@
       "id": "cordis.patch.yml",
       "level": "info",
       "ok": true,
-      "detail": "8.9KB  C:\\Users\\Z1848\\.dsh\\profiles\\desktop\\cordis.patch.yml"
+      "detail": "10.4KB  C:\\Users\\Z1848\\.dsh\\profiles\\desktop\\cordis.patch.yml"
     },
     {
       "group": "组合层",
       "id": "patch 顶层为数组",
       "level": "error",
       "ok": true,
-      "detail": "是（14 个条目）"
+      "detail": "是（15 个条目）"
     },
     {
       "group": "组合层",
@@ -119,7 +119,7 @@
       "id": "T4 插件 dsh-up-t 心跳",
       "level": "warn",
       "ok": true,
-      "detail": "dsh-up-t 0.1.0 · 2026-10-07T04:40:49.307Z（18 秒前） · pid 36028 · 服务已就绪（路由 4 条） · 渲染层已握手（bundle+capsule）"
+      "detail": "dsh-up-t 0.1.0 · 2026-10-07T05:37:56.524Z（36 分钟前） · pid 35256 · 服务已就绪（路由 4 条） · 渲染层已握手（bundle+capsule+unknown）"
     },
     {
       "group": "安装包",
@@ -175,14 +175,14 @@
       "id": "patch 引用的包可解析",
       "level": "error",
       "ok": true,
-      "detail": "14 个包全部可解析"
+      "detail": "15 个包全部可解析"
     },
     {
       "group": "解析",
       "id": "patch 中仅安装包提供的包",
       "level": "warn",
       "ok": false,
-      "detail": "@deepseek-ai/dsh-client-ui-chat, @deepseek-ai/dsh-client-ui-settings-account, @deepseek-ai/dsh-agent-preset-registry, @deepseek-ai/dsh-client-product-analytics"
+      "detail": "@deepseek-ai/dsh-client-ui-chat, @deepseek-ai/dsh-client-ui-settings-account, @deepseek-ai/dsh-agent-preset-registry, @deepseek-ai/dsh-client-product-analytics, @deepseek-ai/dsh-experimental-agent-team"
     }
   ]
 }

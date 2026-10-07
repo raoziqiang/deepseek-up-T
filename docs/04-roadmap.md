@@ -56,8 +56,9 @@
 
 **当前状态（已经很丰富）**
 - OpenCode Go 订阅已接入 3 条路由（chat / responses / messages），约 30 个模型，凭据走 `OPENCODE_GO_API_KEY`。
-- `agent-default-model`：`deepseek-account` / `deepseek-flash` / `reasoningEffort: high`。
-- `agent-preset-registry`：`selectedDefault: cordis`。
+- `agent-default-model`：`opencode-go-chat` / `glm-5.3`（用户在 GUI 里改过）。
+- `agent-preset-registry`：`selectedDefault: cordis` ⇒ 新会话跑 `preset-cordis`，它与 `preset-standard` 的唯一差别是多一个 `tool-cordis`。
+- `subagent`：`maxDepth: 2`；`agent-team`：`maxMembers: 16`（本项目 2026-10-07 从 bundle 的 8 抬到包作者默认值 16）。
 - 12 个 bundle 里含插件市场、上下文、记忆、Agent Teams、自动评审、定时、语音输入。
 
 **已核实的抓手**
@@ -71,13 +72,17 @@
 | `dsh-mcp-client` | 宿主包存在 | MCP 接入能力在手，未启用 |
 | `dsh-tool-web` | `searchTimeoutMs: 60000` | 联网搜索/抓取 |
 | `dsh-skill` / `dsh-skill-filesystem` | 已挂载 | 技能目录 |
+| `agent-team` | bundle 插入行 `maxMembers: 8` | ✅ **已改 16**（2026-10-07）。名额是**每支团队累计、含创建失败的成员、名字永不复用**，所以 8 是「一辈子最多 8 个名字」而不是「同时 8 个在跑」；恢复包作者默认值只抬天花板。同时存活的**可续接子代理**仍由 `subagent.maxActiveSubagents`（默认 8）限制 —— 两道闸门别混为一谈 |
+| `system-prompt` | base 已设 `personaPrefix` / `personaSuffix` | **不动**：base 自带「你是一个由 `{{model}}` 驱动的编码 agent」+「你的工作目录是 `{{cwd}}`」；`toolOrder` 有「列了名字但没注册工具 ⇒ 每次 assemble() 被拒」的锐边。要长期注入的自定义人格放**按目录作用域**的指令文件，而不是全局提示词 |
+| `agent-loop.maxParallelToolCalls` | 未设 ⇒ 默认 `10` | **不动**：没有「并行度不够」的证据 |
 
 **候选动作**
 1. 加 Provider：在 `llm-pi-ai.providers` 下加一节（`apiKeyEnv` + `api` + `baseURL` + `models`）。
 2. 开 MCP：接入本地/远端 MCP server，把外部工具变成 DSH 工具。
-3. 按需开 `tool-ralph`。
-4. 写自己的 skill（`dsh-skill-filesystem` 认目录）。
-5. 调 Agent 行为：`system-prompt.personaPrefix`、`agent-presets`、`subagent.maxDepth`。
+3. ~~按需开 `tool-ralph`~~ ✅ 2026-10-06 已落盘。
+4. 写自己的 skill（`dsh-skill-filesystem` 认目录）✅ 2026-10-06 已完成。
+5. ~~调 Agent 行为~~ ✅ 2026-10-07 已把「Agent 行为」读成一张旋钮表并落了一处（`agent-team.maxMembers`）；其余各项**有证据地不动**，理由与锐边见 `tracks/T2-capability/README.md`。
+6. 另存一份 preset（新建/覆盖 preset 只能靠 bundle 补丁 + `plugin_manager`，见 `patches/README.md`）—— 无目标，暂不动手。
 
 **验收**：模型选择器里出现新模型并能真实对话；新工具在工具目录里可见且可调用。
 

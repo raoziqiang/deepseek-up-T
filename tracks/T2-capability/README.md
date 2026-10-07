@@ -10,8 +10,11 @@
   覆盖 `openai-completions` / `openai-responses` / `anthropic-messages` 三种 wire protocol，
   约 30 个模型；凭据走 `OPENCODE_GO_API_KEY`（存于 `.dsh/.credentials.yaml`）。
 - 每条路由钉了稳定的 `x-opencode-session` 头（网关缺 session 会回 400）。
-- `agent-default-model`：`deepseek-account` / `deepseek-flash` / `reasoningEffort: high`。
-- `agent-preset-registry`：`default: standard`、`selectedDefault: cordis`。
+- `agent-default-model`：`opencode-go-chat` / `glm-5.3`（用户在 GUI 里改过；2026-10-07 的预检
+  把它列成 L0 里唯一一处与上次不同项，从 `deepseek-account` / `deepseek-flash` / `reasoningEffort: high` 变来）。
+- `agent-preset-registry`：`default: standard`、`selectedDefault: cordis`
+  ⇒ **新会话跑的是 `preset-cordis`**，它与 `preset-standard` 的唯一差别是多一个 `tool-cordis`。
+- `subagent`：`maxDepth: 2`（base/包默认 1）；`agent-team`：`maxMembers: 16`（本项目 2026-10-07 改，bundle 原本 8）。
 
 **已装的能力 bundle（13 个）：** base、web-app、dshmarket、dsh-context、billion-context、
 dsh-memory、better-sidebar、whale-widget，4 个 experimental（Agent Teams、自动评审、定时、语音输入），
@@ -28,7 +31,10 @@ dsh-memory、better-sidebar、whale-widget，4 个 experimental（Agent Teams、
 | `dsh-skill` / `dsh-skill-filesystem` | 已挂载 | ✅ 已用它写了项目 skill（2026-10-06），见下方记录 |
 | `spill-policy` | `maxInlineTokens: 12500` | 大结果落盘阈值 |
 | `dsh-tool-web` | `searchTimeoutMs: 60000` | 联网搜索与抓取 |
-| `system-prompt` | `personaPrefix: ''` | 部署人格，可覆盖 |
+| `system-prompt` | base 已设 `personaPrefix` / `personaSuffix` | **不动**：base 自带「你是一个由 `{{model}}` 驱动的编码 agent」+「你的工作目录是 `{{cwd}}`」；锐边见下方记录 |
+| `agent-team` | bundle 插入行 `maxMembers: 8` | ✅ **已改 16**（2026-10-07，恢复包作者默认值），见下方记录 |
+| `agent-loop.maxParallelToolCalls` | 未设 ⇒ 默认 `10` | **不动**：没有「并行度不够」的证据，调它只是赌 |
+| `subagent.maxActiveSubagents` | 未设 ⇒ 默认 `8` | **不动**：见下方记录（一次性运行不受它限制，所以工作流扇出不会撞它） |
 | `product-analytics` | base `enabled: true`（界面无开关） | ✅ **已落盘关闭**（2026-10-06，经用户确认），见下方记录 |
 
 ## 待办
@@ -38,7 +44,10 @@ dsh-memory、better-sidebar、whale-widget，4 个 experimental（Agent Teams、
 - [x] **落盘 `tool-ralph`** —— 2026-10-06 完成（用户确认后落盘），见下方记录
 - [x] **写自有 skill** —— 2026-10-06 完成：`.dsh/skills/deepseek-up-t/SKILL.md` + 两条 junction + 离线单测 9/9，见下方记录
 - [x] **关闭桌面端产品埋点** —— 2026-10-06 完成（经用户确认后落盘），见下方记录
-- [ ] 调 Agent 行为：`personaPrefix`、`agent-presets`、`subagent.maxDepth`
+- [x] **Agent Teams 成员上限 8 → 16** —— 2026-10-07 完成（L0 第 15 条，预检 0 问题），见下方记录
+- [x] **调 Agent 行为：先把「Agent 行为」到底是哪些旋钮读清楚** —— 2026-10-07 完成（四个 preset 的真实差异、`system-prompt` 全部键与两个陷阱、`subagent` 的 depth 与并发两道闸门、`agent-loop.maxParallelToolCalls`、dump 里一长串 `[disabled]` 的来历），见下方记录
+- [ ] 新增 Provider / MCP —— 用户已选「暂时跳过」，需要目标再开
+- [ ] **另存一份 preset**：新建/覆盖 preset 只能靠 bundle 补丁（插入一行 `@deepseek-ai/dsh-agent-preset` 或按 id 覆盖）再用 `plugin_manager` 装进 profile；现在只是把它记清楚了，没有目标就不动手
 
 ## 验收
 
@@ -228,3 +237,139 @@ node src/cli.mjs baseline write
 
 **怎么撤**：`node src/cli.mjs snapshot restore 20261006-084554-T2-关闭产品埋点-改动前`
 ——注意它同样需要重启 DSH 才失效，`cordis.patch.yml` 没有热重载。
+
+### 2026-10-07 · 把「Agent 行为」读清楚：四个 preset、两道闸门、一长串 `[disabled]` 的来历；并把 Agent Teams 的名字上限 8 抬到 16
+
+待办上只剩「调 Agent 行为：`personaPrefix`、`agent-presets`、`subagent.maxDepth`」这一条，
+而这三个词**都不是旋钮名**（一个是键、一个是包的类别名、一个是键）。所以这一步先不「调」，
+先把它们各自是什么读成一张有默认值、有类型、有超限行为的表——没有表的「调」只能靠感觉。
+
+**三个取证来源（都不许靠猜）**
+
+1. `node src/cli.mjs precheck` 的组合结果 `state/probe-dump.txt` —— 这是**权威**：
+   所有 bundle 与用户 L0 叠加之后的最终每一行。
+2. **在用安装包**里各包自己的 `README.zh.md`。抽法：
+   `node src/cli.mjs asar cat /dsh/node_modules/<pkg>/README.zh.md --out D:\Z1848\Temp\<k>.md`。
+   **教训**：PowerShell 里 `Get-Content -Raw` 读 UTF-8 中文文档会乱码，乱码不是内容问题，
+   是量具问题；`asar cat` 落盘再用文件工具打开就正常。
+3. 归档里的 **bundle patch 文件本身**（bundle 是怎么把这一行挂进来的）。
+
+**① dump 里那一长串 `[disabled]` 不是缺失能力，是「谁挂了这一行」**
+
+`agent-instructions`、`plan-mode`、`command-goal`、`command-compact`、`skill-filesystem`、
+`skill-badge`、`tool-subagent`、`tool-subagent-fork`、`tool-subagent-control`、
+`tool-subagent-list-agents` 在顶层全是 `[disabled]`，看着像十个坏掉的开关。实际上
+**这些能力都活在 preset 的插件列表里**（每个 preset 自己挂一份），顶层那一份关掉是为了
+避免同一个能力被注册两次。两条独立证据：
+
+- 四个 preset 的子插件清单里都有它们（见下表）；
+- 本会话里 plan 模式、goal、skill、subagent / Agent Teams 工具**全部在线** ⇒ 生效的是
+  preset scope 里那一份，不是顶层这一份。
+
+四个 `tool-subagent*` 还多一层原因，
+`@deepseek-ai/dsh-experimental-agent-team-profile/cordis.patch.yml` 开头就写着：
+
+> `# Experimental Agent Teams profile layer. Apply after dsh-base so these replacements`
+> `# keep direct delegation and coordination on the Team tools.`
+
+即**它故意关掉直连委派，让协调走 Team 工具**。
+
+⇒ **教训：dump 里的 `[disabled]` 说的是「谁挂了这一行」，不是「这个能力有没有」。**
+看到它先去找同一个 id 在不在某个 preset / 子插件列表里，不要当成待修的漏洞。
+
+**② 四个 preset 的真实差异（比名字小得多）**
+
+| preset | 子插件数 | 与 `standard` 的差异 |
+| --- | --- | --- |
+| `preset-standard` | 32 | 基准 |
+| `preset-cordis` | 33 | **只多一个 `tool-cordis`** |
+| `preset-ptc` | 33 | **只多一个 `tool-presentation`** |
+| `preset-minimal` | 7 | 只有 `persistent-bash` / `persistent-pwsh` / `persistent-shell` / `pty` / `terminal-bash` / `terminal-pwsh` |
+
+`minimal` 缺的是 `tool-fs`、`tool-fs-search`、`tool-bash`、`tool-pwsh`、`tool-web`、
+`tool-todo`、`tool-skill`、`tool-subagent*`、`compaction`、`planning` 等 —— 它不是「轻量」，
+是**没有文件工具**，别误选。
+
+`agent-preset-registry`（README 实读）：`default` **必填**（部署默认 preset ID）；
+`selectedDefault` 是 **volatile 字段**，保留**用户**的默认值，新会话优先用它；
+注册表**不写任何声明** —— 新建 preset 或覆盖内置 preset 只能靠 bundle 补丁
+（插入一行 `@deepseek-ai/dsh-agent-preset`，或按该行 id 写覆盖补丁），再用 `plugin_manager`
+装进 profile。所以「另存一份 preset」是有路可走的，只是现在没有目标，记下来即可。
+
+**③ `system-prompt` 的全部键，与两个不该碰的陷阱**
+
+| 键 | 默认 | 位置 |
+| --- | --- | --- |
+| `includeHarnessIdentity` | `true` | 顺序 −1000，第一方固定开场白 |
+| `includeRuntimeContext` | `true` | 运行时上下文 |
+| `personaPrefix` | `''`（**但 base 设了值**） | 顺序 `0`，在第一方指导**之前** |
+| `personaSuffix` | `''`（**但 base 设了值**） | 顺序 `10200`（`deployment:persona-suffix`），在第一方指导**之后** |
+| `toolOrder` | 无 | 工具引导的顺序 `100–199` |
+
+base 已经在用它，现值（dump `:500-504`）：
+
+```yaml
+personaSuffix: Your working directory is {{cwd}}.
+personaPrefix: You are a coding agent powered by the {{model}} model.
+```
+
+- **陷阱一（`toolOrder`）**：必须**恰好**含一个 `'<unlisted-tools>'` 其余项标记。形状不合规
+  在**配置加载时**就抛错；而已列名字没有对应的已注册工具会让**每一次 `assemble()` 被拒绝**
+  —— 危险点在首轮才暴露，不在启动时。**所以这个键不动。**
+- **陷阱二（严格插值）**：未知 `{{x}}`、已注册但无值、格式错误的完整组都会抛错；
+  孤立的 `{{` 后面没有 `}}` 按字面量通过；替换值绝不再扫描一次。
+
+**决定：不动。** 理由不是「默认值挺好」，而是**要长期注入的自定义人格有更合适的载体**：
+项目级说明应该放指令文件（`agent-instructions` 在 preset 里挂着，`maxBytes: 65536`），
+它**按目录作用域**；而 `personaPrefix` 是**每个会话都生效**的全局提示词。用全局机制解决
+局部问题，等于把「这个项目怎么做事」泄漏到跟这个项目无关的会话里，还平白动一次所有会话
+的提示词前缀（KV Cache 前缀变更）。
+
+**④ 两道不同的闸门（最容易混为一谈的地方）**
+
+| | `subagent.maxActiveSubagents` | `agent-team.maxMembers` |
+| --- | --- | --- |
+| 默认 | `8`（未设） | bundle 写死 `8`（包默认 16） |
+| 语义 | **同时在世的可续接子代理数** | **一支团队累计创建过的 teammate 数** |
+| 计数对象 | 存活名额（新建/冷恢复前预占，handle 释放后归还） | 不可变 roster 条目，**含创建失败的** |
+| 超限行为 | `ACTIVATION_LIMIT_REACHED`，**不排队** | `TeamError('Team member limit N reached', 'TEAM_MEMBER_LIMIT')` |
+
+- `subagent.maxDepth`：用户已设 **2**（包默认 1；深度 `0` 禁止继承该设置的委派，`1` 只允许
+  直接子代理，工具显式深度含 `provider-managed` 优先）。**不动** —— 2 已覆盖「再派一层」。
+- `agent-loop.maxParallelToolCalls` 默认 `10`。**不动** —— 没有「并行度不够」的证据；
+  改成 `1` 是全线变慢，改大是赌限流。
+- `subagent.maxActiveSubagents` 默认 `8`。**不动** —— README 原文说它只约束**可续接**的存活
+  子代理，**一次性运行与外部提供方不受此限制**，所以工作流扇出不会撞它；会撞它的场景是
+  「同时挂着 8 个以上常驻子代理」，那是资源问题，不是能力问题。
+
+**⑤ 真正动的一处：`agent-team.maxMembers: 8 → 16`**
+
+- **为什么**：`@deepseek-ai/dsh-experimental-agent-team-profile` 这个 bundle 用自己的 patch 层
+  插入 agent-team 行并写死 `maxMembers: 8`，而该包 README.zh.md 的默认值是 **16** ——
+  bundle 比包作者更保守。真正决定值不值得改的是名额语义：**每支团队累计、含创建失败的成员、
+  名字永不复用**（`lib/index.js:564`
+  `if (state.members.length >= this.maxMembers) throw new TeamError(\`Team member limit ${this.maxMembers} reached\`, "TEAM_MEMBER_LIMIT");`）。
+  所以 8 不是「同时最多 8 个在跑」，而是「这支团队**一辈子最多 8 个名字**」，而 roster 要挺过
+  崩溃与重启；长会话里反复换人就会先把这 8 个名字用完，撞上限时连一次失败重试都烧掉一个名字。
+  恢复包作者自己的 16 **只抬天花板**，不改任何默认行为（名额只在真的创建 teammate 时才消耗）。
+- **怎么落的**（六步环）：① 快照 `20261006-231214-T2-Agent-Teams-成员上限-8-16-改动前`；
+  ② 追加到现场 `cordis.patch.yml` 末尾（第 15 条，含一段写明理由的注释）；
+  ③ `node src/cli.mjs precheck` → **退出码 0、问题 0**，且它自己报出
+  「与上一次预检相比：0 新增 / 0 移除 / **1 修改** —— `~ 条目 agent-team` / `- maxMembers: 8` /
+  `+ maxMembers: 16`」，这是**唯一差异**的直接证据；
+  ④ 查组合结果确认另外四个字段（`maxTasks: 256` / `maxPendingMessagesPerMember: 64` /
+  `maxMessageBytes: 65536` / `disposalTimeoutMs: 5000`）**原样保留**；
+  ⑤ 声明文件 `patches/T2-agent-team-members.yml`；⑥ `baseline write` 重新固化。
+- **为什么五个字段全写**：patch 按 id **整体替换**该行的 `config`（不是深合并）。只写
+  `maxMembers` 会让另外四个退回插件代码默认值 —— 它们恰好也相等，但不能靠这种巧合。
+- **撤**：删掉现场那一条，或
+  `node src/cli.mjs snapshot restore 20261006-231214-T2-Agent-Teams-成员上限-8-16-改动前 --yes`；
+  同样需要重启才生效（profile 层没有热重载）。
+
+**教训（比结论重要）**
+
+1. 「调 X」这种待办，先把 X 展开成**有默认值、有类型、有超限行为**的旋钮表；没表的「调」是感觉。
+2. 一个 `[disabled]` 有三种完全不同的含义：**能力不存在** / **被部署故意关掉** / **顶层副本让位给
+   preset 副本**。分不清就会去修一个没坏的东西。
+3. 同一类限制可能有两道闸门（**累计名额** vs **并发存活**），升错那道等于什么都没做。
+4. 读中文包文档用 `asar cat` 落盘再读；`Get-Content -Raw` 的乱码是量具问题，不是内容问题。

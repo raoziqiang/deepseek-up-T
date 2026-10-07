@@ -1,0 +1,42 @@
+# ── deepseek-up-T · T2 能力扩展 ── Agent Teams 成员上限 8 → 16
+#
+# 状态：**已写进现场 `cordis.patch.yml`**（2026-10-07，第 15 条）。组合预检
+#       （`node src/cli.mjs precheck`）退出码 0、问题 0，与上一次预检相比只有一处差异
+#       `agent-team · maxMembers: 8 → 16`；快照
+#       `20261006-231214-T2-Agent-Teams-成员上限-8-16-改动前`。重启 DSH 后生效
+#       （profile 层没有热重载）。
+#
+# 为什么值得改：
+#   `@deepseek-ai/dsh-experimental-agent-team-profile` 这个 bundle 用自己的 patch 层
+#   插入了 agent-team 那一行，并写死 `config.maxMembers: 8`，而该包 README.zh.md 写的
+#   默认值是 **16** —— 也就是说 bundle 比包作者更保守。真正决定值不值得改的是名额语义：
+#   **每支团队累计、含创建失败的成员、名字永不复用**，
+#     lib/index.js:564
+#     if (state.members.length >= this.maxMembers) throw new TeamError(`Team member limit ${this.maxMembers} reached`, "TEAM_MEMBER_LIMIT");
+#   所以 8 不是「同时最多 8 个在跑」，而是「这支团队一辈子最多 8 个名字」。roster 要挺过
+#   崩溃与重启（README「持久性模型」），长会话里反复换人就会先把这 8 个名字用完，而且
+#   撞上限时连一次失败重试都会烧掉一个名字。
+#
+# 不改变什么（这一段比上面更重要）：
+#   · 同时**存活**的可续接子代理是另一道闸门，由 `subagent.maxActiveSubagents`（默认 8）
+#     限制；本条不动并发，也不改任何默认行为 —— 名额只有在真的创建 teammate 时才消耗。
+#   · 四个 `tool-subagent*` 顶层行仍然 `disabled: true`：那是**同一个 bundle 故意的**
+#     （patch 注释原文「keep direct delegation and coordination on the Team tools」），
+#     不是缺失能力。看到 dump 里一长串 `[disabled]` 不要当成待修的漏洞。
+#
+# 为什么五个字段全写：
+#   patch 按 id 整体替换该行的 `config`（不是深合并）。只写 `maxMembers` 会让另外四个
+#   字段退回插件代码默认值 —— 它们恰好也是 256 / 64 / 65536 / 5000，但不能靠这种巧合，
+#   否则哪天包作者改了默认值，这个文件会静默跟着变。
+#
+# 怎么撤：删掉现场 `cordis.patch.yml` 里这一条，或
+#         node src/cli.mjs snapshot restore 20261006-231214-T2-Agent-Teams-成员上限-8-16-改动前 --yes
+
+- id: agent-team
+  name: "@deepseek-ai/dsh-experimental-agent-team"
+  config:
+    maxMembers: 16
+    maxTasks: 256
+    maxPendingMessagesPerMember: 64
+    maxMessageBytes: 65536
+    disposalTimeoutMs: 5000
