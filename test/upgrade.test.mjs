@@ -94,7 +94,7 @@ check(
   inspectDecl({ items: [{ path: 'lib/main.js', action: 'patch' }] }, { pathSet: new Set(), pristine: false }).state === 'unknown',
 );
 
-// ── 模拟一次升级：临时改基线版本号 ──
+// ── 模拟一次升级：使用未打补丁的原版归档模拟被升级覆盖的环境 ──
 console.log('\n── 模拟升级（临时篡改基线，跑完还原）──');
 const baselineFile = path.join(PROJECT_ROOT, 'state', 'baseline.json');
 const original = fs.readFileSync(baselineFile);
@@ -103,10 +103,21 @@ const payload = JSON.parse(original.toString('utf8'));
 payload.dshVersion = '44.9.9-fake-upgrade';
 fs.writeFileSync(baselineFile, `${JSON.stringify(payload, null, 2)}\n`);
 
+const simDir = path.join(PROJECT_ROOT, 'state', 'cmp', 'sim-upgrade');
+const simRes = path.join(simDir, 'resources');
+fs.mkdirSync(simRes, { recursive: true });
+const simAsar = path.join(simRes, 'app.asar');
+try { fs.unlinkSync(simAsar); } catch {}
+if (fs.existsSync(P.asarBackup)) {
+  fs.linkSync(P.asarBackup, simAsar);
+}
+fs.writeFileSync(path.join(simDir, 'version'), '44.0.0\n');
+const simEnv = { ...process.env, DSH_UP_T_INSTALL_DIR: simDir };
+
 let run;
 try {
   run = spawnSync(process.execPath, ['src/cli.mjs', 'upgrade'], {
-    cwd: PROJECT_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
+    cwd: PROJECT_ROOT, env: simEnv, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
   });
 } finally {
   fs.writeFileSync(baselineFile, original);
@@ -125,7 +136,7 @@ check('有要重打的事 ⇒ 退出码 1', run.status === 1, `实际 ${run.stat
 // ── `--no-hash`：跳过 sha256 时必须诚实降级，不能偷偷算完再报「逐字节相同」 ──
 console.log('\n── --no-hash 语义 ──');
 const nh = spawnSync(process.execPath, ['src/cli.mjs', 'upgrade', '--no-hash', '--json'], {
-  cwd: PROJECT_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
+  cwd: PROJECT_ROOT, env: simEnv, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
 });
 const nhJson = JSON.parse(nh.stdout);
 check('--no-hash 时如实标注按大小比较', nhJson.changes.asar.basis === 'size', nhJson.changes.asar.basis);
@@ -149,9 +160,26 @@ const stagedFile = path.join(PROJECT_ROOT, 'state', 'staged', 'app.asar');
 const stageBefore = fs.existsSync(stagedFile) ? fs.statSync(stagedFile) : null;
 const asarMtimeBefore = fs.statSync(P.asar).mtimeMs;
 
-const stageJson = spawnSync(process.execPath, ['src/cli.mjs', 'upgrade', '--stage', '--json', '--no-hash'], {
-  cwd: PROJECT_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
-});
+// 模拟状态：在未落盘/升级还原的基线下跑 --stage
+const stageBaseline = JSON.parse(original.toString('utf8'));
+stageBaseline.facts.asarBytes = 121348951;
+stageBaseline.facts.asarHash = '983ca71114e6dfd353fc79af5a1f9481a250ee64c2a3c757673029b811b23bc2';
+fs.writeFileSync(baselineFile, `${JSON.stringify(stageBaseline, null, 2)}\n`);
+
+let stageJson;
+let stageHuman;
+try {
+  stageJson = spawnSync(process.execPath, ['src/cli.mjs', 'upgrade', '--stage', '--json', '--no-hash'], {
+    cwd: PROJECT_ROOT, env: simEnv, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
+  });
+  stageHuman = spawnSync(process.execPath, ['src/cli.mjs', 'upgrade', '--stage', '--no-hash'], {
+    cwd: PROJECT_ROOT, env: simEnv, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
+  });
+} finally {
+  fs.writeFileSync(baselineFile, original);
+  try { fs.rmSync(simDir, { recursive: true, force: true }); } catch {}
+}
+
 let stageParsed = null;
 try { stageParsed = JSON.parse(stageJson.stdout); } catch { /* stageParsed 保持 null */ }
 check('--stage --json 的 stdout 仍是合法 JSON（构建输出被捕获而不是继承）', stageParsed !== null);
@@ -166,9 +194,6 @@ check('--stage 之后暂存包存在且变新了', fs.existsSync(stagedFile) && 
 check('--stage 只写 state/，安装目录的 mtime 一动没动', fs.statSync(P.asar).mtimeMs === asarMtimeBefore);
 check('--stage 退出码 0（构建成功时不该拖累退出码）', stageJson.status === 0, `实际 ${stageJson.status}`);
 
-const stageHuman = spawnSync(process.execPath, ['src/cli.mjs', 'upgrade', '--stage', '--no-hash'], {
-  cwd: PROJECT_ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
-});
 const stageHumanOut = stageHuman.stdout ?? '';
 check('人类可读输出里说明已构建到暂存包', stageHumanOut.includes('已构建到 state/staged/app.asar'));
 check('人类可读输出里仍把「落盘」留给用户，并给出两条命令', stageHumanOut.includes('完全退出 Harness') && stageHumanOut.includes('baseline write'));

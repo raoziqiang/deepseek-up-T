@@ -41,7 +41,8 @@ function toolPath(value) {
 }
 
 const declFile = path.resolve(arg('--decl', path.join(PROJECT_ROOT, 'patches', 'T1-whale-splash.yml')));
-const from = path.resolve(arg('--from', P.asar));
+const defaultFrom = fs.existsSync(P.asarBackup) ? P.asarBackup : P.asar;
+const from = path.resolve(arg('--from', defaultFrom));
 const out = path.resolve(arg('--out', STAGED_ASAR));
 
 if (!fs.existsSync(from)) fail(`原版归档不存在：${from}`);
