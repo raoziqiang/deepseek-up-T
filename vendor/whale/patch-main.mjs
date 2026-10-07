@@ -276,11 +276,29 @@ const installCharmHandlers = () => {
 		charmDragOrigin = void 0;
 		return true;
 	});
+	ipcMain.handle(CHARM_IPC.state, async (event) => {
+		assertDesktopSender(event, ["app", "platform"]);
+		return readCharmState().enabled;
+	});
 	ipcMain.handle(CHARM_IPC.action, async (event, action) => {
+		if (action === "enable") {
+			assertDesktopSender(event, ["app", "platform"]);
+			await setCharmEnabled(true);
+			return true;
+		}
+		if (action === "disable") {
+			assertDesktopSender(event, ["app", "platform"]);
+			await setCharmEnabled(false);
+			return false;
+		}
 		assertCharm(event);
 		if (action === "close") {
 			await setCharmEnabled(false);
-			mainWindow?.webContents.send(CHARM_IPC.changed, false);
+			for (const win of BrowserWindow.getAllWindows()) {
+				if (!win.isDestroyed() && win !== charmWindow) {
+					win.webContents.send(CHARM_IPC.changed, false);
+				}
+			}
 			return true;
 		}
 		if (action === "reset") {
@@ -297,7 +315,7 @@ const installCharmHandlers = () => {
 			await replaySplash();
 			return true;
 		}
-		return false;
+		throw new Error("desktop charm: unknown settings action");
 	});
 };
 //#endregion
@@ -378,24 +396,7 @@ replaceOnce(
 replaceOnce(
   'settings IPC',
   '\t\tipcMain.handle(DESKTOP_IPC.windowsMenu, (event, name, x, y) => {\n\t\t\tassertDesktopSender(event, ["app"]);',
-  `\t\tipcMain.handle(CHARM_IPC.state, async (event) => {
-			assertDesktopSender(event, ["app", "platform"]);
-			installCharmHandlers();
-			return readCharmState().enabled;
-		});
-		ipcMain.handle(CHARM_IPC.action, async (event, action) => {
-			assertDesktopSender(event, ["app", "platform"]);
-			installCharmHandlers();
-			if (action === "enable") {
-				await setCharmEnabled(true);
-				return true;
-			}
-			if (action === "disable") {
-				await setCharmEnabled(false);
-				return false;
-			}
-			throw new Error("desktop charm: unknown settings action");
-		});
+  `\t\tinstallCharmHandlers();
 \t\tipcMain.handle(DESKTOP_IPC.windowsMenu, (event, name, x, y) => {
 \t\t\tassertDesktopSender(event, ["app"]);`,
 )
