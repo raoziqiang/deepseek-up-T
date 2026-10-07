@@ -1,5 +1,5 @@
 {
-  "capturedAt": "2026-10-06T15:46:20.173Z",
+  "capturedAt": "2026-10-07T04:41:07.952Z",
   "project": "deepseek-up-T",
   "home": "C:\\Users\\Z1848\\.dsh",
   "profile": "desktop",
@@ -23,9 +23,9 @@
     "dsh-up-t"
   ],
   "facts": {
-    "asarBytes": 121348951,
-    "asarHash": "983ca71114e6dfd353fc79af5a1f9481a250ee64c2a3c757673029b811b23bc2",
-    "asarFiles": 12967,
+    "asarBytes": 121421984,
+    "asarHash": "2c6d8b4bf4716498456ca5c6aa18c7540392c7d73208d1871e86674356bdad01",
+    "asarFiles": 12976,
     "asarPackages": 529,
     "asarDshPackages": 503,
     "patchEntries": 14
@@ -34,7 +34,7 @@
     "error": 0,
     "warn": 2,
     "info": 6,
-    "total": 20
+    "total": 21
   },
   "checks": [
     {
@@ -115,25 +115,32 @@
       "detail": "全部有条目 id"
     },
     {
+      "group": "运行时",
+      "id": "T4 插件 dsh-up-t 心跳",
+      "level": "warn",
+      "ok": true,
+      "detail": "dsh-up-t 0.1.0 · 2026-10-07T04:40:49.307Z（18 秒前） · pid 36028 · 服务已就绪（路由 4 条） · 渲染层已握手（bundle+capsule）"
+    },
+    {
       "group": "安装包",
       "id": "app.asar 头可解析",
       "level": "error",
       "ok": true,
-      "detail": "头 3.2MB，条目 12967 文件 / 2609 目录"
+      "detail": "头 3.2MB，条目 12976 文件 / 2609 目录"
     },
     {
       "group": "安装包",
       "id": "app.asar 大小",
       "level": "info",
       "ok": true,
-      "detail": "115.7MB（121348951 字节）  sha256:983ca71114e6dfd3"
+      "detail": "115.8MB（121421984 字节）  sha256:2c6d8b4bf4716498"
     },
     {
       "group": "安装包",
       "id": "原版备份可比对",
       "level": "info",
       "ok": true,
-      "detail": "内容与当前 app.asar 完全一致"
+      "detail": "内容与当前 app.asar 不同"
     },
     {
       "group": "安装包",
