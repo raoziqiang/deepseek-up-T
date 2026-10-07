@@ -80,7 +80,8 @@ node vendor/whale/install.mjs --yes --to state/cmp/rehearsal-app.asar
 然后对临时目标跑**同一段**声明核对。两条规则：`--to` 落在安装目录里一律拒绝（那会让人以为落盘了，
 其实 Harness 读的仍是在用那份）；`--to` 指向在用 `app.asar` 时按真落盘处理，不许借它绕过 Harness 守卫。
 双击版：`install-whale.cmd /dry`。这条路径的回归由 `test/install.test.mjs` 守着
-（56 条断言，Harness 在跑时；它没在跑时是 57 条 —— 真回滚那一段多一条）。
+（60 条断言，Harness 在跑时；它没在跑时是 57 条 + 1 SKIP —— 真回滚那一段多一条，
+而「两条真路径」那一段会改成跳过，因为那时它们会真的写安装包）。
 
 **回滚也能先演练**（2026-10-07 起，同样不用退出 Harness）：
 
@@ -149,9 +150,10 @@ node vendor/asar/verify.mjs <原版> <改动后> --expect 13
 
 落盘链路本身的自检（构建确定性、`--to` 演练、三条拒绝路径、全程在用安装包 sha256 未变）**外加
 唯一一条回头路**（`--rollback` 的演练、真回滚跑在一个临时「安装目录」里、守卫拦下、无备份时的报错次序）：
-`node test/install.test.mjs` —— 56 条断言（Harness 在跑时）/ 57 条（没在跑时），约 6 秒，不碰安装目录。
+`node test/install.test.mjs` —— 60 条断言（Harness 在跑时）/ 57 条 + 1 SKIP（没在跑时），约 8 秒，不碰安装目录。
 真回滚那一节靠 `DSH_UP_T_INSTALL_DIR` 把整个安装目录换成一个临时目录，所以跑的是同一段真回滚代码。
-最后一节**真的执行 `install-whale.cmd` 的两条演练路径**（`/dry` 与 `/rollback /dry`），
+最后一节**真的执行 `install-whale.cmd`**：四条演练路径断言（`/dry`、`/rollback /dry`，两种标志顺序），
+Harness 在跑时再加四条**真路径的守卫分支**（`/test` 与 `/test /rollback` 必须退出码 2 并让人先托盘 Quit），
 并断言这个 `.cmd` 里没有非 ASCII 字节。
 
 构建产物**内容**的自检（引用完整性校验，**字节核对查不出来的那一类**）：

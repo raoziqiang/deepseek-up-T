@@ -1025,8 +1025,8 @@ bbox aspect 1.59、`tail columns 2-run = 53`、左/右质量 59.8% / 40.2%）。
   安装目录 ⇒ 测试把整个安装目录换成一个临时目录（占位文件当 `app.asar`、把**真备份硬链**过去当
   `app.asar.whale-backup`），然后跑**同一段真回滚代码**。守卫按真实进程表判断，所以两条路都有断言：
   Harness 在跑 ⇒ 断言它被拦下、占位文件一个字节没动、提示里有 pid；Harness 没在跑 ⇒ 断言
-  `app.asar` 真的变成了备份内容。**跑的是哪一条会打印出来**（56 条 / 57 条的区别就在这），
-  而不是假装两条都测了。
+  `app.asar` 真的变成了备份内容。**跑的是哪一条会打印出来**（Harness 在跑时 60 条、
+  没在跑时 57 条 + 1 SKIP，区别就在这），而不是假装两条都测了。
 - **顺手钉住的次序**：没有备份时先报「没有备份可回滚」，**不是**先让用户去退出 Harness ——
   回头路本身就不存在的时候，不必惊动任何人。（这条在 Harness 开着时才有区分度：先过备份检查
   就会得到备份的报错，先过守卫就会得到守卫的报错。）
@@ -1041,10 +1041,15 @@ bbox aspect 1.59、`tail columns 2-run = 53`、左/右质量 59.8% / 40.2%）。
   modified」、演练时没有 `[STOP]`。子进程的 `PATH` 前面补上 `path.dirname(process.execPath)` ——
   测试跑在哪个 node 上都成立。另外三条结构断言钉住它自己的约束：**全文只能有 ASCII**（cmd.exe 按当前
   代码页解析，中文是已知的坏法）、真回滚**不许**带 `--yes`、真落盘**必须**带 `--yes`。
+- **⑥ 两条「真路径」的守卫分支也被跑到了**（Harness 在跑时）：`install-whale.cmd /test` 与
+  `/test /rollback` 都必须**退出码 2**、打印 `[STOP]`、让人先去托盘 Quit，并各自给出对应的演练命令
+  （落盘那条给 `/dry`，回滚那条给 `/rollback /dry`）。这一段是整个测试里唯一一处「条件决定跑不跑」的
+  地方：Harness 没在跑时它会真的写安装包，所以那时改成一条 SKIP 并说明原因 ——
+  **跳过要说理由，不能让「没测」看起来像「测过了」**。
 - **教训**：**「一年才跑几次」不是不测它的理由，而是不测它就更不可能发现的理由** ——
   尤其当它恰好是**出事时才会跑**的那一条。落盘当初加上 `--to` 就是因为这个道理，
   回滚没跟上只是因为它更少被想起来。
-- **怎么验**：`node test/install.test.mjs` → 56/56（Harness 在跑时）；`node test/run.mjs` → **11/11 套**。
+- **怎么验**：`node test/install.test.mjs` → 60/60（Harness 在跑时）；`node test/run.mjs` → **11/11 套**。
   手工：`node vendor\whale\install.mjs --rollback --to state\cmp\rb-rehearsal.asar` → exit 0、
   产物 sha256 `983ca71114e6dfd3…` 与备份相同、在用安装包未变；
   `DSH_UP_T_INSTALL_DIR=<临时目录>` 下真跑 `--rollback` → 被判成「不能从备份回滚 app.asar」，

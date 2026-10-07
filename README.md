@@ -123,10 +123,10 @@ deepseek-up-T/
     离线单测覆盖到这些形态；候选预检与 `doctor` 全过），**只差重启 DSH 后确认界面里真的出现了**。
     `dsht accept` 会在重启后把这件事一次问完。
   - ✅ 落盘链路可**离线演练**：`install.mjs --to <临时目标>`（或双击 `install-whale.cmd /dry`）在不退出
-    Harness、不动在用安装包的前提下跑同一段声明核对；`test/install.test.mjs` 56 条断言守着它。
+    Harness、不动在用安装包的前提下跑同一段声明核对；`test/install.test.mjs` 60 条断言守着它。
   - ✅ **唯一一条回头路也能先演练**：`install-whale.cmd /rollback /dry`（不动在用安装包）→
     确认备份好使之后再 `install-whale.cmd /rollback`（过同一个 Harness 守卫）。同一套测试把
-    `.cmd` 的两条演练路径**真的执行**一遍，并断言它全文只有 ASCII。
+    `.cmd` 的两条演练路径**真的执行**一遍，Harness 在跑时再断言两条真路径被守卫拦下，并断言它全文只有 ASCII。
 
 > ⚠️ `cordis.patch.yml` 与 profile `package.json` 的改动**不会热重载**，必须重启 DSH 才生效；
 > `app.asar` 的改动必须**连托盘一起退出 Harness** 才能落盘。重启后请按

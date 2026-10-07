@@ -248,6 +248,23 @@ check('一键脚本回滚演练说清「在用安装包没动」', /live app\.as
 check('一键脚本回滚演练给出去掉 /dry 的真回滚命令',
   /install-whale\.cmd \/rollback/.test(cmdRbDry.stdout ?? ''));
 
+// 两条「真路径」只有在 Harness 开着时才能测 —— 那时脚本必须拒绝，一个字节都不该写。
+// 反过来（Harness 没在跑）这条命令会真的落盘，所以不许无条件跑：这里是这套测试里
+// 唯一一处「条件决定要不要执行」的地方，跳过时必须说清为什么。
+if (procs.length > 0) {
+  const cmdReal = runCmd(['/test']);
+  check('一键脚本真落盘在 Harness 在跑时被拦下（退出码 2）', cmdReal.status === 2, `实际 ${cmdReal.status}`);
+  check('拦下的提示让人先去托盘 Quit，并给出不用退出的那条演练命令',
+    /\[STOP\]/.test(cmdReal.stdout ?? '') && /tray icon/.test(cmdReal.stdout ?? '')
+    && /install-whale\.cmd \/dry/.test(cmdReal.stdout ?? ''));
+  const cmdRealRb = runCmd(['/test', '/rollback']);
+  check('一键脚本真回滚同样被拦下（退出码 2）', cmdRealRb.status === 2, `实际 ${cmdRealRb.status}`);
+  check('回滚被拦下时提示的是 /rollback /dry（不是落盘那条演练）',
+    /\[STOP\]/.test(cmdRealRb.stdout ?? '') && /install-whale\.cmd \/rollback \/dry/.test(cmdRealRb.stdout ?? ''));
+} else {
+  skip('一键脚本两条真路径的守卫分支', 'Harness 没在跑：这两条会真的写安装包，不能在这里跑');
+}
+
 // ── 5. 全程之后：在用安装包一个字节都没变 ──
 console.log('\n── 在用安装包 ──');
 check('全程结束后在用安装包 sha256 未变', (await sha256(P.asar)) === asarHashBefore);
