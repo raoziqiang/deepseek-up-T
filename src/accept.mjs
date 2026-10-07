@@ -19,6 +19,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { resolvePaths } from './paths.mjs';
 import { runDoctor } from './doctor.mjs';
 import { runUpgradeCheck } from './upgrade.mjs';
+import { stagedFacts } from './staged.mjs';
 
 const DEFAULT_URL = 'http://127.0.0.1:19387';
 
@@ -82,7 +83,7 @@ function declItem(r, { file, name, fixMissing, layer }) {
 /**
  * 验收清单。全部只读；`hash: false` 时逐字节结论退化为「无法判断」（并如实标 SKIP）。
  */
-export async function runAccept({ hash = true, url = process.env.DSH_WEB_URL || DEFAULT_URL, timeoutMs = 4000, clientBundle = null } = {}) {
+export async function runAccept({ hash = true, url = process.env.DSH_WEB_URL || DEFAULT_URL, timeoutMs = 4000, clientBundle = null, staged = null } = {}) {
   const P = resolvePaths();
   const r = await runUpgradeCheck({ hash });
   const items = [];
@@ -110,6 +111,34 @@ export async function runAccept({ hash = true, url = process.env.DSH_WEB_URL || 
     items.push(item('asar-modified', 'app.asar 已被改造', 'skip',
       hash ? '无法判断（缺少原版备份 app.asar.whale-backup）' : '无法判断（--no-hash 跳过了逐字节比对）',
       hash ? null : '去掉 --no-hash 再跑一次可以逐字节确认。'));
+  }
+
+  // ── 你验的这一份，是不是你构建的那一份 ────────────────────────
+  // accept 问的是「改完重启之后到底成没成」。如果磁盘上还有一份**比在用的更新**的暂存包，
+  // 那这次重启装的就不是你最后构建的那一份 —— 上面那些 L3 项全绿也没用，它们判的是
+  // 「声明有没有落」，不是「落的是不是最新的」。这一条与 doctor / upgrade 的取向**刻意不同**：
+  // 那两处把 `pending` 当 info（它是常态，落盘要等人退出 Harness），这里是验收，有未落盘的
+  // 产物就意味着「验收对象不对」，所以它是 fail。真落盘会把暂存包移走（`install.mjs` 用
+  // rename，退回原地复制时也会删），所以落过盘之后这一项不会一直红。
+  const sf = staged ?? stagedFacts(P);
+  if (sf.status === 'pending') {
+    items.push(item('staged-fresh', '这次验收的是最新构建', 'fail',
+      `暂存包比在用安装包新（大 ${sf.deltaBytes} 字节）：上面那些项判的是「声明有没有落」，判不了「落的是不是最新的一份」`,
+      '完全退出 Harness（托盘 → Quit）→ node vendor/whale/install.mjs --yes（或双击 install-whale.cmd）→ 重启。落盘会把暂存包移走，这一项就不再出现。'));
+  } else if (sf.status === 'behind') {
+    items.push(item('staged-fresh', '这次验收的是最新构建', 'pass',
+      '暂存包比在用的旧 ⇒ 没有「构建了但没落盘」的东西（但那份旧暂存包别拿去落盘，先重新构建）'));
+  } else if (sf.status === 'same-size') {
+    items.push(item('staged-fresh', '这次验收的是最新构建', 'pass',
+      '暂存包与在用安装包大小相同（大小相同不等于逐字节相同；时间戳分不出谁更新时才落到这一态）'));
+  } else if (sf.status === 'differs') {
+    items.push(item('staged-fresh', '这次验收的是最新构建', 'skip',
+      `暂存包与在用安装包大小不同，但没拿到可比的时间戳，判不出谁更新：${sf.why}`,
+      '跑 node src/cli.mjs doctor 看「暂存包」那一条，它会给出同样的事实。'));
+  } else {
+    items.push(item('staged-fresh', '这次验收的是最新构建', 'skip',
+      sf.why ?? '没拿到暂存产物的信息',
+      null));
   }
 
   // ── L0：profile 层（升级幸存）──────────────────────────────────
