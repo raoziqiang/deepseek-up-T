@@ -92,7 +92,7 @@
 2. **缓存与压缩参数**：`spill-policy.maxInlineTokens`、`tool-result-pruner.thresholdChars`、`compaction-basic`。✅ 已核实、**无需改动**。缓存侧已结案（命中率 98.3%、压缩净 +92.35M）。阈值侧：`spill-policy` 是**仅追加**的（不破坏 KV Cache），完整结果落文件可 `read`/`grep` 读回；`tool-result-pruner` **只在压缩压力下运行**、原始事件留在仅追加日志里可回放（无损），但**从第一个变化的 token 起**会让 KV Cache 失效。⇒ 两处都**维持默认**：调高 `maxInlineTokens` 只是让更多内容内联、反而加重压力；调低 pruner 阈值是用「省一次摘要」换「破坏缓存」。**没有实测病灶就不开刀**；将来若真的要动，先动 `maxInlineTokens` 并用 `acp_cache` 复测命中率。详见 `tracks/T3-efficiency/README.md`。
 3. **会话标题质量**：`session-title-llm` 原来只有 `targetWords: 5` / `targetCjkCharacters: 10` —— 10 个汉字的标题无法区分同主题的多次会话，是纯读数损失。✅ 2026-10-06 已调为 `8` / `16` / `maxOutputTokens: 96`（`maxInputBytes` 与 `timeoutMs` 刻意不动），现场 `cordis.patch.yml` 第 13 条，声明副本 `patches/T3-session-title.yml`；**待重启验收**。
 4. **交互习惯**：`ui-conversation.busyEnter: steer` 已设。✅ 斜杠命令与快捷键已梳理（7 个斜杠命令；快捷键由 `@deepseek-ai/dsh-client-shortcuts` 提供、**按设备可重绑**，`Ctrl+/` 开速查面板，桌面端存 Electron `userData/keybindings.json`）。**不加配置**：默认值已覆盖主要动作，改默认反而破坏既有肌肉记忆。见 `tracks/T3-efficiency/README.md`。
-5. **记忆**：`@furongjun1999/dsh-memory` 与 `billion-context` 已在，梳理它们的写入/召回策略。
+5. **记忆**：`@furongjun1999/dsh-memory` 与 `billion-context` 已在，梳理它们的写入/召回策略。✅ 三个插件机制正交（压缩 / 长期记忆 / 只读观测），**都不动**；2026-10-07 把灵枢 **33 个配置键逐项读完**（两个独立来源互相印证），结论仍是全部维持默认，并实测自动记忆确实在写（`_audit.jsonl` 有 `actor=dsh-memory` / `clearance=internal` 记录）。顺带查出两件原本不知道的事：写入凭据在**包外**密钥环 `~/.mdcg/token`（首启自动签发 ⇒ 升级/重装不会带走），以及**热重载会让灵枢静默降级**（`apply failed: cannot create effect on inactive context` ⇒ 改完必须重启 Harness）。详见 `tracks/T3-efficiency/README.md`。
 
 **验收**：给一个具体任务，改前改后对比耗时与 token 消耗（`acp_cache` / `dsh-token-meter` 可读）。
 
@@ -220,7 +220,7 @@
 | **M2** | T5 `../tools/` 归拢进 `vendor/`（构建链闭环）+ T1 鲸鱼动画落盘 | ✅ 2026-10-06 晚全部完成：构建链闭环 + 落盘（12 项自动判定全过；观感那一眼归你） |
 | **M3** | T2 新增 Provider + T4 自建 Web 插件样板 | 🚧 T4 样板**已落地并重启验收**（L1 插件 + 设置页 + 操作按钮 + 桌面挂件开关；10:48 重启后操作通道与两条握手通道实测在线）；T2 新增 Provider 卡在**需要用户给出目标**（baseURL + key，或 MCP 服务器） |
 | **M4** | 升级重打自动化 | 🚧 检测 + **半自动重打**（`upgrade --stage`）+ **离线演练落盘**（`--to`）已交付；自动落盘**不做**（要人挑时间，见 `docs/03-workflow.md`） |
-| **M5** | T2/T3 落地批次：启用 `tool-ralph`、会话标题更长、上下文阈值核实、关闭产品埋点、写项目 skill | ✅ **已全部落盘并重启验收**（ralph / 标题 / 埋点开关 / skill；10:48 重启后 `dsht upgrade` 报 4 份 L0 声明全部 OK）；阈值核实结论是**维持不动**；灵枢记忆策略已梳理（三个插件机制正交，都不动） |
+| **M5** | T2/T3 落地批次：启用 `tool-ralph`、会话标题更长、上下文阈值核实、关闭产品埋点、写项目 skill | ✅ **已全部落盘并重启验收**（ralph / 标题 / 埋点开关 / skill；10:48 重启后 `dsht upgrade` 报 4 份 L0 声明全部 OK）；阈值核实结论是**维持不动**；灵枢记忆策略已梳理（三个插件机制正交，都不动），2026-10-07 补完 33 个配置键逐项体检 + 自动记忆实测 |
 
 ### M4 的验收标准
 

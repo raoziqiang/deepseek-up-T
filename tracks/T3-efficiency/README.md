@@ -12,7 +12,7 @@
 | 4 | 会话标题质量 | `session-title-llm` | ✅ 已调：`targetWords: 8` / `targetCjkCharacters: 16` / `maxOutputTokens: 96`（原 5 / 10 / 64），待重启验收 |
 | 5 | 交互习惯 | `ui-conversation.busyEnter` | 已设 `steer` |
 | 6 | 快捷键 / 斜杠命令 | `dsh-client-shortcuts`、`dsh-commands` | ✅ 已梳理：7 个斜杠命令；快捷键**可重绑**（`Ctrl+/` 开速查），见记录 |
-| 7 | 记忆策略 | `@furongjun1999/dsh-memory`（灵枢）、`billion-context`、`dsh-context` | ✅ 已梳理：三者**机制正交**（压缩 / 长期记忆 / 只读观测），**无需改配置**，见记录 |
+| 7 | 记忆策略 | `@furongjun1999/dsh-memory`（灵枢）、`billion-context`、`dsh-context` | ✅ 已梳理：三者**机制正交**（压缩 / 长期记忆 / 只读观测）；灵枢 **33 个配置键已逐项体检、全部维持默认**（自动记忆实测在写），见记录 |
 | 8 | 缓存经济学 | `acp_cache` | ✅ 已量：命中率 **98.3%**，压缩净 **+92.35M tok**；无问题可修（见记录） |
 
 ## 为什么先做第 1 项
@@ -40,6 +40,8 @@
 - [x] 梳理斜杠命令与快捷键 —— 2026-10-06 完成，见下方记录
 - [x] **让会话标题更长、更能区分** —— 2026-10-06 完成，见下方记录
 - [x] 梳理记忆插件的写入与召回 —— 2026-10-06 完成：三个插件机制正交，**结论是都不动**，见下方记录
+- [x] 逐项读完灵枢的配置清单并实测自动记忆 —— 2026-10-07 完成：33 个键全部维持默认，自动记忆确实在写，见下方记录
+- [ ] 重启 DSH 后确认灵枢仍以可写身份启动（不是只读 `guest`）—— 落盘/重启后看一眼是否有 `写入凭据不可用` 告警
 
 ## 验收
 
@@ -359,8 +361,107 @@
 - 「压缩太频繁/太贵」⇒ 看 `acp_cache` 的 `FOLD ECONOMICS`，再动 `nudgeGrowthTokens`。
 - 动任何一项之前先读 billion-context 的 `GRAND LEDGER`，不要凭感觉调。
 
-**还没验的（如实标注，没有猜测补齐）**：灵枢的 30+ 项完整配置清单只在其自带的
-「README 详细版」（`docs/mdcg/README详细版_v0.4.10.md`）里，本次**未读**；
-`@furongjun1999/dsh-memory/dsh/cordis.patch.yml` 与 `dsh-context/package.json` 内容**未读**。
+**还没验的（如实标注，没有猜测补齐）**：`@furongjun1999/dsh-memory` 的 30+ 项配置清单与
+`…/dsh/cordis.patch.yml` 已于 2026-10-07 逐项读完（见下一节）；
+`dsh-context/package.json` 内容**仍未读**（本次只读了它的 README 级说明）。
+
+### 2026-10-07 · 第 7 项补完：灵枢 33 个配置键逐项体检 + 自动记忆实测
+
+**起因**：上一节把「三个插件机制正交、都不动」的结论立住了，但留了一句「灵枢的 30+ 项完整配置清单
+本次未读」。**没读过的配置清单里藏着不知道的开关** —— 结论虽然是对的，证据链却缺一环。
+
+**① 清单位置（两个独立来源互相印证，无出入）**
+
+- 真源 A（代码）：`lib/index.js:88-153` 的 `export const Config = z.object({...})`，每个键带 `.default(...)`。
+- 真源 B（文档）：随包详细版 `docs/mdcg/README详细版_v0.4.10.md:650` 的「## 配置项」30 行表格。
+- 规模：**12 个顶层叶子 + `memory` 7 + `mutual` 2 + `mdcg` 5 + `capability` 3 = 29 个可设叶子，
+  加 4 个组键共 33 个键**（这就是「30+ 项」的实际构成）。
+- 包位置与版本：`C:\Users\Z1848\.dsh\profiles\desktop\node_modules\@furongjun1999\dsh-memory`，**v0.7.1**。
+  注意它在 **`profiles\desktop\node_modules`**（不是 `profiles\node_modules`），且 scope 名里没有
+  「lingshu / memory」字样 —— **按名字搜索会漏掉它**，是按 `dsh.profile.bundles` 第 6 项才定位到的。
+
+**② 33 个键的默认值（逐项过，实际全部处于默认）**
+
+| 组 | 键与默认值 |
+| --- | --- |
+| 进程 | `serverName 'lingshu'`；`python` = `defaultPython()`（Windows 下 `python`，`MDCG_PYTHON` 可覆盖）；`moduleArgs ['-m','md_cg.mcp_server']` |
+| 数据 | `dbPath 'data/lingshu.db'`（⚠️ 遗留键，**不存记忆**，只参与角色数据目录推导） |
+| 身份 | `identity '灵枢'`；`env {}`；`charter 'v2.0-published'` |
+| 工具 | `tools 'core'`（只暴露 2 个：`lingshu_cg` 34 op + `lingshu_stg` 4 op） |
+| 超时 | `toolCallTimeoutMs 60_000`；`maxRetryDelayMs 30_000` |
+| 容错 | `failOnStartupError false`；`roleplayEntryButton false` |
+| `memory` | `userMessage true` / `assistantMessage false` / `toolResult false` / `importance 0.6` / `autoRecall true` / `autoRecallLimit 4`（范围 1~10）/ `desensitize true` |
+| `mutual` | `enabled false` / `heartbeatMs 600000` |
+| `mdcg` | `enabled true` / `root ''` / `actor 'dsh-memory'` / `tenant 'default'` / `clearance 'private'` |
+| `capability` | `enabled false` / `python ''` / `args []` |
+
+**「全部处于默认值」的证据（不是看文件没写就下结论）**：用户的
+`%USERPROFILE%\.dsh\profiles\desktop\cordis.patch.yml`（220 行、14 个条目）里**没有** dsh-memory 条目；
+插件自带的 `dsh\cordis.patch.yml`（**85 B**）只有 `- insert:` + `id` + `name`，**没有 `config`**
+⇒ 每个键都落在代码默认值上。
+
+**③ 自动记忆实测：确实在写**
+
+- `_audit.jsonl` 最后 4 条：`{"op":"add","actor":"dsh-memory","session":"sess_4d2f124ce18d|sess_db460183f478",
+  "layer":"contextual","role":"user","tenant":"default","clearance":"internal","unit":"record"}`。
+- `contextual/` 共 **9 个节点**，最新 `mem_1791351594429_0f51fc.md`（10-06 22:39）；其余 8 层
+  （anchor / structural / knowledge / goals / self / hippocampus / unresolved / rejected）**空**
+  —— 自动记忆固定落 `contextual`，别的层只有显式 `cg(op=write)` 才写。
+- `_forgetting.jsonl` 最新三条 verdict 全是 `ACCEPT`，理由原文 `重要度 0.60≥0.3`，importance `{"score":0.6,"from":"hint"}`。
+- `_writelimit.json` 的 `sigs` **按用户消息文本去重**（每条签名带原话与节点 id）⇒ 同一句话重复说不会重复入库。
+- 写入不受「六要素闸门」限制：那条闸门（`policy.json` 的 `required` / `required_kinds: ["text"]`）只针对
+  `text` 类显式写入；自动记忆走 `mdcg_remember(gated=true)`，落层 `contextual`。
+- 脱敏面有效：`policy.json` 的 `forbidden` 11 条含 `\bsk-[A-Za-z0-9_\-]{20,}`、`\btk_[0-9a-f]{8,}\b`、
+  `mdcg1\.[A-Za-z0-9._\-]{20,}` —— **令牌本身永远进不了库**。
+
+**④ 写入凭据从哪来（决定「升级后记忆还在不在」）**
+
+用户级 / 机器级环境变量 `MDCG_TOKEN`、`MDCG_LEGACY_ENV_AUTH`、`MDCG_ROOT`、`MDCG_ACTOR`、
+`MDCG_CAN_ADMIN`、`MDCG_POLICY_FILE` **全部未设**。答案在插件自己的
+`lib\lib\token_store.js`，解析顺序：①`config.env.MDCG_TOKEN` ②进程 env ③**密钥环 `~/.mdcg/token`（0600）**
+④都没有 → **首启自动签发一枚 designer 令牌**写入密钥环（`MDCG_AUTO_ISSUE=0` 可关掉自动签发）。
+
+实测 `C:\Users\Z1848\.mdcg\` 里确有：`token`（75 B，10-03 02:51）、`_tokens.json`（512 B，哈希与元数据）、
+`master.key`（44 B）、`theory.json`、`sustain/`。
+
+⇒ **密钥环在插件包之外，pnpm 升级不会带走它**；但包内 `data/` 会被带走 ——
+所以 `mdcg.root` 绝不能改指包内路径（那等于把记忆放在升级会删掉的地方）。
+
+**⑤ 逐组判断：29 个叶子全部维持默认**
+
+- 写入面 `memory.*`：只收真人消息（`assistantMessage` / `toolResult` 均关），噪音面最小；开那两项会让
+  每条回复与每个工具结果都进库，而在 0.6 的 importance 阈值下它们大概率仍然 `ACCEPT` ⇒ **纯增量成本**。
+- 召回面 `autoRecall: true` / `autoRecallLimit: 4`：注入块每次请求都进 system prompt，4 条是
+  「上下文固定成本 vs 召回面」的折中；**调大直接抬高每个请求的固定成本**。
+- `tools: 'core'`：升 `brain` / `all` 会把 30 个工具 schema 每轮塞进上下文，**在没有明确需求前那是纯成本**。
+- `mdcg.clearance: 'private'` 与实际 principal `clearance=internal` **不冲突、也不该改**：principal 的密级
+  由令牌决定（密钥环里那枚是 designer / internal），config 里的 `clearance` 是调用方声明。
+- `mutual.enabled` / `capability.enabled` / `roleplayEntryButton` 三项都会额外起进程或遮挡 GUI，无需求不开。
+- `failOnStartupError: false`：坏掉的灵枢不会拖垮 DSH 启动 —— 可靠性上是对的默认值。
+
+**⑥ 这次体检顺带查出的两条日志事实**
+
+- ★ `C:\Users\Z1848\.dsh\logs\dsh-memory-apply-error.log`（947 B，10-06 08:01 本地）：
+  `[2026-10-06T15:01:59.470Z] apply failed: Error: cannot create effect on inactive context`，
+  栈为 `Fiber.assertActive (cordis/lib/index.js:1133)` ← `Proxy.on (:373)` ←
+  `installMemoryHooks (dsh-memory/lib/hooks.js:366)` ← `Object.apply (dsh-memory/lib/index.js:347)` ←
+  `Fiber._reload (cordis/lib/index.js:1356)`。同一秒 `lingshu-bridge-debug.log` 记 `uptime=2s`
+  ⇒ **热重载 dsh-memory 时，`apply` 里 await（起 python 子进程）期间 fiber 被停用，随后建 effect 抛错**：
+  那一次重载后自动记忆钩子没装上，**除这条日志外没有任何症状**（对话照常），要到下次重启才恢复。
+  ⇒ **动过灵枢插件或配置后必须重启 Harness，不要指望热重载**。这是上游缺陷，本项目记录而不修。
+- `C:\Users\Z1848\.dsh\logs\lingshu-bridge-debug.log`（1054 B，11 行）：唯一异常为
+  `2026-10-03T10:59:16.196Z exit code=1073807364`（0x40000004，被强制终止）+ 下一行
+  `schedule retry 1/8 in 1000ms`（退避重连生效）；其余 exit 0 且 `disposed=true`（正常回收）。
+
+**⑦ 一条「不要顺手优化」的警告（来自随包文档，值得抄在这里）**
+`memory.autoRecall` 的注入块落在 `assembly.contexts`，宿主按**渲染后整段文本**去重，变了才 append 一条
+`user/message` 快照（**append 语义，旧快照不会被替换**）。所以插件**每步都照旧 push**（内容没变也不跳过）：
+跳过反而会在「有块 / 无块」之间跳变，实测每步各追加一份 ≈250 tok，长会话里会线性涨到 30k+ tok。
+⇒ **不要为了「省 token」把它改成条件跳过** —— 那是把一个已知的线性成本，换成一个会让前缀失效的抖动。
+
+**教训**：「清单未读」和「结论已定」可以同时成立，但**只有读过之后，结论才从判断变成证据**。
+这次读完 33 个键的结果是结论没变（仍然全部不动），但顺带查出两件原本不知道的事：
+写入凭据在包外密钥环（所以升级安全），以及热重载会让灵枢静默降级（所以改完必须重启）。
+—— 换句话说，读清单的价值不在「可能推翻结论」，而在**它顺带暴露了什么**。
 
 
