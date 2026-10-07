@@ -5,6 +5,9 @@
 //   node vendor/asar/list.mjs --get <条目> <输出文件>               抽出一个条目
 //   node vendor/asar/list.mjs [过滤正则] --archive <归档>           换一个归档
 //
+// ⚠️ `--get` 与列表一样**默认读在用安装包**。要核对 `state/staged/app.asar` 或演练
+// 产物里的那一份，必须显式 `--archive`；否则你比的是在用的那一份，而输出不会反驳你。
+//
 // 归档默认是本机正在使用的安装包（src/paths.mjs 是路径的唯一来源），必须用
 // `--archive` 显式替换——不把第一个位置参数当归档，避免 `list.mjs <正则>` 被
 // 误当成文件名。需要读「真正在跑的那份代码」时用这个或 `dsht asar cat`，
@@ -98,7 +101,11 @@ function main() {
       if (!meta) return fail(`归档里没有这个条目：${key}`);
       const buf = readEntry(archive, { ...meta, path: key }, dataOffset, fd);
       fs.writeFileSync(out, buf);
-      process.stdout.write(`抽出 ${key}（${buf.length} 字节）-> ${out}\n`);
+      // 来源必须打出来：`--get` 不写 `--archive` 时读的是**在用安装包**，
+      // 而这里恰恰是最常用来「核对暂存包/演练产物里那一份是不是修好的版本」的命令
+      // —— 漏掉 `--archive` 会把在用安装包的哈希当成暂存包的哈希（骗过一次核对）。
+      const origin = archiveFlag >= 0 ? archive : `${archive}  ← 默认（在用安装包，不是暂存包）`;
+      process.stdout.write(`抽出 ${key}（${buf.length} 字节）\n  来自 ${origin}\n  写出 ${out}\n`);
       return;
     }
 

@@ -105,6 +105,12 @@ node vendor/whale/install.mjs --yes --to state/cmp/rehearsal-app.asar
 4. **声明读不到就报错，不用默认值。** `readPatchDecl()` 只解析受控子集
    （`id:`、`verify.expect_diff_entries:`、`target.entries[].path`），
    `expect` 缺失或 `entries:` 块不是恰好一个，直接失败退出。
+5. **每一个关于归档的判断都要说清「哪一份归档」。** `list.mjs` 的 `--get` 与列表
+   **默认读在用安装包**（`verify.mjs` 无位置参数时也是比 backup vs 在用）。
+   要核对 `state/staged/app.asar`、演练产物或临时归档，必须显式 `--archive` ——
+   2026-10-07 就因此把**在用安装包**里 `renderer/replay.js` 的哈希（2144 B /
+   `782116F8…`）当成了暂存包那一份（真正的暂存包是 2835 B / `E2695F4B…`）。
+   现在 `--get` 会把来源路径打出来，省略时明确标注「默认（在用安装包，不是暂存包）」。
 
 ## 自检
 
