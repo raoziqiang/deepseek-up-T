@@ -1,7 +1,7 @@
 // deepseek-up-T :: 设置页与桌面挂件开关（plugins/dsh-up-t/lib/client.js）的离线渲染单测
 //
 // 为什么要有它：设置里那一页「deepseek-up-T」和「通用」里那一行挂件开关，**从来没有被渲染过**。
-// test/plugin.test.mjs（55 条）钉住的是**形状** —— 槽位注册签名、`inject` 声明、条目 id/order ——
+// test/plugin.test.mjs（57 条）钉住的是**形状** —— 槽位注册签名、`inject` 声明、条目 id/order ——
 // 它给 bundle 的 React 是个 stub（`useState` 只回初值、`useEffect` 什么都不做），组件函数**没被调用过**。
 // 形状对而组件在真渲染里抛错，表现同样是「设置里没有那一页」：没有报错、没有堆栈、没有白屏提示。
 //

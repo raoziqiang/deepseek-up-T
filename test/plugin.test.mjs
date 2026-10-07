@@ -307,6 +307,68 @@ check('status.json 路由返回可解析的 JSON，且字段齐备', () => {
     assert.equal(typeof j.install.dir, 'string');
     assert.ok([true, false, null].includes(j.install.sameSizeAsBackup));
   }
+  // 暂存产物必须**一直**在 status.json 里：界面靠它说「待落盘」，而这一格缺失时
+  // 界面只能表现为「一切正常」—— 那正是这条链要修的病。
+  assert.ok(j.staged && typeof j.staged === 'object', 'status.json 必须带 staged 事实');
+  assert.equal(typeof j.staged.file, 'string', '要说清比的是哪一份文件');
+  // 测试进程里没有 Electron 的 resourcesPath ⇒ 拿不到在用安装包 ⇒ 必须是 unavailable。
+  // 「拿不到」在这里绝不能变成 pending：把没证据说成「待落盘」会让人去落一个不该落的包。
+  assert.equal(j.staged.status, 'unavailable');
+  assert.equal(typeof j.staged.why, 'string');
+  assert.ok(j.staged.why.length > 0, '说不清为什么拿不到，这一格就没有意义');
+  assert.equal(j.staged.deltaBytes, null, '两侧没凑齐时不许给差值');
+});
+
+// ── 暂存产物：把「待落盘」变成一条可核对的判定 ──────────────────────
+//
+// 这一段守的是一条**真实代价**：一份含修复的暂存包在磁盘上等了一整天没落盘，而当时界面上
+// 一个字都不说 —— 打开设置页全是「一切正常」，人只能以为改动已经生效。
+//
+// 判定表被刻意做成纯函数（`stagedVerdict`）就是为了这里：五个状态直接喂数字，不用去改真文件。
+// 用真文件造「0 字节的暂存包」意味着测试中途一死就留下一个被改过的 121 MB 产物。
+
+check('stagedVerdict：五个状态各自说各自的话，不把「拿不到」说成「有改动」', () => {
+  const v = mod.stagedVerdict;
+  // 0 字节 / 读不到：不是「有改动」的证据（与 findInstall 那条教训同源）
+  assert.equal(v({ bytes: 0, mtimeMs: 9, installedBytes: 5, installedMtimeMs: 1 }).status, 'unavailable');
+  assert.equal(v({ bytes: null, mtimeMs: 9, installedBytes: 5, installedMtimeMs: 1 }).status, 'unavailable');
+  // 拿不到在用安装包的大小：同样不许猜方向
+  assert.equal(v({ bytes: 121422676, mtimeMs: 9, installedBytes: null, installedMtimeMs: 1 }).status, 'unavailable');
+  assert.match(v({ bytes: 10, mtimeMs: 9, installedBytes: null, installedMtimeMs: 1 }).why, /没拿到在用安装包的大小/);
+  // 大小相同：只说大小相同（这是个 121 MB 的文件，这里刻意不算 sha256）
+  const same = v({ bytes: 10, mtimeMs: 9, installedBytes: 10, installedMtimeMs: 1 });
+  assert.equal(same.status, 'same-size');
+  assert.equal(same.deltaBytes, 0);
+  assert.match(same.why, /不等于逐字节相同/);
+  // 暂存更新 ⇒ 待落盘（唯一要人动手的那一态）
+  const pending = v({ bytes: 121422676, mtimeMs: 200, installedBytes: 121421984, installedMtimeMs: 100 });
+  assert.equal(pending.status, 'pending');
+  assert.equal(pending.deltaBytes, 692, '差多少字节要能报出来');
+  // 暂存更旧 ⇒ 提醒别拿它落盘（「更新」的反面不是「没事」，是「先重新构建」）
+  assert.equal(v({ bytes: 121300000, mtimeMs: 1, installedBytes: 121421984, installedMtimeMs: 100 }).status, 'behind');
+  assert.match(v({ bytes: 1, mtimeMs: 1, installedBytes: 2, installedMtimeMs: 100 }).why, /先重新构建/);
+  // 大小不同但没有可比的时间戳 ⇒ differs，不许硬猜成 pending
+  const unknown = v({ bytes: 11, mtimeMs: null, installedBytes: 10, installedMtimeMs: 100 });
+  assert.equal(unknown.status, 'differs');
+  assert.equal(unknown.deltaBytes, 1);
+  assert.match(unknown.why, /判不出谁更新/);
+});
+
+check('stagedFacts：在这台机器上真的找到了项目根与暂存包', () => {
+  // 这条不是「测环境」：它钉的是**路径推导**。插件是通过 junction 装进 profile 的，
+  // 一旦 realpath 那一步失效，项目根就会变成 ...\node_modules，而表现是「什么都拿不到」却不报错。
+  const root = mod.findProjectRoot();
+  assert.equal(root, path.resolve(HERE, '..'), '项目根必须解析到仓库根（junction 的 realpath 必须生效）');
+  const facts = mod.stagedFacts({ asar: null, asarBytes: null });
+  assert.equal(facts.file, path.join(root, 'state', 'staged', 'app.asar'));
+  if (existsSync(facts.file)) {
+    assert.ok(facts.bytes > 0, '暂存包存在时大小必须 > 0');
+    assert.equal(facts.status, 'unavailable', '没有「在用安装包」可比 ⇒ 必须是 unavailable');
+    assert.match(facts.why, /没拿到在用安装包的大小/);
+  } else {
+    assert.equal(facts.status, 'unavailable');
+    assert.match(facts.why, /还没构建过暂存包/);
+  }
 });
 
 // 心跳的对外面：status.json 必须把**磁盘上**的心跳原样带出来。
@@ -921,6 +983,24 @@ check('设置页：证据不足时不许说「已被改造」，也不许假装�
   // 4) 能拿到 status.json 却读不到心跳字段 ⇒ 这是「这一版宿主还没写心跳」，不是「插件没被加载」。
   assert.match(render(base), /没有心跳字段/);
   assert.match(render({ ...base, ok: false }), /还没有心跳/, '拿不到 status.json 时才是「插件没被加载」');
+  // 5) 暂存产物那一行：待落盘要写清「该做什么」，拿不到要说「没拿到」。这一行存在的全部理由，
+  //    是让「我改的东西还没生效」变成看得见的事 —— 所以这里连命令一起钉。
+  const pending = render({
+    ...base,
+    staged: { root: 'r', file: 'f', bytes: 121422676, mtimeMs: 200, installedBytes: 121421984, installedMtimeMs: 100, deltaBytes: 692, status: 'pending', why: '暂存包比在用安装包新' },
+  });
+  assert.match(pending, /待落盘/);
+  assert.match(pending, /比在用安装包大 692 B/);
+  assert.match(pending, /install\.mjs --yes/, '说了「待落盘」就必须说清怎么落盘');
+  const behind = render({
+    ...base,
+    staged: { root: 'r', file: 'f', bytes: 121300000, mtimeMs: 1, installedBytes: 121421984, installedMtimeMs: 100, deltaBytes: -121984, status: 'behind', why: '暂存包比在用安装包旧' },
+  });
+  assert.match(behind, /别拿它落盘/);
+  assert.ok(!behind.includes('待落盘'), '「更旧」不是「待落盘」—— 说反了会把人引去落一个错的包');
+  assert.match(render({ ...base, staged: { status: 'unavailable', why: '没拿到在用安装包的大小，无法与暂存包比较' } }), /没拿到在用安装包的大小/);
+  // 旧宿主（status.json 里根本没有 staged 字段）也必须给出人话，而不是 undefined
+  assert.match(render(base), /没拿到（宿主那一版还没有这个字段）/);
 });
 
 check('findInstall：0 字节的 app.asar 是「拿不到」，不是「大小不同」——必须被否掉并记下理由', () => {

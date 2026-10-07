@@ -466,6 +466,87 @@ await check('拿不到备份时判定说「无法判断」并把圆点标黄', a
   assert.match(findPanel(r.dom).textContent, /拿不到|unavailable/);
 });
 
+// ── ⑤½ 暂存产物：把「我改的东西还没落盘」变成看得见的一件事 ──────────
+//
+// 这条链的由来：一份含修复的暂存包在磁盘上等了一整天没落盘，而当时**界面上一个字都不说**
+// —— 打开面板看到的全是「一切正常」。所以这里钉的不是文案好不好看，而是三件不同的事
+// 必须长得不一样：待落盘（要人挑时间动手）、暂存包比在用的旧（要人重新构建）、拿不到（不猜）。
+
+await check('暂存包更新时：胶囊自己变成「待落盘」、圆点转橙、面板给出落盘命令', async () => {
+  const r = runCapsule({
+    responders: [
+      {
+        json: statusPayload({
+          staged: {
+            root: 'D:\\Z1848\\harness-ds\\deepseek-up-T',
+            file: 'D:\\Z1848\\harness-ds\\deepseek-up-T\\state\\staged\\app.asar',
+            bytes: 121422676,
+            mtimeMs: 1791353633926,
+            installedBytes: 121421984,
+            installedMtimeMs: 1791348000000,
+            deltaBytes: 692,
+            status: 'pending',
+            why: '暂存包比在用安装包新',
+          },
+        }),
+      },
+    ],
+  });
+  await tick();
+  // 胶囊本身：不点开也要能看见
+  const label = r.dom.created.find((n) => n.tagName === 'SPAN' && /^up-T/.test(n.textContent));
+  assert.equal(label.textContent, 'up-T · 待落盘', '「待落盘」必须写在胶囊上，不能只藏在面板里');
+  const dot = r.dom.created.find((n) => n.style.borderRadius === '50%');
+  assert.equal(dot.style.background, '#f0883e', '橙色与「无法判断」的黄(#d29922)必须分得开');
+  // 面板
+  findChip(r.dom).dispatch('pointerdown', { clientX: 1, clientY: 1, pointerId: 1 });
+  findChip(r.dom).dispatch('pointerup', { clientX: 1, clientY: 1, pointerId: 1 });
+  const text = findPanel(r.dom).textContent;
+  assert.match(text, /待落盘/);
+  assert.match(text, /比在用大 692 B/, '差多少字节要写出来，不能只说「有改动」');
+  assert.match(text, /install\.mjs --yes/, '要落到「我现在该做什么」');
+  assert.deepEqual(r.warns, []);
+});
+
+await check('暂存包比在用的旧 / 拿不到 / 缺字段：各自说各自的话，都不冒充「待落盘」', async () => {
+  const cases = [
+    [
+      { bytes: 121300000, mtimeMs: 1, installedBytes: 121421984, installedMtimeMs: 2, deltaBytes: -121984, status: 'behind', why: '暂存包比在用安装包旧' },
+      /比在用的旧/,
+      'up-T · 44.0.0',
+    ],
+    [
+      { bytes: 121422676, mtimeMs: 5, installedBytes: null, installedMtimeMs: 1, deltaBytes: null, status: 'unavailable', why: '没拿到在用安装包的大小，无法与暂存包比较' },
+      null,
+      'up-T · 44.0.0',
+    ],
+  ];
+  for (const [staged, expectPanel, expectLabel] of cases) {
+    const r = runCapsule({ responders: [{ json: statusPayload({ staged }) }] });
+    await tick();
+    const label = r.dom.created.find((n) => n.tagName === 'SPAN' && /^up-T/.test(n.textContent));
+    assert.equal(label.textContent, expectLabel, '不算「待落盘」时胶囊必须保持原样');
+    const dot = r.dom.created.find((n) => n.style.borderRadius === '50%');
+    assert.notEqual(dot.style.background, '#f0883e', '橙色是给「要你动手落盘」专用的');
+    findChip(r.dom).dispatch('pointerdown', { clientX: 1, clientY: 1, pointerId: 1 });
+    findChip(r.dom).dispatch('pointerup', { clientX: 1, clientY: 1, pointerId: 1 });
+    const text = findPanel(r.dom).textContent;
+    if (expectPanel === null) {
+      assert.ok(!/暂存包/.test(text), '拿不到证据时连「暂存包」这一行都不该出现 —— 不猜也不吓人');
+    } else {
+      assert.match(text, expectPanel);
+    }
+    assert.deepEqual(r.warns, []);
+  }
+  // 旧宿主（status.json 里根本没有 staged 字段）也不能坏：这是升级顺序里必然出现的一段时间
+  const r = runCapsule({ responders: [{ json: statusPayload() }] });
+  await tick();
+  const label = r.dom.created.find((n) => n.tagName === 'SPAN' && /^up-T/.test(n.textContent));
+  assert.equal(label.textContent, 'up-T · 44.0.0');
+  assert.ok(!/暂存包/.test(findPanel(r.dom).textContent));
+  assert.deepEqual(r.warns, []);
+});
+
 await check('localStorage 整个被禁（getItem/setItem 都抛）时胶囊仍然可用', async () => {
   const r = runCapsule({ storage: makeStorage({}, { throws: true }), responders: [{ json: statusPayload() }] });
   await tick();

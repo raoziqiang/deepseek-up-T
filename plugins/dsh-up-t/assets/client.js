@@ -50,6 +50,34 @@
       return (i === 0 ? v : v.toFixed(1)) + ' ' + u[i];
     }
 
+    // 暂存产物（state/staged/app.asar）的结论。
+    //
+    // 这条为什么必须显示出来：项目的工作流是「改 → 构建到暂存包 → 落盘 → 重启」，而落盘要等
+    // Harness 完全退出（人可以拖很久）。于是「暂存包比在用安装包新」是常态，而界面上原来一个
+    // 字都不说 —— 打开面板看到全是正常，就会以为改动已经生效了。
+    //
+    // 三种状态的颜色不同，是因为**要人做的事不同**：待落盘要人挑时间动手，暂存包更旧要人重新
+    // 构建，其余只是信息。拿不到就说拿不到：绝不把「没证据」当成「没改动」。
+    function stagedText(staged) {
+      if (!staged || staged.status === 'unavailable') {
+        return { text: '没拿到暂存产物的信息', color: '#8b949e', pending: false };
+      }
+      var d = staged.deltaBytes;
+      var delta = (typeof d === 'number' && d !== 0)
+        ? '（' + (d > 0 ? '比在用大 ' : '比在用小 ') + human(Math.abs(d)) + '）'
+        : '';
+      if (staged.status === 'pending') {
+        return { text: '待落盘 · 暂存包更新' + delta, color: '#f0883e', pending: true };
+      }
+      if (staged.status === 'behind') {
+        return { text: '暂存包比在用的旧，别拿它落盘' + delta, color: '#d29922', pending: false };
+      }
+      if (staged.status === 'same-size') {
+        return { text: '与在用安装包大小相同', color: '#8b949e', pending: false };
+      }
+      return { text: '大小不同，但判不出谁更新' + delta, color: '#d29922', pending: false };
+    }
+
     function readPos() {
       try {
         var raw = localStorage.getItem(POS_KEY);
@@ -177,6 +205,20 @@
         }
         panel.appendChild(row('判定', verdict, color));
 
+        // 暂存产物：这是「我改的东西到底生效了没有」的答案里唯一要人动手的那一格。
+        var staged = status.staged;
+        if (staged && staged.status !== 'unavailable') {
+          var st = stagedText(staged);
+          panel.appendChild(row('暂存包', st.text, st.color));
+          if (st.pending) {
+            panel.appendChild(el('div', {
+              marginTop: '4px',
+              color: '#f0883e',
+              fontSize: '11px',
+            }, '落盘要先把 Harness 完全退出（托盘 → Quit）：node vendor\\whale\\install.mjs --yes'));
+          }
+        }
+
         panel.appendChild(el('div', {
           marginTop: '7px',
           paddingTop: '7px',
@@ -200,9 +242,18 @@
             .then(function (j) {
               render(j);
               var inst = j && j.install;
-              if (!inst) { dot.style.background = '#d29922'; label.textContent = 'up-T'; return; }
-              label.textContent = 'up-T · ' + (inst.version || '?');
-              dot.style.background = inst.sameSizeAsBackup === false ? '#3fb950'
+              var pending = !!(j && j.staged && j.staged.status === 'pending');
+              // 「待落盘」必须改胶囊本身的样子，不能只藏在展开后的面板里：
+              // 这件事要人挑时间动手，而人不会没事去点开一个说「一切正常」的胶囊。
+              if (pending) label.textContent = 'up-T · 待落盘';
+              if (!inst) {
+                dot.style.background = '#d29922';
+                if (!pending) label.textContent = 'up-T';
+                return;
+              }
+              if (!pending) label.textContent = 'up-T · ' + (inst.version || '?');
+              dot.style.background = pending ? '#f0883e'
+                : inst.sameSizeAsBackup === false ? '#3fb950'
                 : inst.sameSizeAsBackup === true ? '#8b949e' : '#d29922';
             })
             .catch(function () { render(null); });

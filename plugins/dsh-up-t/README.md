@@ -31,7 +31,7 @@ up-T · ?             ← 黄点：没有原版备份可比 / 宿主没回应
 | 路由 | 作用 |
 | --- | --- |
 | `/dsh-up-t/client.js` | 客户端脚本。按 **mtime** 重读，所以改完**硬刷新页面即生效，不用重启 DSH** |
-| `/dsh-up-t/status.json` | 状态事实（只做 stat 级读取，不算 121MB 的 sha256；含磁盘上的心跳） |
+| `/dsh-up-t/status.json` | 状态事实（只做 stat 级读取，不算 121MB 的 sha256；含磁盘上的心跳与**暂存产物**的现状） |
 | `/dsh-up-t/action` | 操作通道。`GET` 列出可用操作（只读、无需请求头），`POST` 才真的执行 |
 | `/dsh-up-t/seen` | 握手通道。渲染层脚本跑起来后 `POST` 一句「我到了」；`GET` 只读，永不记录 |
 
@@ -42,6 +42,9 @@ up-T · ?             ← 黄点：没有原版备份可比 / 宿主没回应
 它整段包在一个 `try { … } catch (e) { console.warn(…) }` 里 —— 这是刻意的（挂件坏掉绝不能影响主界面），
 代价是**任何异常都表现为「界面上什么都没有」**：没有胶囊、没有报错、没有堆栈。
 正是因为这个，它的行为用 `test/capsule.test.mjs` 在假 DOM 里真跑一遍（见下面「验证」）。
+
+胶囊正面显示两件事，都是**要人动手**的：Harness 版本，以及「待落盘」（见下面第三格那节）。
+后面那件必须写在**没点开**的胶囊上 —— 人不会没事去点开一个说「一切正常」的面板。
 
 ## ★ 心跳：回答「重启到底有没有把我装进去」
 
@@ -192,15 +195,45 @@ dsh-up-t 已经装好了，它的客户端 bundle 由宿主**按 mtime 重读**�
 语言按 `ctx.get('locale')` 切（所以 `inject` 从 `["slots"]` 变成 `["slots", "locale"]`），
 文案中英两套都在 `__charmCopy()` 里。
 
-### 已知：挂件菜单的「Replay animation」还是空的
+### 「Replay animation」曾经是空的（已修）
 
-挂件窗口右键菜单里那三项，`reset` 与 `close` 都由主进程处理；`toggle-splash` 却把
+挂件窗口右键菜单里那三项，`reset` 与 `close` 都由主进程处理；`toggle-splash` 原本把
 `"replay"` 发给**主窗口**，而鲸鱼启动画面只存在于**欢迎窗口**（`welcome.html`
 与 `renderer/whale-splash.js`）。主进程里 `welcomeWindow` 与 `installCharmHandlers` 不在同一个
-函数作用域内，所以这个消息没有收件人 —— 点它什么也不会发生。
+函数作用域内，所以那条消息没有收件人 —— 点它什么也不会发生。
 
-**不修**：修它要打通主进程的作用域（把欢迎窗口的引用交给 charm handler），
-属于必须改安装包的独立一步。先在这里记下来，免得以后把它当成 bug 重新发现一遍。
+**现在的做法**：由主进程**新开一个短命窗口**加载 `renderer/replay.html`（`replay.js` 自己播完
+并 `window.close()`），动画时长只写在 `replay.js` 里，主进程只留一枚 20 秒的安全网定时器。
+理由：复用现成的 `showWelcome()` 要拿到深层闭包里的绑定，属于给安装包打一个更脆的补丁；
+专用页面则是一枚能被离线单测钉住的普通页面。
+
+这一条属于 L3（改的是安装包里的 `lib/main.js`），**要落盘 + 重启才生效**。
+页面本身在 `test/splash.test.mjs` 里有离线行为断言（含「画不出来时也必须自己收场」）。
+
+## ★ 第三条状态：「我改的东西还没落盘」
+
+界面上的三格里，前两格回答的是「装的是什么」（Harness 版本、安装包被改造过没有）。
+第三格回答的是**流程走到哪一步**：`state/staged/app.asar` 与在用安装包比，谁更新。
+
+为什么必须有这一格：项目的工作流是「改 → 构建到暂存包 → 落盘 → 重启」，而**落盘要等人把
+Harness 完全退出**（托盘 → Quit），人可以拖很久。于是「暂存包比在用安装包新」是常态，
+而界面上原来一个字都不说 —— 打开面板看到全是正常，就会以为改动已经生效了。
+真实代价：一份含重播修复的暂存包在磁盘上等了一整天，而唯一提示它存在的地方是我在终端里
+打出来的一句话。
+
+判定与 `install` 同源（**拿不到 ≠ 反面结论**），五个状态：
+
+| 状态 | 什么时候 | 界面怎么说 |
+| --- | --- | --- |
+| `pending` | 大小不同，且暂存包的 mtime 更新 | **待落盘** —— 胶囊自己变橙并写「待落盘」，面板给出落盘命令 |
+| `behind` | 大小不同，但暂存包的 mtime 更旧 | 「别拿它落盘，先重新构建」（这里说反了会把人引去落一个错的包） |
+| `same-size` | 大小相同 | 「与在用安装包大小相同」——**不**说逐字节相同（121 MB 的 sha256 是 `dsht upgrade` 的活） |
+| `differs` | 大小不同，但没有可比的时间戳 | 「判不出谁更新」——方向只能由 mtime 决定，没有就承认没有 |
+| `unavailable` | 0 字节 / 读不到 / 项目根找不到 / 没拿到在用包大小 | 说清是哪一种，**绝不**升级成 `pending` |
+
+判定表被刻意拆成纯函数 `stagedVerdict({bytes, mtimeMs, installedBytes, installedMtimeMs})`：
+五个状态直接喂数字就能钉住，不需要为了造「0 字节的暂存包」去动真文件 ——
+那种测试中途一死，就会留下一个被改过的 121 MB 产物。
 
 ## ★ 三条不能违反的约束（都是别人踩过的坑）
 
@@ -341,8 +374,8 @@ node src\cli.mjs precheck --profile-json state\candidate\package.json
 
 ```powershell
 cd D:\Z1848\harness-ds\deepseek-up-T
-node test\plugin.test.mjs    # 55 条断言：心跳（apply + ready 两枚、trail、route 清单）、注入行、四条路由、操作守卫与真 spawn、specs 的 writes 标记、握手通道（GET 只读 / 缺头 403 / 两条通道分开记 / bundle 恰好握一次）、客户端 bundle 形态与两个槽位的注册、设置页的按钮与心跳行、**挂件开关的九种情形**（中英文案、桥不在、可用、失败可重试、busy 不可连点、挂载读状态、`"replay"` 不当状态、桥的返回值说了算、切换失败要留告警）、判定的三态与「拿不到 ≠ 不同」（含 `findInstall` 跳过 0 字节候选的回归测试）、清理
-node test\capsule.test.mjs   # 16 条断言：在假 DOM + 假 fetch 里把 assets/client.js 真跑一遍 —— 挂载（complete / loading / 无 body / 重试）、幂等、握手、状态渲染与数字、点击展开与拖动、右键隐藏与持久化、四种降级文案、存储被禁时依然可用，以及「全程一次都没有 `client failed`」
+node test\plugin.test.mjs    # 57 条断言：心跳（apply + ready 两枚、trail、route 清单）、注入行、四条路由、操作守卫与真 spawn、specs 的 writes 标记、握手通道（GET 只读 / 缺头 403 / 两条通道分开记 / bundle 恰好握一次）、客户端 bundle 形态与两个槽位的注册、设置页的按钮与心跳行、**挂件开关的九种情形**（中英文案、桥不在、可用、失败可重试、busy 不可连点、挂载读状态、`"replay"` 不当状态、桥的返回值说了算、切换失败要留告警）、判定的三态与「拿不到 ≠ 不同」（含 `findInstall` 跳过 0 字节候选的回归测试）、**暂存产物那五态**（`stagedVerdict` 纯函数喂数字 + `stagedFacts` 在真机上解析项目根 + status.json 里 `staged` 必须在且「拿不到」不许变成「待落盘」）、清理
+node test\capsule.test.mjs   # 18 条断言：在假 DOM + 假 fetch 里把 assets/client.js 真跑一遍 —— 挂载（complete / loading / 无 body / 重试）、幂等、握手、状态渲染与数字、点击展开与拖动、右键隐藏与持久化、四种降级文案、**待落盘时胶囊自己变橙并给出落盘命令 / 其余状态不许冒充待落盘**、存储被禁时依然可用，以及「全程一次都没有 `client failed`」
 node src\cli.mjs doctor      # bundles 全部可解析
 node src\cli.mjs precheck    # 组合可用
 ```

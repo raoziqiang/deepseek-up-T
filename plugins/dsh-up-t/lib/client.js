@@ -72,6 +72,28 @@
         return "已被改造（app.asar 与原版备份大小不同）";
       }
 
+      // 暂存产物（state/staged/app.asar）：项目的工作流是「改 → 构建到暂存包 → 落盘 → 重启」，
+      // 而落盘必须等人先把 Harness 完全退出（安装目录被占用时谁也不敢写），人可以拖很久。
+      // 于是「暂存包比在用安装包新」是常态，而这一页原来一个字都不说 —— 人打开看到全是正常，
+      // 就会以为改动已经生效了。这一行的价值就在这：把「还没生效」变成一条看得见的事实。
+      function stagedText(data) {
+        var staged = data && data.staged;
+        if (!staged || staged.status === "unavailable") {
+          return "没拿到（" + ((staged && staged.why) || "宿主那一版还没有这个字段") + "）";
+        }
+        var d = staged.deltaBytes;
+        var delta = (typeof d === "number" && d !== 0)
+          ? "（" + (d > 0 ? "比在用安装包大 " : "比在用安装包小 ") + fmtBytes(Math.abs(d)) + "）"
+          : "";
+        if (staged.status === "pending") {
+          return "待落盘 —— 暂存包比在用安装包新" + delta
+            + "。落盘：先把 Harness 完全退出（托盘 → Quit），再跑 node vendor\\whale\\install.mjs --yes";
+        }
+        if (staged.status === "behind") return "暂存包比在用安装包旧" + delta + " —— 别拿它落盘，先重新构建";
+        if (staged.status === "same-size") return "与在用安装包大小相同" + delta;
+        return "与在用安装包大小不同，但没拿到可比的时间戳，判不出谁更新" + delta;
+      }
+
       // 「加载了」和「能用」是两件事，这个页面恰恰是「什么都没出现」时人会来看的地方，
       // 所以把心跳走到哪一步也显示出来：只走到 apply() 就说明 webServer 依赖没就绪。
       function heartbeatText(data) {
@@ -403,6 +425,7 @@
             row("app.asar", fmtBytes(install.asarBytes)),
             row("原版备份", fmtBytes(install.backupBytes)),
             row("判定", verdictText(data)),
+            row("暂存包", stagedText(data)),
             row("心跳", heartbeatText(data)),
             row("读取时间", data.time),
           ];
@@ -424,7 +447,9 @@
           h(
             "p",
             { key: "note", style: { margin: "12px 0 0", fontSize: "0.9em", opacity: 0.6 } },
-            "依据：只比了文件大小（宿主半侧刻意不在这里算 121MB 的 sha256）。要看逐字节结论、以及哪些补丁需要重打，请在项目里跑 dsht upgrade。",
+            "依据：只比了文件大小（宿主半侧刻意不在这里算 121MB 的 sha256）。要看逐字节结论、以及哪些补丁需要重打，请在项目里跑 dsht upgrade。"
+              + "「暂存包」那一行比的是 state/staged/app.asar 与在用安装包：同样只比大小，方向（谁更新）由 mtime 判定；"
+              + "大小相同不等于逐字节相同。",
           ),
         );
 

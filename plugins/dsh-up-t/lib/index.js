@@ -137,6 +137,9 @@ export const heartbeatPath = HEARTBEAT_FILE;
 // 导出给测试：这条「0 字节不作数」的规则是用运行中的实例换来的（旧版报过 asarBytes: 0
 // ⇒ 设置页说「已被改造」），必须有回归测试盯着，不能只靠注释。
 export { findInstall };
+// 同上：暂存包那三态（pending / same-size / behind / differs / unavailable）是给人看结论的地方，
+// 措辞错了比不显示更糟，所以判定表也导出给测试直接钉。
+export { stagedFacts, stagedVerdict };
 
 /**
  * 渲染层的握手记录。
@@ -246,6 +249,95 @@ function evidenceOrNull(n) {
 }
 
 /**
+ * 暂存产物的现状：**「我改的东西构建出来了没有、落盘了没有」**。
+ *
+ * 为什么这条事实必须出现在界面上：项目的工作流是「改 → 构建到 `state/staged/app.asar`
+ * → 落盘 → 重启」，而落盘**必须等人先把 Harness 完全退出**（安装目录被占用时谁也不敢写）。
+ * 于是「暂存包比在用安装包新」是常态而不是故障，而界面上原来一个字都不说 —— 人打开设置页
+ * 看到的全是「一切正常」，于是要么以为改动做完了，要么去查一个不存在的故障。
+ * 这个真实代价刚发生过：一份含重播修复的暂存包在磁盘上等了一整天，而唯一提示它存在的地方
+ * 是一句我在终端里打出来的话。
+ *
+ * 与 `install` 的判定同源的三条规矩：
+ * 1. **0 字节与读不到一律算「拿不到」**，不是反面证据（见 `evidenceOrNull` 的注释）；
+ * 2. **大小相同只说「大小相同」**，绝不说「逐字节相同」——这里刻意不算 121MB 的 sha256；
+ * 3. 方向（谁更新）只能由 **mtime** 判定，所以 mtime 拿不到时状态是 `differs`（不同但判不出方向），
+ *    而不是硬猜一个「待落盘」。界面文案里必须带上这条依据。
+ */
+/**
+ * 判定表：给四个数字，还一个状态加一句人话。**纯函数，与文件读取刻意分开。**
+ *
+ * 分开的理由是测试：这条判定有五个状态要钉住，而其中两个（0 字节的暂存包、暂存包比在用的更旧）
+ * 如果只能靠「改真文件再复原」来造，那么测试中途一死就会留下一个被改过的工作区 ——
+ * 用一个 121 MB 的产物去换两条断言，不划算。所以判定与 I/O 分开，判定表直接喂数字。
+ */
+function stagedVerdict({ bytes, mtimeMs, installedBytes, installedMtimeMs }) {
+  const b = evidenceOrNull(bytes);
+  const ib = evidenceOrNull(installedBytes);
+  const m = typeof mtimeMs === 'number' && isFinite(mtimeMs) ? mtimeMs : null;
+  const im = typeof installedMtimeMs === 'number' && isFinite(installedMtimeMs) ? installedMtimeMs : null;
+  if (b === null) {
+    return { status: 'unavailable', why: '暂存包是 0 字节或读不到 —— 0 字节不是「有改动」的证据', deltaBytes: null };
+  }
+  if (ib === null) {
+    return { status: 'unavailable', why: '没拿到在用安装包的大小，无法与暂存包比较', deltaBytes: null };
+  }
+  const deltaBytes = b - ib;
+  if (b === ib) {
+    return {
+      status: 'same-size',
+      why: '与在用安装包大小相同（大小相同不等于逐字节相同，也可能是这次改动没改大小）',
+      deltaBytes,
+    };
+  }
+  if (m !== null && im !== null) {
+    return m > im
+      ? { status: 'pending', why: '暂存包比在用安装包新', deltaBytes }
+      : { status: 'behind', why: '暂存包比在用安装包旧 —— 别用它落盘，先重新构建', deltaBytes };
+  }
+  return {
+    status: 'differs',
+    why: '与在用安装包大小不同，但没拿到可比的时间戳，判不出谁更新',
+    deltaBytes,
+  };
+}
+
+function stagedFacts(inst) {
+  const root = findProjectRoot();
+  const out = {
+    root,
+    file: root ? path.join(root, 'state', 'staged', 'app.asar') : null,
+    bytes: null,
+    mtimeMs: null,
+    installedBytes: evidenceOrNull(inst && inst.asarBytes),
+    installedMtimeMs: null,
+    // 差多少字节（暂存 - 在用）：只在两侧都拿到时才有意义
+    deltaBytes: null,
+    // pending（待落盘） / same-size（大小相同） / differs（不同，方向判不出）
+    // / behind（暂存比在用的旧） / unavailable（事实拿不到）
+    status: 'unavailable',
+    why: null,
+  };
+  if (!out.file) {
+    out.why = '找不到项目根（这个插件不是从 deepseek-up-T 仓库里加载的）';
+    return out;
+  }
+  let st = null;
+  try { st = fs.statSync(out.file); } catch { /* 还没构建过 */ }
+  if (!st) {
+    out.why = '还没构建过暂存包（state/staged/app.asar 不存在）—— 界面上「重打到暂存包」那个按钮就是干这个的';
+    return out;
+  }
+  out.bytes = evidenceOrNull(st.size);
+  out.mtimeMs = typeof st.mtimeMs === 'number' ? st.mtimeMs : null;
+  try {
+    const live = fs.statSync(inst.asar);
+    out.installedMtimeMs = typeof live.mtimeMs === 'number' ? live.mtimeMs : null;
+  } catch { /* 拿不到在用的 mtime：判定表会降级成 differs */ }
+  return { ...out, ...stagedVerdict(out) };
+}
+
+/**
  * 状态事实。刻意只用 stat 级别的成本：
  * 121MB 的安装包不做 sha256（那是 `dsht upgrade` 的活），这里只比大小。
  * 因此结论的措辞必须诚实——是「大小相同」，不是「逐字节相同」。
@@ -258,6 +350,8 @@ function collectStatus() {
     plugin: { name: pkg.name, version: pkg.version },
     time: new Date().toISOString(),
     install: null,
+    // 暂存产物（state/staged/app.asar）的现状：见 stagedFacts —— 「待落盘」这件事必须有人看得见
+    staged: null,
     // 心跳是**磁盘真相**（不是内存里的变量）：读文件，读不到就是 null。
     heartbeat: null,
     heartbeatFile: HEARTBEAT_FILE,
@@ -268,6 +362,8 @@ function collectStatus() {
   };
   // 被否掉的候选路径永远带出去：它是「为什么读不到」的答案，不是内部细节。
   out.installRejected = (inst && inst.rejected) || [];
+  // 暂存产物的现状与安装目录能不能找到无关（项目根是另一条线索），所以在 early return 之前算。
+  out.staged = stagedFacts(inst);
   try { out.heartbeat = JSON.parse(fs.readFileSync(HEARTBEAT_FILE, 'utf8')); } catch { /* 还没落过 */ }
   if (!inst || !inst.asar) return out;
 
