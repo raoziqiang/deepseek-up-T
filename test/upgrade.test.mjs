@@ -199,5 +199,52 @@ check('人类可读输出里说明已构建到暂存包', stageHumanOut.includes
 check('人类可读输出里仍把「落盘」留给用户，并给出两条命令', stageHumanOut.includes('完全退出 Harness') && stageHumanOut.includes('baseline write'));
 check('人类可读输出里说明基线必须在落盘之后写', stageHumanOut.includes('基线必须在落盘之后写'));
 
+// ── 落盘后的稳态：安装包已改造、原版备份还在、基线已刷新 ──
+//
+// 落盘之后，安装包里躺着的是**打过补丁的**代码。「素材过期」若仍拿声明素材对比在用
+// 安装包，稳态下每一天都会报 3 条假过期 + 一段「重打前必须先修素材」的误导指引 ——
+// 天天响的假警报会淹没升级时的真警报。基准必须跟 build.mjs 的默认 --from 同源：
+// 有备份、没升级 ⇒ 比备份里的条目（备份里躺着的是没打过补丁的原版）。
+console.log('\n── 落盘后稳态（不报假「素材过期」）──');
+const steadyDir = path.join(SCRATCH, 'steady');
+const steadyRes = path.join(steadyDir, 'resources');
+fs.mkdirSync(steadyRes, { recursive: true });
+const steadyAsar = path.join(steadyRes, 'app.asar');
+const steadyBackup = path.join(steadyRes, 'app.asar.whale-backup');
+for (const f of [steadyAsar, steadyBackup]) { try { fs.unlinkSync(f); } catch {} }
+fs.linkSync(stagedFile, steadyAsar);      // 已改造的安装包（暂存产物就是落盘后的样子）
+fs.linkSync(P.asarBackup, steadyBackup);  // 完好的原版备份
+fs.writeFileSync(path.join(steadyDir, 'version'), '44.0.0\n');
+const steadyEnv = { ...process.env, DSH_UP_T_INSTALL_DIR: steadyDir };
+
+let steadyRun = null;
+let steadyJson = null;
+let steadyHuman = null;
+try {
+  steadyRun = spawnSync(process.execPath, ['src/cli.mjs', 'upgrade', '--no-hash', '--json'], {
+    cwd: PROJECT_ROOT, env: steadyEnv, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
+  });
+  try { steadyJson = JSON.parse(steadyRun.stdout); } catch { /* steadyJson 保持 null */ }
+  steadyHuman = spawnSync(process.execPath, ['src/cli.mjs', 'upgrade', '--no-hash'], {
+    cwd: PROJECT_ROOT, env: steadyEnv, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
+  });
+} finally {
+  try { fs.rmSync(steadyDir, { recursive: true, force: true }); } catch {}
+}
+
+check('稳态判定为 unchanged（既没升级也没被改动）', steadyJson?.verdict === 'unchanged', String(steadyJson?.verdict ?? '(stdout 不是 JSON)'));
+check(
+  '稳态不再报「素材过期」（基准 = 原版备份，而不是已改造的安装包）',
+  (steadyJson?.stale ?? ['?']).length === 0,
+  JSON.stringify(steadyJson?.stale ?? null),
+);
+check(
+  '每条 L3 声明的 staleSources 都为空',
+  (steadyJson?.patches ?? []).filter((p) => p.layer === 'L3').every((p) => (p.staleSources ?? []).length === 0),
+);
+check('稳态退出码 0（不该拿假过期拖累退出码）', steadyRun?.status === 0, `实际 ${steadyRun?.status}`);
+check('人类可读输出里没有「素材过期」假警报', !(steadyHuman.stdout ?? '').includes('素材过期'));
+check('人类可读输出里没有「重打前必须先修素材」误导指引', !(steadyHuman.stdout ?? '').includes('重打前必须先修素材'));
+
 console.log(bad ? `\n${bad} 个失败` : `\n全部通过`);
 process.exit(bad ? 1 : 0);

@@ -11,8 +11,11 @@
 //   3. 声明里 `action: insert` 的条目在归档里   ⇒ 那一条补丁「看起来已应用」
 //      （insert 是「归档里本来没有」的条目，它在不在是最好的存在性信号）
 //
-// 另外还会预检**原版素材是否过期**：`action: patch` 的 `source` 必须与归档里那一份逐字节
-// 相同，否则构建会失败。与其让人跑构建时才看到失败，不如升级检测里就指出来。
+// 另外还会预检**原版素材是否过期**：`action: patch` 的 `source` 必须与重打基准里那一份
+// 逐字节相同，否则构建会失败。基准与 build.mjs 的默认 `--from` 同源：没检测到升级、又有
+// 原版备份时是备份（落盘后安装包里躺着的是打过补丁的代码，拿它当基准会天天报假过期）；
+// 检测到升级时是现场安装包（素材必须从新归档重新抽取）。与其让人跑构建时才看到失败，
+// 不如升级检测里就指出来。
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -176,7 +179,10 @@ export async function currentFacts({ hash = true } = {}) {
  * `applied` 只在「所有 insert 条目都在归档里」时给出；一条声明可能只做 replace/patch，
  * 那就没有存在性证据，返回 `unknown` 而不是猜。
  */
-export function inspectDecl(decl, { pathSet, pristine, asarPath }) {
+export function inspectDecl(decl, {
+  pathSet, pristine, asarPath,
+  staleAsarPath = asarPath, stalePathSet = pathSet,
+}) {
   const all = decl.items ?? [];
   const inserts = all.filter((i) => i.action === 'insert').map((i) => i.path);
   const patches = all.filter((i) => i.action === 'patch');
@@ -195,9 +201,13 @@ export function inspectDecl(decl, { pathSet, pristine, asarPath }) {
     else state = 'partial';
   }
 
-  // 原版素材是否还等于归档里那一份。不等就意味着构建会被守卫拦下。
+  // 原版素材是否还等于重打基准里那一份。不等就意味着构建会被守卫拦下。
+  // 基准不一定是「在用的安装包」：落盘之后安装包里躺着的是**打过补丁的**代码，
+  // 而重打从原版备份出发（build.mjs 的默认 --from），所以稳态下比的是备份里的条目 ——
+  // 否则落盘后的每一天都会报「素材过期」，天天响的假警报会淹没升级时的真警报。
   const staleSources = [];
-  if (asarPath && pathSet) {
+  if (staleAsarPath && stalePathSet) {
+    const refLabel = staleAsarPath === asarPath ? '归档' : '原版备份';
     for (const item of patches) {
       if (!item.source) {
         staleSources.push({ path: item.path, source: null, why: '声明里没有 source' });
@@ -205,16 +215,16 @@ export function inspectDecl(decl, { pathSet, pristine, asarPath }) {
       }
       const src = path.resolve(path.dirname(decl.file), item.source);
       const disk = exists(src) ? fs.readFileSync(src) : null;
-      const inArchive = pathSet.has(item.path) ? readAsarEntry(asarPath, item.path) : null;
+      const inArchive = stalePathSet.has(item.path) ? readAsarEntry(staleAsarPath, item.path) : null;
       if (disk === null) {
         staleSources.push({ path: item.path, source: src, why: '磁盘上找不到素材' });
       } else if (inArchive === null) {
-        staleSources.push({ path: item.path, source: src, why: '归档里找不到对应条目' });
+        staleSources.push({ path: item.path, source: src, why: `${refLabel}里找不到对应条目` });
       } else if (!bytesEqual(disk, inArchive)) {
         staleSources.push({
           path: item.path,
           source: src,
-          why: `素材 ${human(disk.length)} 与归档里的 ${human(inArchive.length)} 不一致`,
+          why: `素材 ${human(disk.length)} 与${refLabel}里的 ${human(inArchive.length)} 不一致`,
         });
       }
     }
@@ -274,6 +284,26 @@ export async function runUpgradeCheck({ hash = true } = {}) {
     },
   };
 
+  // 「素材过期」的对照基准必须与 build.mjs 的默认 --from 同源：没检测到升级、又有原版备份
+  // ⇒ 重打从**原版备份**出发。否则落盘后安装包里躺着打过补丁的代码，「素材 vs 安装包」
+  // 会天天报过期，假警报淹没了升级时的真警报。检测到升级/安装包被换 ⇒ 基准仍是现场
+  // 安装包：素材必须从**新归档**重新抽取，此时备份反而是过期的。
+  const archiveChanged = Boolean(changes.version.changed || changes.asar.changed);
+  const staleBase = { asarPath: P.asar, pathSet: cur.asarPathSet };
+  if (!archiveChanged && exists(P.asarBackup)) {
+    try {
+      // readAsarHeader 返回 { header, jsonLen, pickleSize } —— listAsarPaths 要的是解构出的 header。
+      const { header: backupHeader } = readAsarHeader(P.asarBackup);
+      const backupPaths = listAsarPaths(backupHeader);
+      if (backupPaths.length) {
+        staleBase.pathSet = new Set(backupPaths);
+        staleBase.asarPath = P.asarBackup;
+      }
+    } catch {
+      // 备份头读不了就保守退回安装包基准（宁可误报也不漏报）。
+    }
+  }
+
   const patches = [];
   for (const file of listPatchDecls(P)) {
     const raw = readText(file) ?? '';
@@ -281,6 +311,7 @@ export async function runUpgradeCheck({ hash = true } = {}) {
       try {
         patches.push(inspectDecl(readPatchDecl(file), {
           pathSet: cur.asarPathSet, pristine: cur.backupsMatch, asarPath: P.asar,
+          staleAsarPath: staleBase.asarPath, stalePathSet: staleBase.pathSet,
         }));
       } catch (err) {
         patches.push({
@@ -305,7 +336,7 @@ export async function runUpgradeCheck({ hash = true } = {}) {
   //   · 安装包没变 ⇒ 从来没有落盘过 ⇒ 不是重打，是还没做
   // 混在一起会把「没做过的事」说成「做过的被冲掉了」，那种报告会让人白忙一场。
   const notInEffect = l3.filter((p) => p.state === 'absent' || p.state === 'partial').map((p) => p.id);
-  const archiveChanged = Boolean(changes.version.changed || changes.asar.changed);
+  // archiveChanged 已在 patches 循环前算好（staleBase 的基准选择要用它）。
   const needsReapply = archiveChanged ? notInEffect : [];
   const neverApplied = archiveChanged ? [] : notInEffect;
   const stale = l3.filter((p) => (p.staleSources ?? []).length > 0).map((p) => p.id);

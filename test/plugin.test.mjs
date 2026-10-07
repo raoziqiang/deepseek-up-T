@@ -125,6 +125,15 @@ function makeHarness() {
 const mod = await import(new URL(`file:///${path.join(PLUGIN, 'lib', 'index.js').replace(/\\/g, '/')}`).href);
 const plugin = mod.default;
 
+// 宿主可能正跑着、且在它自己 apply() 时已经把心跳写进了 .runtime/heartbeat.json。
+// 下面这些用例会把这枚文件反复覆写成「测试进程的心跳」，而宿主只在加载时写一次、
+// 没有别的重写路径 —— 所以必须在动它之前把宿主的那一份原样存下来，结尾写回。
+// （老版清理直接 rmSync 整个 .runtime：跑一次测试套件，宿主的心跳就没了，
+// `dsht accept` 的「插件写过心跳」从此 SKIP 到下一次重启为止 —— 修的就是这个。）
+const hostHeartbeat = existsSync(mod.heartbeatPath)
+  ? readFileSync(mod.heartbeatPath)
+  : null;
+
 check('默认导出带 name 与 apply', () => {
   assert.equal(typeof plugin, 'object');
   assert.equal(plugin.name, 'dsh-up-t');
@@ -1160,7 +1169,17 @@ check('package.json 声明了 dsh.client.platform=web 且导出 ./client', () =>
 
 // 必须清理：这枚心跳的 pid 是测试进程，测试一退出它就变成「来自已退出进程」，
 // 留着会让下一次 `dsht doctor` 报 WARN。测试不许给真实环境留状态。
-try { rmSync(path.dirname(mod.heartbeatPath), { recursive: true, force: true }); } catch { /* 忽略 */ }
+// 但「清理」≠「抹掉宿主的证据」：跑测试之前宿主可能已经写了自己的心跳（pid 是宿主的、
+// 还活着）—— 那份要在结尾**原样写回**。宿主没写过（文件本来就不存在）才整个 .runtime
+// 抹掉，语义与「不给真实环境留状态」一致。
+try {
+  if (hostHeartbeat !== null) {
+    mkdirSync(path.dirname(mod.heartbeatPath), { recursive: true });
+    writeFileSync(mod.heartbeatPath, hostHeartbeat);
+  } else {
+    rmSync(path.dirname(mod.heartbeatPath), { recursive: true, force: true });
+  }
+} catch { /* 忽略 */ }
 
 const failed = results.filter((r) => !r.ok);
 for (const r of results) {

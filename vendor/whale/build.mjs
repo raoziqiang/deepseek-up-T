@@ -71,8 +71,11 @@ for (const item of decl.items) {
 
   if (!fs.existsSync(src)) {
     const hint = item.action === 'patch'
-      ? `这是原版素材，从当前安装包里抽出来：\n  node vendor/asar/list.mjs --get ${item.path} ${path.relative(process.cwd(), src)}`
-      : `这是构建素材，应当在改造素材目录里（见 vendor/README.md）。`;
+      ? '这是原版素材，从与本脚本 `--from` 同源的那份归档里抽出来\n' +
+        '（无升级时 = resources/app.asar.whale-backup 原版备份；升级后 = 新安装包；\n' +
+        '  落盘后别从已改造的安装包抽，抽出来的会是打过补丁的代码）：\n' +
+        `  node vendor/asar/list.mjs --get ${item.path} ${path.relative(process.cwd(), src)}`
+      : '这是构建素材，应当在改造素材目录里（见 vendor/README.md）。';
     fail(`缺少素材：${src}\n${hint}`);
   }
 
@@ -94,7 +97,7 @@ for (const item of decl.items) {
       fail(
         `原版素材与归档不一致：${src}\n` +
         `  归档里 ${current.length} 字节，素材 ${fs.statSync(src).size} 字节\n` +
-        '这是拿旧版本的原版去改，会丢掉新版代码。重新抽一份：\n' +
+        '这是拿旧版本的原版去改，会丢掉新版代码。从上面这份 --from 归档里重新抽一份：\n' +
         `  node vendor/asar/list.mjs --get ${item.path} ${path.relative(process.cwd(), src)}`,
       );
     }

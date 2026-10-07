@@ -15,7 +15,7 @@
 
 import http from 'node:http';
 import path from 'node:path';
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { resolvePaths } from './paths.mjs';
 import { runDoctor } from './doctor.mjs';
 import { runUpgradeCheck } from './upgrade.mjs';
@@ -99,8 +99,13 @@ export async function runAccept({ hash = true, url = process.env.DSH_WEB_URL || 
       `app.asar 仍是未改造的原版（与 app.asar.whale-backup 逐字节相同）`,
       '任何 L3 改动都没生效。先在 Harness 完全退出后运行 install-whale.cmd，再重启。'));
   } else if (r.pristine === false) {
+    // 「原版备份」这一栏必须引用备份自己的字节数。落盘后 `baseline write` 会把基线刷成
+    // 改造后的状态，基线里的 asarBytes 就成了「改造后的包」—— 拿它标「原版」会把
+    // 121,348,951 B 的备份说成 121,421,984 B。
+    let backupBytes = null;
+    try { backupBytes = statSync(P.asarBackup).size; } catch { /* 备份不在场就如实打 '?' */ }
     items.push(item('asar-modified', 'app.asar 已被改造', 'pass',
-      `与原版备份不同（${r.current.asarBytes} B；原版 ${r.changes.asar.fromBytes ?? '?'} B）`));
+      `与原版备份不同（安装包 ${r.current.asarBytes} B；原版备份 ${backupBytes ?? '?'} B）`));
   } else {
     items.push(item('asar-modified', 'app.asar 已被改造', 'skip',
       hash ? '无法判断（缺少原版备份 app.asar.whale-backup）' : '无法判断（--no-hash 跳过了逐字节比对）',
