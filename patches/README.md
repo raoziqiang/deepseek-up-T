@@ -76,7 +76,10 @@ notes: |
 1. **锚点必须唯一。** 锚点在归档中出现多次时，工具必须失败退出，不许「改第一个」。
 2. **必须写 `verify.expect_diff_entries`。** 应用的差异条目数必须**恰好**等于声明值——
    多一处少一处都说明改坏了。`install.mjs` 会拿实际差异集合与 `target.entries` 逐项比对。
-3. **必须写 `rollback`。** 回滚路径不加 `--yes` 确认，因为它是恢复通道。
+3. **必须写 `rollback`。** 回滚路径不加 `--yes` 确认，因为它是恢复通道 —— 失败提示里印出来让人
+   **原样复制**的就是 `node vendor/whale/install.mjs --rollback`，一条还要再加个参数才能跑的救急命令，
+   等于在最需要它的时候先失败一次。回滚也可以**先演练**（不退出 Harness、不动在用安装包）：
+   `node vendor/whale/install.mjs --rollback --to state/cmp/rollback-rehearsal.asar`。
 4. 手写素材放 `vendor/whale/materials/`（入库）；`action: patch` 的原版缓存放 `../.probe/`（不入库，可重抽）；
    构建的中间产物在 `state/staged/tree/`、整包在 `state/staged/app.asar`（均已 gitignore，可重建）。不要放这里。
 5. **声明读不到就报错，不要默认值。** 缺 `expect_diff_entries` 时宁可失败退出。

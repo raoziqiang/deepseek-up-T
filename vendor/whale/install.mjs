@@ -10,12 +10,18 @@
 //   node vendor/whale/install.mjs --yes                落盘暂存包（默认 state/staged/app.asar）
 //   node vendor/whale/install.mjs --yes --to <archive> 演练：写到别处并按声明核对（不碰在用安装包）
 //   node vendor/whale/install.mjs --rollback           从 app.asar.whale-backup 恢复
+//   node vendor/whale/install.mjs --rollback --to <archive>  演练：恢复到一个临时文件
 //   node vendor/whale/install.mjs --decl <file>        换一份声明
 //   node vendor/whale/install.mjs --staged <archive>   换暂存包位置
 //
 // `--to` 存在的理由：这条路径过去**没法在 Harness 开着的时候验证** —— 它的守卫（以及
 // 「声明与实际差异是否一致」这条核对）只在真落盘那一刻才跑，而真落盘一年只做几次。
 // 现在它可以在临时目标上跑一遍：声明、守卫、核对、字节相等全部能离线验。
+// 回滚后来也有了同样的 `--to`：它是出事时才会跑的那条路，更需要能先演练一遍。
+//
+// 回滚**刻意不要 `--yes`**（与落盘不对称）：失败提示里印出来的救急命令是
+// `回滚：node vendor/whale/install.mjs --rollback`，是让人原样复制的。一条需要
+// 再加个参数才能跑的救急命令，等于在最需要它的时候先失败一次。它仍然过同一个守卫。
 import fs from 'node:fs';
 import path from 'node:path';
 import {
@@ -52,13 +58,36 @@ function main() {
   // ── 回滚路径 ──────────────────────────────────────────────────────────────
   if (rollback) {
     if (!fs.existsSync(P.asarBackup)) return fail(`没有备份可回滚：${P.asarBackup}`);
+
+    // 与落盘同样的道理：回滚也应当能先演练一遍。它同样是「一年做几次」的动作，
+    // 而更糟的是 —— 它是**出事时**才跑的那一个。
+    const rollbackTo = arg('--to', null);
+    if (rollbackTo) {
+      const target = path.resolve(rollbackTo);
+      if (target === path.resolve(P.asar)) {
+        // 指向在用的那一份 = 真回滚，走下面的守卫路径，不许借 --to 绕过去。
+        process.stdout.write('--to 指的就是在用安装包，按真回滚处理（需要 Harness 已退出）\n');
+      } else if (isInside(target, P.resourcesDir)) {
+        return fail(
+          `演练目标不许落在安装目录里：${target}\n` +
+          `那会让人以为已经回滚了，其实 Harness 读的仍是 ${P.asar}。换个目录（例如 state/cmp/）。\n`,
+        );
+      } else {
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.copyFileSync(P.asarBackup, target);
+        process.stdout.write(
+          `\n⚠ 演练：这次写的**不是**在用安装包。\n` +
+          `  目标  ${target}\n` +
+          `  在用  ${P.asar}（未被改动）\n`,
+        );
+        return verifyRollback(target, { rehearsal: true });
+      }
+    }
+
     assertHarnessStopped('从备份回滚 app.asar');
     fs.copyFileSync(P.asarBackup, P.asar);
     process.stdout.write(`\n已从备份恢复 ${P.asar}\n`);
-    const check = runAsarVerify(P.asarBackup, P.asar, 0);
-    process.stdout.write(check.ok ? '核对：恢复后的安装包与备份逐字节一致\n' : '核对失败：恢复结果与原版不一致\n');
-    process.exitCode = check.ok ? 0 : 1;
-    return;
+    return verifyRollback(P.asar, { rehearsal: false });
   }
 
   // ── 落盘路径 ──────────────────────────────────────────────────────────────
@@ -133,6 +162,36 @@ function main() {
 function isInside(child, parent) {
   const rel = path.relative(path.resolve(parent), path.resolve(child));
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+/**
+ * 回滚之后的核对。回滚是**唯一一条回头路**，所以它自己也不能只看退出码：
+ * 复制出来的目标必须与备份逐字节一致（0 个差异），否则「已恢复」就是一句假话。
+ * 与 `verifyAgainst` 一样，演练与真回滚共用这一段 —— 不让「演练通过」和
+ * 「真回滚通过」变成两套可能各说各话的判据。
+ */
+function verifyRollback(target, { rehearsal }) {
+  const check = runAsarVerify(P.asarBackup, target, 0);
+  if (!check.ok) {
+    process.stderr.write(
+      `\n核对失败：恢复结果与备份不一致（预期 0 个差异，实际 ${check.problems.length} 个）。\n` +
+      `这条链是回头路，它自己坏了必须当场知道。\n\n`,
+    );
+    for (const p of check.problems.slice(0, 20)) process.stderr.write(`  ${p}\n`);
+    process.exit(1);
+  }
+
+  process.stdout.write(
+    '\n核对：恢复后的安装包与备份逐字节一致（0 个差异）\n' +
+    (rehearsal
+      ? '这是演练：在用安装包一个字都没动。真要回滚请在退出 Harness 后跑同样的命令、去掉 --to。\n'
+      : '\n回滚之后还剩两步：\n' +
+        '  1. 重启 Harness —— 现在跑的是原版界面（改造全部失效，但都没丢：它们还在仓库里）；\n' +
+        '  2. 重刷基线：node src\\cli.mjs baseline write\n' +
+        '     （不刷的话，upgrade 会把这次回滚报成「安装包被动过」）。\n' +
+        '\n想再装回改造版：node vendor/whale/build.mjs 重新构建（构建是确定性的），\n' +
+        '再在 Harness 完全退出后跑 node vendor/whale/install.mjs --yes。\n'),
+  );
 }
 
 /**

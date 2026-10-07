@@ -19,7 +19,7 @@ vendor/
   asar/verify.mjs          逐字节比对两个归档，--expect N 校验差异数量
   asar/write.mjs           单条目重写，其余条目字节保持不变
   whale/build.mjs          按 patches/*.yml 构建暂存包（不碰安装目录）
-  whale/install.mjs        把暂存包落盘 / 从备份回滚 / --to 演练核对（唯一会覆盖在用 app.asar 的地方）
+  whale/install.mjs        把暂存包落盘 / 从备份回滚 / `--to` 演练核对（唯一会覆盖在用 app.asar 的地方）
   whale/patch-main.mjs     lib/main.js 的锚点替换
   whale/patch-preload.mjs  lib/preload-app.cjs 的锚点替换
   whale/patch-session-controller.mjs  视觉模型自动路由的锚点替换
@@ -79,7 +79,22 @@ node vendor/whale/install.mjs --yes --to state/cmp/rehearsal-app.asar
 `--to` 把暂存包**复制**到临时目标（真落盘那条路是 rename，会把暂存包移走；演练之后人还要用它去落盘），
 然后对临时目标跑**同一段**声明核对。两条规则：`--to` 落在安装目录里一律拒绝（那会让人以为落盘了，
 其实 Harness 读的仍是在用那份）；`--to` 指向在用 `app.asar` 时按真落盘处理，不许借它绕过 Harness 守卫。
-双击版：`install-whale.cmd /dry`。这条路径的回归由 `test/install.test.mjs`（26 条断言）守着。
+双击版：`install-whale.cmd /dry`。这条路径的回归由 `test/install.test.mjs` 守着
+（43 条断言，Harness 在跑时；它没在跑时是 44 条 —— 真回滚那一段多一条）。
+
+**回滚也能先演练**（2026-10-07 起，同样不用退出 Harness）：
+
+```powershell
+node vendor/whale/install.mjs --rollback --to state/cmp/rollback-rehearsal.asar
+```
+
+回滚是那条**出事时才跑**的命令，过去既没有演练模式、`test/` 里也一个字都没提过它 ——
+一年做几次的动作，等于没验证。现在它把备份复制到临时目标并跑同一段逐字节核对（`verifyRollback`，
+演练与真回滚共用，不让两种「通过」变成两套判据）。三条规则与落盘对称：目标落在安装目录里拒绝、
+`--to` 指向在用 `app.asar` 时按真回滚处理、两者过**同一个** Harness 守卫。
+真回滚**刻意不要 `--yes`**（与落盘不对称）：失败提示里印出来让人原样复制的是
+`node vendor/whale/install.mjs --rollback`，一条还要再加参数才能跑的救急命令，
+等于在最需要它的时候先失败一次。
 
 ## 路径约定
 
@@ -99,7 +114,8 @@ node vendor/whale/install.mjs --yes --to state/cmp/rehearsal-app.asar
    原地重写正在使用的安装包是最容易把 Harness 写坏的一步，必须是**显式**选择。
 2. **写安装包前必须检测 Harness 进程。** `assertHarnessStopped()` 用
    `tasklist /FI "IMAGENAME eq DeepSeek Harness.exe"` 取 pid 列表，有进程就拒绝执行
-   并提示「右键托盘图标退出（只关窗口进程还在）」。
+   并提示「右键托盘图标退出（只关窗口进程还在）」。**落盘与 `--rollback` 过的是同一个守卫**——
+   回滚同样会覆盖被内存映射的 `app.asar`，一样会 EPERM 或写坏。
 3. **落盘后必须验证，不能只看退出码。** `install.mjs` 落盘后用 `verify.mjs --json`
    把**实际差异条目集合**与 `patches/*.yml` 声明的集合逐项比对，多一条少一条都算失败。
 4. **声明读不到就报错，不用默认值。** `readPatchDecl()` 只解析受控子集
@@ -119,15 +135,17 @@ node vendor/whale/install.mjs --yes --to state/cmp/rehearsal-app.asar
 node vendor/asar/verify.mjs
 
 # 或者对任意两个归档
-node vendor/asar/verify.mjs <原版> <改动后> --expect 11
+node vendor/asar/verify.mjs <原版> <改动后> --expect 13
 ```
 
 `verify.mjs` 无位置参数时默认比较 `app.asar.whale-backup` vs `app.asar`。
 
 实测输出（2026-10-06）：`比较 11470 个归档内条目、1497 个 unpacked 条目` + `OK：逐字节一致`。
 
-落盘链路本身的自检（构建确定性、`--to` 演练、三条拒绝路径、全程在用安装包 sha256 未变）：
-`node test/install.test.mjs` —— 26 条断言，约 4 秒，不碰安装目录。
+落盘链路本身的自检（构建确定性、`--to` 演练、三条拒绝路径、全程在用安装包 sha256 未变）**外加
+唯一一条回头路**（`--rollback` 的演练、真回滚跑在一个临时「安装目录」里、守卫拦下、无备份时的报错次序）：
+`node test/install.test.mjs` —— 43 条断言（Harness 在跑时）/ 44 条（没在跑时），约 4 秒，不碰安装目录。
+真回滚那一节靠 `DSH_UP_T_INSTALL_DIR` 把整个安装目录换成一个临时目录，所以跑的是同一段真回滚代码。
 
 构建产物**内容**的自检（引用完整性校验，**字节核对查不出来的那一类**）：
 `node test/assets.test.mjs` —— 28 条断言。它只读归档，检查被 insert/replace 的 HTML 引用的每个本地资源

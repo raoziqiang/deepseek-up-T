@@ -130,6 +130,79 @@ if (procs.length > 0) {
   check('Harness 没在跑时守卫放行（不是无条件拒绝）', guard.status === 0 && /GUARD-DID-NOT-TRIP/.test(guard.stdout ?? ''));
 }
 
+// ── 4b. 回滚：唯一一条回头路 ──
+//
+// 它是出事时才会跑的那条命令，而它过去**一个字都没有测过**（连排练模式都没有）。
+// 真回滚会覆盖在用 app.asar，所以这里用 DSH_UP_T_INSTALL_DIR 把整个「安装目录」
+// 换成一个临时目录再跑真回滚 —— 走的还是同一段代码，但写坏也写不到真安装包。
+console.log('\n── 回滚（--rollback）──');
+const RB_REHEARSAL = path.join(SCRATCH, 'install-e2e-rollback.asar');
+const FAKE_INSTALL = path.join(SCRATCH, 'fake-install');
+const FAKE_ASAR = path.join(FAKE_INSTALL, 'resources', 'app.asar');
+const FAKE_BACKUP = path.join(FAKE_INSTALL, 'resources', 'app.asar.whale-backup');
+fs.rmSync(FAKE_INSTALL, { recursive: true, force: true });
+fs.rmSync(RB_REHEARSAL, { force: true });
+fs.mkdirSync(path.dirname(FAKE_ASAR), { recursive: true });
+fs.writeFileSync(FAKE_ASAR, 'not-an-archive-before-rollback');
+// 备份只被读、从不被写 ⇒ 硬链过去，省一次 121MB 拷贝（同卷才成功，不行就退回复制）。
+try { fs.linkSync(P.asarBackup, FAKE_BACKUP); } catch { fs.copyFileSync(P.asarBackup, FAKE_BACKUP); }
+const fakeBefore = await sha256(FAKE_ASAR);
+
+// 4b-1 演练：恢复到一个临时文件（Harness 开着也能跑）
+const rbReh = run(['vendor/whale/install.mjs', '--rollback', '--to', RB_REHEARSAL]);
+check('回滚演练退出码 0', rbReh.status === 0, `实际 ${rbReh.status}`);
+check('回滚演练产物与备份逐字节相同', fs.existsSync(RB_REHEARSAL) && (await sha256(RB_REHEARSAL)) === backupHash);
+check('回滚演练明说这次写的不是在用安装包', /不是\*\*在用安装包|不是在用安装包/.test(rbReh.stdout ?? ''));
+check('回滚演练打印核对结论（不是只看退出码）', /逐字节一致（0 个差异）/.test(rbReh.stdout ?? ''));
+check('回滚不需要 --yes（失败提示里印出来让人原样复制的就是这条命令）',
+  !/确认要执行请再加 --yes/.test(`${rbReh.stdout}${rbReh.stderr}`) && rbReh.status === 0);
+
+// 4b-2 与落盘同一条规矩：演练目标不许落在安装目录里，免得以为回滚了
+const rbInside = run(
+  ['vendor/whale/install.mjs', '--rollback', '--to', path.join(FAKE_INSTALL, 'resources', 'app.asar.rb')],
+  { env: { ...process.env, DSH_UP_T_INSTALL_DIR: FAKE_INSTALL } },
+);
+check('回滚演练目标落在安装目录里时拒绝', rbInside.status === 1, `实际 ${rbInside.status}`);
+check('拒绝时确实什么都没写', !fs.existsSync(path.join(FAKE_INSTALL, 'resources', 'app.asar.rb')));
+check('拒绝的理由里指出 Harness 读的仍是哪一个文件', /Harness 读的仍是/.test(rbInside.stderr ?? ''));
+
+// 4b-3 没有备份时：先报「没有备份可回滚」，而不是先抱怨 Harness 在跑
+const FAKE_NOBACKUP = path.join(SCRATCH, 'fake-install-nobackup');
+fs.rmSync(FAKE_NOBACKUP, { recursive: true, force: true });
+fs.mkdirSync(path.join(FAKE_NOBACKUP, 'resources'), { recursive: true });
+const NOBACKUP_ASAR = path.join(FAKE_NOBACKUP, 'resources', 'app.asar');
+fs.writeFileSync(NOBACKUP_ASAR, 'untouched');
+const rbNoBackup = run(['vendor/whale/install.mjs', '--rollback'],
+  { env: { ...process.env, DSH_UP_T_INSTALL_DIR: FAKE_NOBACKUP } });
+check('没有备份时回滚拒绝（退出码 1）', rbNoBackup.status === 1, `实际 ${rbNoBackup.status}`);
+check('拒绝的理由是「没有备份」，不是先怨 Harness 在跑（先看有没有回头路）',
+  /没有备份可回滚/.test(rbNoBackup.stderr ?? ''), (rbNoBackup.stderr ?? '').trim().split(/\r?\n/).filter(Boolean)[0] ?? '');
+check('拒绝时不碰那个 app.asar', fs.readFileSync(NOBACKUP_ASAR, 'utf8') === 'untouched');
+
+// 4b-4 真回滚（跑在临时「安装目录」里，不是真安装包）
+const rbReal = run(['vendor/whale/install.mjs', '--rollback'],
+  { env: { ...process.env, DSH_UP_T_INSTALL_DIR: FAKE_INSTALL } });
+const fakeAfter = await sha256(FAKE_ASAR);
+if (procs.length > 0) {
+  // Harness 在跑 ⇒ 只可能走到守卫那一步。这本身就是要测的东西：回滚也过同一个守卫。
+  check('Harness 在跑时回滚被守卫拦下（退出码 1）', rbReal.status === 1, `实际 ${rbReal.status}`);
+  check('拦下的提示点出占用者 pid，并说清拦的是「从备份回滚」',
+    /从备份回滚/.test(rbReal.stderr ?? '') && /pid \d+/.test(rbReal.stderr ?? ''));
+  check('被拦下时目标安装目录里的 app.asar 一个字节都没动', fakeAfter === fakeBefore);
+} else {
+  check('Harness 没在跑时真回滚执行成功（退出码 0）', rbReal.status === 0, `实际 ${rbReal.status}`);
+  check('回滚把 app.asar 换成了备份的内容（原先是个占位文件）', fakeAfter === backupHash);
+  check('回滚后的输出给出重刷基线这一步', /baseline write/.test(rbReal.stdout ?? ''));
+  check('回滚后的输出说明怎么再装回改造版', /build\.mjs/.test(rbReal.stdout ?? ''));
+}
+
+// 4b-5 源码层面的结构性不变量
+check('回滚的守卫排在复制之前',
+  src.indexOf("assertHarnessStopped('从备份回滚 app.asar')") < src.indexOf('fs.copyFileSync(P.asarBackup, P.asar)'),
+  '先确认 Harness 已退出，才轮得到覆盖');
+check('回滚的核对是一段共用代码（演练通过 == 真回滚通过）',
+  (src.match(/verifyRollback\(/g) ?? []).length >= 3, '定义 1 次 + 演练与真回滚各 1 次');
+
 // ── 5. 全程之后：在用安装包一个字节都没变 ──
 console.log('\n── 在用安装包 ──');
 check('全程结束后在用安装包 sha256 未变', (await sha256(P.asar)) === asarHashBefore);
@@ -137,7 +210,11 @@ check('原版备份 sha256 也未变', (await sha256(P.asarBackup)) === backupHa
 
 // ── 6. 不留痕 ──
 fs.rmSync(REHEARSAL, { force: true });
-check('演练产物已清理（测试不许给真实环境留状态）', !fs.existsSync(REHEARSAL));
+fs.rmSync(RB_REHEARSAL, { force: true });
+fs.rmSync(FAKE_INSTALL, { recursive: true, force: true });
+fs.rmSync(FAKE_NOBACKUP, { recursive: true, force: true });
+check('演练产物已清理（测试不许给真实环境留状态）',
+  !fs.existsSync(REHEARSAL) && !fs.existsSync(RB_REHEARSAL) && !fs.existsSync(FAKE_INSTALL));
 
 console.log('');
 if (bad) {

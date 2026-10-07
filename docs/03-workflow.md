@@ -107,8 +107,18 @@ L3 的落盘与 Harness 是否运行互斥。**当前会话本身就跑在 Harne
 node vendor/whale/install.mjs --yes --to state/cmp/rehearsal-app.asar   # 或双击 install-whale.cmd /dry
 ```
 
-它把暂存包**复制**到临时目标，并在临时目标上跑**同一段**声明核对。所以「产物是不是声明里那 11 条」
+它把暂存包**复制**到临时目标，并在临时目标上跑**同一段**声明核对。所以「产物是不是声明里那几条」
 这件事不必等到退出 Harness 那一刻才知道 —— 那是整个流程里唯一不可重来的时刻，不该同时用来做验证。
+
+**回滚同样可以先演练**（2026-10-07 起）：
+
+```powershell
+node vendor/whale/install.mjs --rollback --to state/cmp/rollback-rehearsal.asar
+```
+
+回滚是那条「出事时才跑」的命令，它过去既没有演练模式、也没有一行测试 —— 一年做几次的事，
+等于没验证。现在它把备份**复制**到临时目标并跑同一段逐字节核对，所以「回头路好不好使」
+可以在需要它之前就知道。真回滚仍然要等 Harness 完全退出，落盘与回滚过的是**同一个守卫**。
 
 **「构建了但忘了落盘」会自己报出来**（2026-10-07 起）：`doctor` 的「安装包」段与 `upgrade` 的报告末尾
 都有一条 `暂存包`，给五态之一 —— `pending`（比在用安装包新，待落盘）、`behind`（比在用的旧，**别拿它落盘**，
@@ -146,6 +156,7 @@ node vendor/whale/install.mjs --yes --to state/cmp/rehearsal-app.asar   # 或双
 | 用通用打包器重建 `app.asar` | 会让一万多个条目字节变化，无法审计也无法回滚 | 用 `vendor/asar/write.mjs` 单条目重写 + `verify.mjs` 校验 |
 | 改完不 diff 就提交 | 误改会静默进入基线 | 提交前必跑 `snapshot diff` 或 `patchdecl` 比对 |
 | Harness 运行中尝试落盘 asar | Windows 会拒绝替换被内存映射的文件 | 连托盘一起退出再落盘 |
+| 出事时才第一次跑 `--rollback` | 它和落盘一样「一年做几次」，而且正好是出事时才跑的那一个；没跑过就等于不知道它好不好使 | 先演练 `install.mjs --rollback --to state/cmp/rollback-rehearsal.asar`，确认无误后再退出 Harness 真跑 |
 | 只改现场 `cordis.patch.yml` 而不回头改 `patches/*.yml` | 声明不再是权威描述，下次升级重打会退回旧配置 | 改完现场立刻同步声明，用 `dsht upgrade` 查漂移 |
 
 ## 升级 Harness 之后
