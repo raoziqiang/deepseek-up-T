@@ -9,7 +9,7 @@
 - `dsh-whale-widget@0.3.18` 已装为 **L1 插件**：Web 右下角余额小鲸鱼、气泡点击序列、音效、角色、动图。
 - 数据目录：`.dsh/whale-audio`、`.dsh/whale-bubble-imgs`、`.dsh/whale-roles`（多数为空）。
 - **动画已落盘**（2026-10-06 晚）：安装包 `app.asar` 121,421,984 B（sha256 `2c6d8b4bf4716498…`），与 `state/staged/app.asar` 逐字节相同；原版备份 121,348,951 B（`983ca71114e6dfd3…`）完好保留，随时可回滚（`install.mjs --rollback`）。`dsht accept` 12 项自动判定全过。
-- 暂存包 `state/staged/app.asar`（121,421,984 B，**13** 条目按声明改动，其余 11,466 条目逐字节一致）—— 落盘时 `install.mjs` 拿同一判据自检过（verify --expect 13）。
+- 暂存包 `state/staged/app.asar`（121,422,676 B，**13** 条目按声明改动，其余 11,466 条目逐字节一致）—— 落盘时 `install.mjs` 拿同一判据自检过（verify --expect 13）。**注意它比在用安装包新 692 字节**（2026-10-06 又修了一版 replay 健壮性，见下方记录），要生效得再落盘一次。
 
 ## 主战场
 
@@ -281,3 +281,33 @@
 - **怎么撤**：`node vendor/whale/install.mjs --rollback`；或 git 回到本提交之前（声明与素材一起走）。
 - **教训**：`?.` 与 `send()` 都不会告诉你「收件人不存在」。凡是要跨窗口投递的消息，
   值得在发送处问一句「谁在听」—— 或者干脆像这里一样，由发消息的人自己把事做完。
+
+### 2026-10-06 · 重播窗口「画不出来的时候」会当 20 秒置顶空白方块
+
+- **症状（还没人见过，但路径是通的）**：重播窗口是 `frame:false / transparent / alwaysOnTop`，
+  而主进程的安全网要 **20 秒**才收回它。上一版 `replay.js` 在两种情况下什么都不做就往回走：
+  ① 页面里没有 `#whale-stage` 画布；② 开始动画时 `new WhaleSplash(...)` 抛异常。
+  两种情况下窗口都留在屏幕上，用户看到一块**挡着界面、点不掉、20 秒后自己消失的空白方块**。
+  没有异常逃出去（第二种会逃到 `window.onerror`），所以它同样是个「安静到极点」的 bug。
+- **改了什么**（`vendor/whale/materials/renderer/replay.js`，原则是「不管出什么事都自己收场」）：
+  - 没有画布 ⇒ **立刻** `window.close()` 走人，而不是等安全网。
+  - 静止帧画不出来（`drawWhale` 抛）⇒ `console.error('replay: failed to draw the still frame')`
+    之后**照样** `close(STILL_MS)`。
+  - 动画起不来（`WhaleSplash` 构造/`start()` 抛）⇒ `console.error('replay: failed to start the animation')`、
+    退回画一张静止的鲸鱼（画不出来就空着），然后 `close(STILL_MS)`。
+- **为什么**：一个只在屏幕上存在 20 秒、却会挡住用户操作的窗口，比「什么都不发生」更糟 ——
+  用户不会知道那是自己的挂件菜单弄出来的，只会以为界面卡了。
+- **怎么验**：`test/splash.test.mjs` 23 → **25** 条。两条新的**故意失败**用例分别把
+  `drawWhale` 与 `WhaleSplash` 换成抛异常的实现（新增 `makePage({ preScript })`：在动画包就位、
+  页面脚本开跑**之前**破坏沙箱；放太早会被动画包自己的导出盖回去），断言「有且只有一条对应告警
+  + 仍然走淡出 + 跑到定时器后 `closes === 1`」；没有画布那条从 `closes === 0` 改成 `closes === 1`。
+  这两条用例故意制造告警，所以 `makePage` 多了一个 `expectWarns` 开关，把它们从「全程零告警」那条
+  总账里摘出去 —— 其余页面依然一条告警都不许有。
+- **注意（这套测试的既定用法）**：`test/splash.test.mjs` 读的是**归档字节**（`state/staged/app.asar`
+  优先，其次在用安装包），所以**改完素材必须先 `node vendor/whale/build.mjs` 再跑测试**。
+  我第一次跳过构建直接跑，看到的是旧归档里的旧 `replay.js`，`3/25` 失败 —— 失败信息指向
+  `renderer/replay.js:54`，那个行号在磁盘上的素材里根本不存在。
+- **怎么撤**：素材与声明一起 git 回退，再重建暂存包；落盘过的话 `node vendor/whale/install.mjs --rollback`。
+- **产出现状**：`state/staged/app.asar` = **121,422,676 B**（在用安装包 121,421,984 B）⇒ **待落盘**，
+  生效要再跑一次 `install-whale.cmd`。`accept` 在此之前仍然 12/12 全过（它比声明与在用安装包，
+  insert 条目不做逐字节比对）。

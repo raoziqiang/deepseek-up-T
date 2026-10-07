@@ -24,7 +24,10 @@
   **欢迎窗口**里 —— 没有收件人，点了没反应也不报错。2026-10-06 已修（详见 `tracks/T1-appearance/README.md`）：
   新增 `renderer/replay.html` + `renderer/replay.js`（`patches/T1-whale-splash.yml` 的 `verify.expect_diff_entries` 11 → **13**），
   `vendor/whale/patch-main.mjs` 新增 `replaySplash()` 真开一个短命无框窗口（600×700、不可交互、`REPLAY_MAX_MS = 2e4` 安全网），
-  `test/splash.test.mjs` 19 → 23 条钉住「动画播完自己收场，不赖着不走」。**已构建核对，并于 2026-10-06 晚落盘**（`expect_diff_entries` 13 条已是现场实况）。
+  `test/splash.test.mjs` 19 → **25** 条钉住「动画播完自己收场，不赖着不走」（其中两条是**故意让画面画不出来**的失败路径：
+  没有画布、`drawWhale`/`WhaleSplash` 抛异常时，重播窗口必须立刻/按时自己关掉，而不是留一块 20 秒的置顶空白方块挡着界面）。
+  **已构建核对，并于 2026-10-06 21:36 落盘**（`expect_diff_entries` 13 条已是现场实况）；此后又修了一版 replay 健壮性，
+  暂存包 121,422,676 B **比在用安装包新 692 字节 ⇒ 待落盘**（`install-whale.cmd` 再跑一次即同步）。
 - **手写素材已入库**：`vendor/whale/materials/`（**12 个文件 / 53 KB**，后两件就是上面的 replay）。搬进去之后重建验证过 ——
   产物与搬家前 **sha256 完全相同**（搬家前后各构建一次比对）。`action: patch` 的三份原版缓存仍不入库
   （从任意一份 `app.asar` 可原样重抽，且构建时逐字节校验）。

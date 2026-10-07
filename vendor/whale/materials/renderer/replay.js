@@ -16,7 +16,12 @@
   const STILL_MS = 1600
 
   const canvas = document.getElementById('whale-stage')
-  if (canvas === null) return
+  if (canvas === null) {
+    // 没有画布就别把窗口留着：它是无边框置顶窗，主进程的安全网要 20 秒才收回，
+    // 那 20 秒里用户看到的是一个挡在界面上的空白方块。
+    window.close()
+    return
+  }
 
   const close = (delay) => {
     canvas.classList.add('is-done')
@@ -44,18 +49,33 @@
     window.matchMedia('(prefers-reduced-motion: reduce)').matches ||
     typeof window.WhaleSplash !== 'function'
   ) {
-    drawStill()
+    try {
+      drawStill()
+    } catch (err) {
+      // 画不出来也要收场：宁可空着淡出，也不要留一个置顶窗口等安全网。
+      console.error('replay: failed to draw the still frame', err)
+    }
     close(STILL_MS)
     return
   }
 
   // `onPendant` fires when the splash settles; the real welcome window keeps a
   // draggable charm at that point, while the replay simply fades out and leaves.
-  const splash = new window.WhaleSplash(canvas, {
-    durationMs: DURATION_MS,
-    onPendant: () => close(520 + CLOSE_AFTER_FADE_MS),
-  })
-  splash.start()
+  try {
+    const splash = new window.WhaleSplash(canvas, {
+      durationMs: DURATION_MS,
+      onPendant: () => close(520 + CLOSE_AFTER_FADE_MS),
+    })
+    splash.start()
 
-  window.addEventListener('pagehide', () => splash.stop(), { once: true })
+    window.addEventListener('pagehide', () => splash.stop(), { once: true })
+  } catch (err) {
+    console.error('replay: failed to start the animation', err)
+    try {
+      drawStill()
+    } catch {
+      // 连静止帧都画不出来：那就空着淡出，总之窗口要自己走。
+    }
+    close(STILL_MS)
+  }
 })()

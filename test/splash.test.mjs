@@ -391,6 +391,8 @@ function makePage({
   innerHeight = 700,
   devicePixelRatio = 2,
   script = 'splash', // 'splash' = 欢迎窗口那两段；'replay' = 挂件重播页那一段
+  preScript = null, // (sandbox, document) => void，在被测脚本执行前改动沙箱
+  expectWarns = false, // 故意制造失败的页面：把它从「全程零告警」那条总账里摘出去
 } = {}) {
   const body = makeElement('body', { rect: { width: innerWidth, height: innerHeight, left: 0, top: 0 } });
   const documentElement = makeElement('html');
@@ -501,6 +503,10 @@ function makePage({
 
   vm.createContext(sandbox);
   vm.runInContext(ANIMATION_SRC, sandbox, { filename: ANIMATION_ENTRY });
+  // preScript：动画包已经就位、**页面脚本还没开始跑**的时候破坏沙箱里的某个东西。
+  // 有些降级路径只在「页面脚本跑起来的那一刻」才走得到，事后改属性已经太晚；
+  // 而放在动画包之前又会被它自己的导出盖回去。
+  if (preScript) preScript(sandbox, document);
   if (script === 'replay') {
     vm.runInContext(REPLAY_SRC, sandbox, { filename: REPLAY_ENTRY });
   } else {
@@ -509,6 +515,7 @@ function makePage({
 
   const page = {
     sandbox,
+    expectWarns,
     document,
     body,
     stage,
@@ -825,12 +832,53 @@ if (REPLAY_SRC === null) {
     assert.deepEqual(Array.from(p.errors), []);
   });
 
-  await check('Replay 页连画布都没有：安静退出，不建节点、不排定时器、不关窗', () => {
+  await check('Replay 页连画布都没有：立刻关窗走人（不是留一个置顶空白窗等安全网）', () => {
     const p = makePage({ script: 'replay', withCanvas: false });
     assert.equal(p.created.length, 0);
     assert.equal(p.rafCalls, 0);
-    assert.equal(p.timeouts.length, 0);
+    assert.equal(p.timeouts.length, 0, '没有画布还排了定时器 —— 说明它打算慢慢来');
+    assert.equal(p.closes, 1, '没有画布却把窗口留着：它会当 20 秒的置顶空白方块，挡着界面');
+    assert.equal(p.errors.length, 0);
+  });
+
+  await check('Replay 画不出静止帧（drawWhale 抛异常）：照样淡出关窗', () => {
+    const p = makePage({
+      script: 'replay',
+      reduce: true,
+      expectWarns: true,
+      preScript: (s) => {
+        s.drawWhale = () => {
+          throw new Error('boom: drawWhale 炸了');
+        };
+      },
+    });
+    assert.equal(p.warns.length, 1, '画不出来时应当留一条 console.error（静默失败最难查）');
+    assert.ok(String(p.warns[0]).includes('still frame'), `告警内容对不上：${p.warns[0]}`);
+    assert.ok(p.stage.classList.contains('is-done'), '抛异常之后没有走淡出');
+    for (const t of p.timeouts.slice()) t.fn();
+    assert.equal(p.closes, 1, '画不出来就不关窗 —— 用户要盯着一块置顶空白 20 秒');
+    assert.equal(p.errors.length, 0, '异常应当被脚本自己吃掉，而不是逃到 window.onerror');
+  });
+
+  await check('Replay 动画起不来（WhaleSplash 构造抛异常）：退回静止帧并关窗', () => {
+    const p = makePage({
+      script: 'replay',
+      expectWarns: true,
+      preScript: (s) => {
+        s.WhaleSplash = function Broken() {
+          throw new Error('boom: 打包坏了');
+        };
+      },
+    });
+    assert.equal(p.warns.length, 1);
+    assert.ok(String(p.warns[0]).includes('failed to start'), `告警内容对不上：${p.warns[0]}`);
+    assert.ok(
+      Array.from(p.stageCtx.ops).includes('bezierCurveTo'),
+      '动画起不来时应当退回画一张静止的鲸鱼，而不是留一块空白',
+    );
     assert.equal(p.closes, 0);
+    for (const t of p.timeouts.slice()) t.fn();
+    assert.equal(p.closes, 1);
     assert.equal(p.errors.length, 0);
   });
 }
@@ -841,7 +889,9 @@ await check('所有沙箱运行里都没有异常、也没有控制台告警', (
   assert.ok(RUNS.length >= 6, `只跑了 ${RUNS.length} 次沙箱，覆盖不够（这条会假通过）`);
   const errs = RUNS.flatMap((p) => Array.from(p.errors).map((e) => String(e && e.message ? e.message : e)));
   assert.deepEqual(errs, []);
-  const warns = RUNS.flatMap((p) => Array.from(p.warns));
+  // 故意制造失败的那几次运行（expectWarns）不看这条总账 —— 它们自己的用例里
+  // 已经逐字断言了「该有哪一条告警」，这里仍然不允许出现计划外的告警。
+  const warns = RUNS.filter((p) => !p.expectWarns).flatMap((p) => Array.from(p.warns));
   assert.deepEqual(warns, []);
 });
 

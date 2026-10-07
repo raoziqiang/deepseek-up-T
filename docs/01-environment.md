@@ -25,10 +25,14 @@ SyntaxError: Identifier 'readFileSync' has already been declared
 原因是 `patch-main.mjs` 无条件插入 `import { readFileSync, writeFileSync } from "node:fs";`，
 而原版 `main.js`（esbuild 产物）第 8 行已声明同名绑定 —— 落盘后主进程会拒绝启动。
 已删除该文件（可再生），并在 `vendor/whale/patch-main.mjs` 里修掉根因（只补缺的绑定）。
-现在有一份**语法正确、已交叉验证**的暂存包：`state/staged/app.asar` = 121,421,944 字节
+现在有一份**语法正确、已交叉验证**的暂存包：`state/staged/app.asar` = 121,422,676 字节
 （素材已搬进仓库 `vendor/whale/materials/`，重建后与搬家前那一份 sha256 完全相同，
 唯一区别是 bundle banner 里那句「从哪一份源生成」不再指向仓库外的路径；
 2026-10-06 又加了 replay 两件 —— `renderer/replay.html` + `renderer/replay.js`，声明条目 11 → 13）。
+**在用的安装包**（2026-10-06 21:36 落盘的那一份）是 121,421,984 字节 / sha256 `2c6d8b4b…`；
+暂存包此后又加了一版 replay 健壮性修复（见 `tracks/T1-appearance/README.md`），
+所以现在**暂存包比在用安装包新 692 字节，处于「待落盘」状态** —— 再跑一次
+`install-whale.cmd`（或 `node vendor/whale/install.mjs --yes`）就同步了。
 
 ## DSH 用户态（DSH_HOME）
 

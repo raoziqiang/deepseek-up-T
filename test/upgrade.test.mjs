@@ -206,45 +206,64 @@ check('人类可读输出里说明基线必须在落盘之后写', stageHumanOut
 // 天天响的假警报会淹没升级时的真警报。基准必须跟 build.mjs 的默认 --from 同源：
 // 有备份、没升级 ⇒ 比备份里的条目（备份里躺着的是没打过补丁的原版）。
 console.log('\n── 落盘后稳态（不报假「素材过期」）──');
+// 夹具里的「在用安装包」必须是**基线描述的那一份**，也就是现场真正装着的那一份。
+// 曾经这里硬链的是 state/staged/app.asar，理由是「暂存产物就是落盘后的样子」—— 只要
+// 用的人每次都先落盘再跑测试，这句话成立；但**改了素材、还没退出 Harness 落盘**时
+// 暂存包就是比基线新一份，于是这一节会报 changed（那是真的 changed，不是假警报）。
+// 而那正是「提交前必跑 10 套全绿」最常发生的状态，用它会让纪律变成不可能完成的要求。
 const steadyDir = path.join(SCRATCH, 'steady');
 const steadyRes = path.join(steadyDir, 'resources');
 fs.mkdirSync(steadyRes, { recursive: true });
 const steadyAsar = path.join(steadyRes, 'app.asar');
 const steadyBackup = path.join(steadyRes, 'app.asar.whale-backup');
 for (const f of [steadyAsar, steadyBackup]) { try { fs.unlinkSync(f); } catch {} }
-fs.linkSync(stagedFile, steadyAsar);      // 已改造的安装包（暂存产物就是落盘后的样子）
-fs.linkSync(P.asarBackup, steadyBackup);  // 完好的原版备份
-fs.writeFileSync(path.join(steadyDir, 'version'), '44.0.0\n');
-const steadyEnv = { ...process.env, DSH_UP_T_INSTALL_DIR: steadyDir };
+const installedPatched = fs.existsSync(P.asar) && fs.existsSync(P.asarBackup)
+  && (await sha256(P.asar)) !== (await sha256(P.asarBackup));
+check(
+  '稳态这一节的前提：在用的 app.asar 确实已被改造（否则它测的不是「落盘后」）',
+  installedPatched,
+);
 
 let steadyRun = null;
 let steadyJson = null;
 let steadyHuman = null;
-try {
-  steadyRun = spawnSync(process.execPath, ['src/cli.mjs', 'upgrade', '--no-hash', '--json'], {
-    cwd: PROJECT_ROOT, env: steadyEnv, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
-  });
-  try { steadyJson = JSON.parse(steadyRun.stdout); } catch { /* steadyJson 保持 null */ }
-  steadyHuman = spawnSync(process.execPath, ['src/cli.mjs', 'upgrade', '--no-hash'], {
-    cwd: PROJECT_ROOT, env: steadyEnv, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
-  });
-} finally {
-  try { fs.rmSync(steadyDir, { recursive: true, force: true }); } catch {}
+if (installedPatched) {
+  fs.linkSync(P.asar, steadyAsar);          // 已改造的安装包：基线描述的就是它
+  fs.linkSync(P.asarBackup, steadyBackup);  // 完好的原版备份
+  // 版本文件也跟着现场走：写死 '44.0.0' 会在 Harness 真升级之后变成一条假失败。
+  fs.writeFileSync(path.join(steadyDir, 'version'), `${readText(P.versionFile)?.trim() ?? ''}\n`);
+  const steadyEnv = { ...process.env, DSH_UP_T_INSTALL_DIR: steadyDir };
+  try {
+    steadyRun = spawnSync(process.execPath, ['src/cli.mjs', 'upgrade', '--no-hash', '--json'], {
+      cwd: PROJECT_ROOT, env: steadyEnv, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
+    });
+    try { steadyJson = JSON.parse(steadyRun.stdout); } catch { /* steadyJson 保持 null */ }
+    steadyHuman = spawnSync(process.execPath, ['src/cli.mjs', 'upgrade', '--no-hash'], {
+      cwd: PROJECT_ROOT, env: steadyEnv, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
+    });
+  } finally {
+    try { fs.rmSync(steadyDir, { recursive: true, force: true }); } catch {}
+  }
 }
 
-check('稳态判定为 unchanged（既没升级也没被改动）', steadyJson?.verdict === 'unchanged', String(steadyJson?.verdict ?? '(stdout 不是 JSON)'));
-check(
-  '稳态不再报「素材过期」（基准 = 原版备份，而不是已改造的安装包）',
-  (steadyJson?.stale ?? ['?']).length === 0,
-  JSON.stringify(steadyJson?.stale ?? null),
-);
-check(
-  '每条 L3 声明的 staleSources 都为空',
-  (steadyJson?.patches ?? []).filter((p) => p.layer === 'L3').every((p) => (p.staleSources ?? []).length === 0),
-);
-check('稳态退出码 0（不该拿假过期拖累退出码）', steadyRun?.status === 0, `实际 ${steadyRun?.status}`);
-check('人类可读输出里没有「素材过期」假警报', !(steadyHuman.stdout ?? '').includes('素材过期'));
-check('人类可读输出里没有「重打前必须先修素材」误导指引', !(steadyHuman.stdout ?? '').includes('重打前必须先修素材'));
+if (!installedPatched) {
+  // 没落盘过就跳过，而不是让六条断言拿 null 去假通过、也不是假装环境坏了。
+  console.log('  skip  还没落盘过（app.asar 仍是原版）—— 稳态这一节的前提不成立');
+} else {
+  check('稳态判定为 unchanged（既没升级也没被改动）', steadyJson?.verdict === 'unchanged', String(steadyJson?.verdict ?? '(stdout 不是 JSON)'));
+  check(
+    '稳态不再报「素材过期」（基准 = 原版备份，而不是已改造的安装包）',
+    (steadyJson?.stale ?? ['?']).length === 0,
+    JSON.stringify(steadyJson?.stale ?? null),
+  );
+  check(
+    '每条 L3 声明的 staleSources 都为空',
+    (steadyJson?.patches ?? []).filter((p) => p.layer === 'L3').every((p) => (p.staleSources ?? []).length === 0),
+  );
+  check('稳态退出码 0（不该拿假过期拖累退出码）', steadyRun?.status === 0, `实际 ${steadyRun?.status}`);
+  check('人类可读输出里没有「素材过期」假警报', !(steadyHuman.stdout ?? '').includes('素材过期'));
+  check('人类可读输出里没有「重打前必须先修素材」误导指引', !(steadyHuman.stdout ?? '').includes('重打前必须先修素材'));
+}
 
 console.log(bad ? `\n${bad} 个失败` : `\n全部通过`);
 process.exit(bad ? 1 : 0);
