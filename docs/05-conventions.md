@@ -6,7 +6,8 @@
 2. **`cordis.yml` 必须保持顶层 `[]`。** 所有意图写进 `cordis.patch.yml`。`doctor` 会强制检查。
 3. **不删 `app.asar.whale-backup`。** 这是本机唯一的原版安装包副本。
 4. **Harness 运行时不动 `app.asar`。** 连托盘一起退出再落盘。
-5. **不整体重建 `app.asar`。** 只用 `asar-write.mjs` 单条目重写，并用 `asar-verify.mjs` 校验差异数量。
+5. **不整体重建 `app.asar`。** 只用 `vendor/asar/write.mjs` 单条目重写，并用 `vendor/asar/verify.mjs` 校验差异数量。
+   （`write.mjs` 自己还会拒掉三种写法：输出会落进安装目录、`--out` 指向 `app.asar.whale-backup`、原地重写且 Harness 在跑。）
 6. **不在** `profiles/node_modules/@deepseek-ai/*` **里做持久改动。** 那是 L2，会被覆盖；用 L0 覆盖 row。
 
 ## 层的选择
@@ -64,7 +65,7 @@
   怎么验：<doctor / diff / 界面观察>
   怎么撤：<恢复哪个快照>
   ```
-- 提交前必跑：`node test/run.mjs`（发现式跑全 `test/*.test.mjs`，**当前 12 套**全绿）、`node src/cli.mjs doctor`（0 error）、
+- 提交前必跑：`node test/run.mjs`（发现式跑全 `test/*.test.mjs`，**当前 13 套**全绿）、`node src/cli.mjs doctor`（0 error）、
   且 `snapshot diff <快照id>` 只显示预期改动。
   **加了一套新测试就什么都不用改**——`test/run.mjs` 自己发现；反过来，`test/` 下一套都找不到时它以退出码 2 报错，
   而不是「0 套通过」地装成成功。

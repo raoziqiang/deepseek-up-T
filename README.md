@@ -128,6 +128,11 @@ deepseek-up-T/
   - ✅ **唯一一条回头路也能先演练**：`install-whale.cmd /rollback /dry`（不动在用安装包）→
     确认备份好使之后再 `install-whale.cmd /rollback`（过同一个 Harness 守卫）。同一套测试把
     `.cmd` 的两条演练路径**真的执行**一遍，Harness 在跑时再断言两条真路径被守卫拦下，并断言它全文只有 ASCII。
+  - ✅ **`vendor/asar/` 三件套自己也有回归测试**：`test/asar-tools.test.mjs`（15 条，不碰安装目录）。
+    此前 `write.mjs` 连一个自动调用者都没有，它「写哪儿」的守卫从没被跑到过；这一轮补上测试的同时
+    堵掉两条真隐患 —— 省略 `--out` 时会在安装目录里造出 `doctor` 专门报的 `app.asar.tmp` 残留
+    （那份曾经是一块坏构建，主进程一加载就 SyntaxError），以及 `--out` 指向原版备份等于烧掉
+    唯一一条回头路。两种写法现在都在打开归档之前被拒绝。
 
 > ⚠️ `cordis.patch.yml` 与 profile `package.json` 的改动**不会热重载**，必须重启 DSH 才生效；
 > `app.asar` 的改动必须**连托盘一起退出 Harness** 才能落盘。重启后请按

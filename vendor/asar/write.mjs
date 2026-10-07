@@ -3,20 +3,30 @@
 // 用法：
 //   node vendor/asar/write.mjs <归档> --set <条目> <输入文件> [--set ...] [--out <输出>]
 //
-// 与归拢前的差别（两条都是安全性的）：
+// 与归拢前的差别（四条都是安全性的）：
 //   1. **不再默认原地重写。** `--out` 省略时输出到 `<归档>.tmp`，也就是暂存位。
 //      要原地写必须显式 `--out <归档>`，且此时**强制**要求 Harness 已退出——
 //      Electron 会 memory-map app.asar，应用开着时覆盖是静默写坏的开始。
-//   2. 路径全部来自 src/paths.mjs，不再由脚本位置推 `..`。
+//   2. **`<归档>.tmp` 不许落在安装目录里。** 输入就是在用安装包时，省略 `--out` 会正好造出
+//      doctor 专门报的那个「app.asar.tmp 残留」（当初一块坏构建在那里躺了一整天，
+//      主进程一加载就 SyntaxError）。想写那里可以，但要显式写出 `--out`。
+//   3. **原版备份 (`app.asar.whale-backup`) 一律拒绝写入**，与输入是什么无关：
+//      那是唯一一条回头路。恢复安装包请用 `install.mjs --rollback`。
+//   4. 路径全部来自 src/paths.mjs，不再由脚本位置推 `..`。
 //
 // 打包算法与归拢前逐行一致（已验证：条目顺序保留、偏移 4 字节对齐、头部不填充）。
 // 注意 `unpacked: true` 的条目没有 offset，其字节在 `<归档>.unpacked/` 下，
 // 一律原样透传，绝不从数据区拷贝或重写。
 import fs from 'node:fs';
 import path from 'node:path';
-import { assertHarnessStopped, fail } from '../lib/harness.mjs';
+import { P, assertHarnessStopped, fail } from '../lib/harness.mjs';
 
 const JSON_START = 16;
+
+const isInside = (child, parent) => {
+  const rel = path.relative(path.resolve(parent), path.resolve(child));
+  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+};
 
 function main() {
   const argv = process.argv.slice(2);
@@ -42,12 +52,33 @@ function main() {
   }
   if (sets.length === 0) return fail('没有给出任何 --set 操作');
   if (!fs.existsSync(archive)) return fail(`归档不存在：${archive}`);
-  // 省略 --out 一律写暂存位，绝不默认原地重写：原地重写正在使用的安装包是
-  // 最容易把 Harness 写坏的一步，必须是**显式**选择。
+
+  // ── 三条关于「写哪儿」的规矩，全部排在真正打开归档之前 ──────────────────────
+  // 1. 唯一一条回头路不许被覆盖：`app.asar.whale-backup` 一旦写坏，装坏了就没得回去。
+  //    刻意与「输入是不是在用安装包」无关 —— 就算在拿一份副本练手，目标也不许是它。
+  if (out !== null && path.resolve(out) === path.resolve(P.asarBackup)) {
+    return fail(
+      `拒绝写入原版备份：${P.asarBackup}\n`
+      + '那是唯一一条回头路：doctor 的「原版备份」一条与 install.mjs --rollback 都靠这一份。\n'
+      + '覆盖它之后，装坏了就没有原版可以回去了。真要恢复安装包请用：\n'
+      + '  node vendor/whale/install.mjs --rollback',
+    );
+  }
   if (out === null) {
     out = `${archive}.tmp`;
+    // 2. 省略 --out 时输出会落在**输入归档旁边**。如果输入就是在用安装包，那就是安装目录里的
+    //    `app.asar.tmp` —— doctor 专门报的「残留」，也正是当初一块坏构建躺了一整天的地方
+    //    （121,415,608 B，主进程一加载就 SyntaxError）。写这里可以，但必须显式说出口。
+    if (isInside(out, P.resourcesDir)) {
+      return fail(
+        `未指定 --out，而输出会落在安装目录里：${out}\n`
+        + '那正是 doctor 会报的「app.asar.tmp 残留」。请显式指定一个安装目录之外的输出，例如：\n'
+        + '  node vendor/asar/write.mjs <归档> --set <条目> <文件> --out state/cmp/练手.asar',
+      );
+    }
     process.stdout.write(`未指定 --out，写入暂存位 ${out}\n`);
   } else if (path.resolve(out) === path.resolve(archive)) {
+    // 3. 原地重写正在使用的安装包：Electron 会 memory-map 它，应用开着时覆盖是静默写坏的开始。
     assertHarnessStopped('原地重写正在使用的 app.asar');
   }
   out = path.resolve(out);

@@ -115,9 +115,16 @@ node vendor/whale/install.mjs --rollback --to state/cmp/rollback-rehearsal.asar
 
 ## 安全约定（比功能重要）
 
-1. **省略 `--out` 绝不原地重写。** `write.mjs` 省略 `--out` 写 `<归档>.tmp`；
-   只有显式 `--out <归档>` 才原地，并且必须先通过 Harness 进程守卫。
-   原地重写正在使用的安装包是最容易把 Harness 写坏的一步，必须是**显式**选择。
+1. **`write.mjs` 只在你说了写哪儿时才写哪儿，而且原版备份一律拒写。** 三条规则
+   （2026-10-07 起）都排在打开归档之前，所以被拒绝时一个字节都不会被碰：
+   ① 省略 `--out` 写 `<归档>.tmp`（暂存位）；只有显式 `--out <归档>` 才原地，且那时必须先过
+   Harness 进程守卫 —— 原地重写正在使用的安装包是最容易把 Harness 写坏的一步，必须是**显式**选择；
+   ② 省略 `--out` 而输出会落在**安装目录里**（输入正是在用安装包时，那正好是 `doctor` 专门报的
+   `app.asar.tmp` 残留 —— 当初一块 121,415,608 B 的坏构建在那里躺了一整天，主进程一加载就 SyntaxError）
+   → 直接拒绝，并给出一个安装目录之外的例子；
+   ③ `--out` 指向 `app.asar.whale-backup` → 直接拒绝：那是唯一一条回头路（`doctor` 的「原版备份」
+   一条与 `install.mjs --rollback` 都靠这一份），覆盖它之后装坏了就没得回去了；要恢复安装包请用
+   `node vendor/whale/install.mjs --rollback`。
 2. **写安装包前必须检测 Harness 进程。** `assertHarnessStopped()` 用
    `tasklist /FI "IMAGENAME eq DeepSeek Harness.exe"` 取 pid 列表，有进程就拒绝执行
    并提示「右键托盘图标退出（只关窗口进程还在）」。**落盘与 `--rollback` 过的是同一个守卫**——
@@ -161,6 +168,16 @@ Harness 在跑时再加四条**真路径的守卫分支**（`/test` 与 `/test /
 都真的存在、`action: replace` 的页面没有丢掉原版引用过的资源、替换页的 CSP 没变严。
 `vendor/asar/verify.mjs` 回答的是「是不是按声明改了」，这一套回答的是「改对了没有」——
 两者的差别见 `tracks/T1-appearance/README.md` 里那条登录窗口页面的记录。
+
+**`vendor/asar/` 三件套自己的自检**（此前这三份脚本没有任何测试引用过：`verify.mjs` 只被
+`install.mjs` 间接用、`write.mjs` 连自动调用者都没有，于是「除落盘器之外唯一能重写归档的工具」的守卫
+从来没被跑到过）：`node test/asar-tools.test.mjs` —— 15 条断言，不碰安装目录。
+三层：① **合成本文件里自己的序列化实现**造一个几 KB 的归档（不调用被测工具，两边对不上就会失败），
+覆盖 list 正则/`--get` 往返、verify 的「恰好 n 个差异」与**同尺寸字节翻转必须失败**、
+write 的暂存位默认值与三条用法错误；② 三条「写哪儿」的守卫（含 `--out` 指向在用归档时
+按 Harness 在不在跑分别断言「被拦下」或「真的写下去」，跑的是哪一条会打印出来）；
+③ 真实归档往返：拿在用 `app.asar` 当**只读**输入换掉 `lib/main.js`，核对恰好 1 个差异、
+其余 11,478 个归档内条目一字未动，输入 sha256 未变。
 
 ## 归拢状态（源在 `D:\Z1848\harness-ds\tools\`，共 23 个脚本）
 

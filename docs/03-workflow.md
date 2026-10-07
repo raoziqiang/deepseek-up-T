@@ -170,6 +170,7 @@ node vendor/whale/install.mjs --rollback --to state/cmp/rollback-rehearsal.asar
 | 直接改 `profiles/node_modules/@deepseek-ai/*` | 升级/重装即丢失，且 diff 里看不出来 | 用 `cordis.patch.yml` 覆盖对应 row |
 | 手改 `cordis.yml` | 协议要求它是空数组，写了也会被组合层覆盖 | 写进 `cordis.patch.yml` |
 | 用通用打包器重建 `app.asar` | 会让一万多个条目字节变化，无法审计也无法回滚 | 用 `vendor/asar/write.mjs` 单条目重写 + `verify.mjs` 校验 |
+| 拿 `write.mjs` 直接改在用安装包（省略 `--out`，或 `--out` 指向原版备份） | 省略 `--out` 会在安装目录里造出 `app.asar.tmp`（`doctor` 专门报它，而当那一份恰好是坏构建时主进程一加载就 SyntaxError）；覆盖原版备份则等于烧掉唯一一条回头路 | `write.mjs` 现在三条规则都直接拒绝（输出落在安装目录 / 写原版备份 / 原地重写且 Harness 在跑）；要装到现场就显式 `--out` 到安装目录之外，再走 `install.mjs` |
 | 改完不 diff 就提交 | 误改会静默进入基线 | 提交前必跑 `snapshot diff` 或 `patchdecl` 比对 |
 | Harness 运行中尝试落盘 asar | Windows 会拒绝替换被内存映射的文件 | 连托盘一起退出再落盘 |
 | 出事时才第一次跑 `--rollback` | 它和落盘一样「一年做几次」，而且正好是出事时才跑的那一个；没跑过就等于不知道它好不好使 | 先演练 `install-whale.cmd /rollback /dry`（或 `install.mjs --rollback --to state/cmp/rollback-rehearsal.asar`），确认无误后再退出 Harness 跑 `install-whale.cmd /rollback` |
