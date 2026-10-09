@@ -90,36 +90,49 @@
   let lastX = 0
   let lastY = 0
 
-  charm.addEventListener('mousedown', (event) => {
+  charm.addEventListener('pointerdown', (event) => {
     if (event.button !== 0) return
     dragging = true
     lastX = event.screenX
     lastY = event.screenY
+    try { charm.setPointerCapture(event.pointerId) } catch {}
     api?.dragStart?.({ x: event.screenX, y: event.screenY })
     event.preventDefault()
   })
 
-  window.addEventListener('mousemove', (event) => {
+  charm.addEventListener('pointermove', (event) => {
     if (!dragging) return
     api?.dragMove?.({ dx: event.screenX - lastX, dy: event.screenY - lastY })
     lastX = event.screenX
     lastY = event.screenY
   })
 
-  const endDrag = () => {
+  const endDrag = (event) => {
     if (!dragging) return
     dragging = false
+    try { if (event?.pointerId) charm.releasePointerCapture(event.pointerId) } catch {}
     api?.dragEnd?.()
   }
-  window.addEventListener('mouseup', endDrag)
+  charm.addEventListener('pointerup', endDrag)
+  charm.addEventListener('pointercancel', endDrag)
   window.addEventListener('blur', endDrag)
+
+  // Double-click to replay splash directly
+  charm.addEventListener('dblclick', (event) => {
+    event.preventDefault()
+    api?.action?.('toggle-splash')
+  })
 
   // ── Context menu ───────────────────────────────────────────────────────────
   const hideMenu = () => { menu.hidden = true }
 
   window.addEventListener('contextmenu', (event) => {
     event.preventDefault()
-    menu.hidden = false
+    if (api?.action) {
+      api.action('context-menu')
+    } else {
+      menu.hidden = false
+    }
   })
   window.addEventListener('click', (event) => {
     if (!menu.hidden && !menu.contains(event.target)) hideMenu()
@@ -134,8 +147,4 @@
     hideMenu()
     api?.action?.(action)
   })
-
-  // ── Native window drag (Electron app-region) fallback ──────────────────────
-  // If the bridge is unavailable the CSS `app-region: drag` still moves the
-  // window natively, so the charm remains movable in every case.
 })()

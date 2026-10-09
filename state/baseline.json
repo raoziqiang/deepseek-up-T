@@ -1,5 +1,5 @@
 {
-  "capturedAt": "2026-10-07T06:13:42.597Z",
+  "capturedAt": "2026-10-09T12:41:59.534Z",
   "project": "deepseek-up-T",
   "home": "C:\\Users\\Z1848\\.dsh",
   "profile": "desktop",
@@ -23,8 +23,8 @@
     "dsh-up-t"
   ],
   "facts": {
-    "asarBytes": 121421984,
-    "asarHash": "2c6d8b4bf4716498456ca5c6aa18c7540392c7d73208d1871e86674356bdad01",
+    "asarBytes": 121424120,
+    "asarHash": "bcc632167f186b22ce6cc6131037236bb164570a66a858fe83a02b78f05b1185",
     "asarFiles": 12976,
     "asarPackages": 529,
     "asarDshPackages": 503,
@@ -32,9 +32,9 @@
   },
   "summary": {
     "error": 0,
-    "warn": 2,
-    "info": 6,
-    "total": 21
+    "warn": 3,
+    "info": 7,
+    "total": 22
   },
   "checks": [
     {
@@ -118,8 +118,8 @@
       "group": "运行时",
       "id": "T4 插件 dsh-up-t 心跳",
       "level": "warn",
-      "ok": true,
-      "detail": "dsh-up-t 0.1.0 · 2026-10-07T05:37:56.524Z（36 分钟前） · pid 35256 · 服务已就绪（路由 4 条） · 渲染层已握手（bundle+capsule+unknown）"
+      "ok": false,
+      "detail": "dsh-up-t 0.1.0 · 2026-10-09T12:34:59.974Z（7 分钟前） · pid 35872  ← 该进程已经不在了"
     },
     {
       "group": "安装包",
@@ -133,7 +133,7 @@
       "id": "app.asar 大小",
       "level": "info",
       "ok": true,
-      "detail": "115.8MB（121421984 字节）  sha256:2c6d8b4bf4716498"
+      "detail": "115.8MB（121424120 字节）  sha256:bcc632167f186b22"
     },
     {
       "group": "安装包",
@@ -151,10 +151,17 @@
     },
     {
       "group": "安装包",
+      "id": "暂存包",
+      "level": "info",
+      "ok": true,
+      "detail": "还没构建过（state/staged/app.asar 不存在）"
+    },
+    {
+      "group": "安装包",
       "id": "Harness 进程",
       "level": "info",
       "ok": true,
-      "detail": "正在运行（含托盘）"
+      "detail": "未运行"
     },
     {
       "group": "解析",

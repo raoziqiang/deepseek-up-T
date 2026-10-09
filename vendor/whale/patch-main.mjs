@@ -144,6 +144,10 @@ const showCharm = async () => {
 	window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 	window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
 	window.webContents.on("will-navigate", (event) => event.preventDefault());
+	window.webContents.on("context-menu", (event) => {
+		event.preventDefault();
+		showCharmMenu();
+	});
 	window.once("closed", () => {
 		if (charmWindow === window) charmWindow = void 0;
 	});
@@ -242,6 +246,38 @@ const replaySplash = async () => {
 		if (!window.isDestroyed()) window.destroy();
 	}, REPLAY_MAX_MS);
 };
+/** Show the native context menu for the charm window. */
+const showCharmMenu = () => {
+	if (charmWindow === void 0 || charmWindow.isDestroyed()) return;
+	const menu = Menu.buildFromTemplate([
+		{
+			label: "重播启动动画 (Replay animation)",
+			click: () => { replaySplash().catch((err) => console.error("desktop charm: replay error", err)); }
+		},
+		{
+			label: "重置位置 (Reset position)",
+			click: () => {
+				const area = screen.getPrimaryDisplay().workArea;
+				const at = clampCharmPosition(area.x + area.width - CHARM_SIZE - 24, area.y + 24);
+				charmWindow?.setPosition(at.x, at.y);
+				writeCharmState(at);
+			}
+		},
+		{ type: "separator" },
+		{
+			label: "隐藏挂件 (Hide charm)",
+			click: async () => {
+				await setCharmEnabled(false);
+				for (const win of BrowserWindow.getAllWindows()) {
+					if (!win.isDestroyed() && win !== charmWindow) {
+						win.webContents.send(CHARM_IPC.changed, false);
+					}
+				}
+			}
+		}
+	]);
+	menu.popup({ window: charmWindow });
+};
 /** Install the charm's IPC handlers exactly once per process. */
 let charmHandlersInstalled = false;
 const installCharmHandlers = () => {
@@ -313,6 +349,10 @@ const installCharmHandlers = () => {
 			// mainWindow to replay it was a no-op, because nothing in that
 			// renderer listens for it. Play it for real in its own window instead.
 			await replaySplash();
+			return true;
+		}
+		if (action === "context-menu") {
+			showCharmMenu();
 			return true;
 		}
 		throw new Error("desktop charm: unknown settings action");
