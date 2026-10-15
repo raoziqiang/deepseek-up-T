@@ -53,7 +53,7 @@ function probe(url, route, { timeoutMs = 4000 } = {}) {
 const item = (id, name, status, detail, fix = null) => ({ id, name, status, detail, fix });
 
 /** 声明项：applied 才算过；drift / absent 各给各的修法。
- *  匹配用**声明文件名**：L0 的 `id` 是 cordis 行 id（`tool-ralph`、`product-analytics`…），
+ *  匹配用**声明文件名**：L0 的 `id` 是 cordis 行 id（`session-query-sqlite`、`session-title-llm`…），
  *  和文件名不是一回事，拿 id 去找会得到「找不到声明文件」这种假失败。 */
 function declItem(r, { file, name, fixMissing, layer }) {
   const abs = r.patches.find((d) => d.layer === layer && path.basename(d.file ?? '') === file)
@@ -142,14 +142,8 @@ export async function runAccept({ hash = true, url = process.env.DSH_WEB_URL || 
   }
 
   // ── L0：profile 层（升级幸存）──────────────────────────────────
-  items.push(declItem(r, {
-    file: 'T2-product-analytics-off.yml', name: 'T2 产品埋点已关闭', layer: 'L0',
-    fixMissing: '把 patches/T2-product-analytics-off.yml 的条目追加到 profile 的 cordis.patch.yml（见该文件顶部说明）。',
-  }));
-  items.push(declItem(r, {
-    file: 'T2-enable-ralph.yml', name: 'T2 ralph 工具已开启', layer: 'L0',
-    fixMissing: '在 profile 的 cordis.patch.yml 里加 `- id: tool-ralph` / `  disabled: false`（不改 config ⇒ 完整继承 base）。',
-  }));
+  // M6：tool-ralph / product-analytics / agent-team.maxMembers 三份 T2 声明已从 patches/ 撤回，
+  // 这里不再验收它们。本机 cordis.patch.yml 不在这条命令的写入路径上。
   items.push(declItem(r, {
     file: 'T3-session-search.yml', name: 'T3 会话全文搜索已开启', layer: 'L0',
     fixMissing: "在 profile 的 cordis.patch.yml 里把 session-query-sqlite 指向 dshHomePath('session-search.sqlite')。",
@@ -289,8 +283,6 @@ export async function runAccept({ hash = true, url = process.env.DSH_WEB_URL || 
     '设置 →「通用」里那一行「桌面鲸鱼挂件」：打开后桌面上出现小鲸鱼（可拖动、右键有菜单），关掉即消失。'));
   items.push(item('manual-search', '等一下：会话全文搜索真的能搜到历史正文', 'manual',
     '搜一个只出现在历史正文里的词（例如 resolveBundleDir），看有没有命中。'));
-  items.push(item('manual-ralph', '等一下：工具目录里有 ralph', 'manual',
-    '在会话里问一下可用工具，或看工具目录里有没有 ralph（长任务用全新子 agent 接力）。'));
   items.push(item('manual-titles', '等一下：会话标题更长、更能区分', 'manual',
     '开一个新会话说一句长话，看标题是不是比原来更容易区分。'));
 

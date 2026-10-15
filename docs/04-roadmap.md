@@ -61,13 +61,13 @@
 - OpenCode Go 订阅已接入 3 条路由（chat / responses / messages），约 30 个模型，凭据走 `OPENCODE_GO_API_KEY`。
 - `agent-default-model`：`opencode-go-chat` / `glm-5.3`（用户在 GUI 里改过）。
 - `agent-preset-registry`：`selectedDefault: cordis` ⇒ 新会话跑 `preset-cordis`，它与 `preset-standard` 的唯一差别是多一个 `tool-cordis`。
-- `subagent`：`maxDepth: 2`；`agent-team`：`maxMembers: 16`（本项目 2026-10-07 从 bundle 的 8 抬到包作者默认值 16）。
+- `subagent`：`maxDepth: 2`。`agent-team.maxMembers` 维持 bundle 写的 `8`（包作者默认 16）；抬到 16 的仓库声明已在 **M6** 撤回。
 - 12 个 bundle 里含插件市场、上下文、记忆、Agent Teams、自动评审、定时、语音输入。
 
 **已核实的抓手**
 | 抓手 | 在哪 | 现状 |
 | --- | --- | --- |
-| `tool-ralph` | base 行 `disabled: true` | ✅ **已落盘**（2026-10-06，现场 `cordis.patch.yml` 第 12 条，重启 DSH 后生效）。它是「每 Round 一个全新子 agent + 有界交接（默认 16384 字符），绝不复制父对话」的迭代循环 ⇒ 长任务上下文成本从 `O(轮数 × 累积历史)` 降到 `O(轮数 × 交接上限)`。base 默认关的理由仍成立：**完成是 worker 自我报告，没有独立评估**，所以只在「明确要求全新 agent 迭代」时用；普通长期工作用 `goal`，有界委派用 `subagent` / `workflow` |
+| `tool-ralph` | base 行 `disabled: true` | **M6 已撤回仓库声明**。base 默认关的理由仍成立：**完成是 worker 自我报告，没有独立评估**。它仍是「每 Round 一个全新子 agent + 有界交接」的迭代循环；仓库不再声称现场必须打开它 |
 | `session-query-sqlite` | base `openAt: never` | **会话全文搜索默认关闭**，overlay 可改 `first-search` / `startup` |
 | `spill-policy` | `maxInlineTokens: 12500` | 大结果落盘阈值 |
 | `tool-result-pruner` | `thresholdChars: 8192` | 工具结果预压缩 |
@@ -75,16 +75,16 @@
 | `dsh-mcp-client` | 宿主包存在 | MCP 接入能力在手，未启用 |
 | `dsh-tool-web` | `searchTimeoutMs: 60000` | 联网搜索/抓取 |
 | `dsh-skill` / `dsh-skill-filesystem` | 已挂载 | 技能目录 |
-| `agent-team` | bundle 插入行 `maxMembers: 8` | ✅ **已改 16**（2026-10-07）。名额是**每支团队累计、含创建失败的成员、名字永不复用**，所以 8 是「一辈子最多 8 个名字」而不是「同时 8 个在跑」；恢复包作者默认值只抬天花板。同时存活的**可续接子代理**仍由 `subagent.maxActiveSubagents`（默认 8）限制 —— 两道闸门别混为一谈 |
+| `agent-team` | bundle 插入行 `maxMembers: 8` | **M6 已撤回仓库声明**（2026-10-07 曾写成 16）。名额是**每支团队累计、含创建失败的成员、名字永不复用**，所以 8 是「一辈子最多 8 个名字」。同时存活的**可续接子代理**仍由 `subagent.maxActiveSubagents`（默认 8）限制，两道闸门别混为一谈 |
 | `system-prompt` | base 已设 `personaPrefix` / `personaSuffix` | **不动**：base 自带「你是一个由 `{{model}}` 驱动的编码 agent」+「你的工作目录是 `{{cwd}}`」；`toolOrder` 有「列了名字但没注册工具 ⇒ 每次 assemble() 被拒」的锐边。要长期注入的自定义人格放**按目录作用域**的指令文件，而不是全局提示词 |
 | `agent-loop.maxParallelToolCalls` | 未设 ⇒ 默认 `10` | **不动**：没有「并行度不够」的证据 |
 
 **候选动作**
 1. 加 Provider：在 `llm-pi-ai.providers` 下加一节（`apiKeyEnv` + `api` + `baseURL` + `models`）。
 2. 开 MCP：接入本地/远端 MCP server，把外部工具变成 DSH 工具。
-3. ~~按需开 `tool-ralph`~~ ✅ 2026-10-06 已落盘。
+3. ~~按需开 `tool-ralph`~~ 2026-10-06 曾落盘；**M6 已撤回仓库声明**。
 4. 写自己的 skill（`dsh-skill-filesystem` 认目录）✅ 2026-10-06 已完成。
-5. ~~调 Agent 行为~~ ✅ 2026-10-07 已把「Agent 行为」读成一张旋钮表并落了一处（`agent-team.maxMembers`）；其余各项**有证据地不动**，理由与锐边见 `tracks/T2-capability/README.md`。
+5. ~~调 Agent 行为~~ 2026-10-07 已把「Agent 行为」读成一张旋钮表。当时落过的 `agent-team.maxMembers` 仓库声明已在 **M6** 撤回；其余各项**有证据地不动**，理由与锐边见 `tracks/T2-capability/README.md`。
 6. 另存一份 preset（新建/覆盖 preset 只能靠 bundle 补丁 + `plugin_manager`，见 `patches/README.md`）—— 无目标，暂不动手。
 
 **验收**：模型选择器里出现新模型并能真实对话；新工具在工具目录里可见且可调用。
@@ -298,7 +298,8 @@
 | **M2** | T5 `../tools/` 归拢进 `vendor/`（构建链闭环）+ T1 鲸鱼动画落盘 | ✅ 2026-10-06 晚全部完成：构建链闭环 + 落盘（12 项自动判定全过；观感那一眼归你） |
 | **M3** | T2 新增 Provider + T4 自建 Web 插件样板 | 🚧 T4 样板**已落地并重启验收**（L1 插件 + 设置页 + 操作按钮 + 桌面挂件开关；10:48 重启后操作通道与两条握手通道实测在线）；T2 新增 Provider 卡在**需要用户给出目标**（baseURL + key，或 MCP 服务器） |
 | **M4** | 升级重打自动化 | 🚧 检测 + **半自动重打**（`upgrade --stage`）+ **离线演练落盘**（`--to`）+ **离线演练回滚**（`--rollback --to`）+ **一键脚本三条路**（`install-whale.cmd` 的 `/dry` `/rollback /dry` `/rollback`）已交付；自动落盘**不做**（要人挑时间，见 `docs/03-workflow.md`） |
-| **M5** | T2/T3 落地批次：启用 `tool-ralph`、会话标题更长、上下文阈值核实、关闭产品埋点、写项目 skill | ✅ **已全部落盘并重启验收**（ralph / 标题 / 埋点开关 / skill；10:48 重启后 `dsht upgrade` 报 4 份 L0 声明全部 OK）；阈值核实结论是**维持不动**；灵枢记忆策略已梳理（三个插件机制正交，都不动），2026-10-07 补完 33 个配置键逐项体检 + 自动记忆实测 |
+| **M5** | T2/T3 落地批次：启用 `tool-ralph`、会话标题更长、上下文阈值核实、关闭产品埋点、写项目 skill | ✅ 当时已落盘并重启验收（标题 / skill 仍在；阈值维持不动；灵枢记忆策略已梳理）。三份 T2 开关的仓库声明已由 **M6** 撤回 |
+| **M6** | 撤回 T2 三个开关的仓库声明，关上这条门：`tool-ralph`、产品埋点关闭、`agent-team.maxMembers` | ✅ 2026-10-15：三份 `patches/T2-*.yml` 已删除。`dsht upgrade` 不再把它们报成「现场 cordis.patch.yml 里没有这一条」。只动仓库声明，不改本机 `cordis.patch.yml` |
 
 ### M4 的验收标准
 
