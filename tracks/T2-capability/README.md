@@ -14,7 +14,7 @@
   2026-10-07 的模型选择器与真实 `OK` 回复已核对。早先记录的 `glm-5.3` 是当时快照，非现值。
 - `agent-preset-registry`：`default: standard`、`selectedDefault: cordis`
   ⇒ **新会话跑的是 `preset-cordis`**，它与 `preset-standard` 的唯一差别是多一个 `tool-cordis`。
-- `subagent`：`maxDepth: 2`（base/包默认 1）；`agent-team`：`maxMembers: 16`（本项目 2026-10-07 改，bundle 原本 8）。
+- `subagent`：`maxDepth: 2`（base/包默认 1）。`agent-team.maxMembers` 维持 bundle 自己写的 `8`（包作者默认 16）；把上限抬到 16 的仓库声明已在 **M6** 撤回。
 
 **已装的能力 bundle（13 个）：** base、web-app、dshmarket、dsh-context、billion-context、
 dsh-memory、better-sidebar、whale-widget，4 个 experimental（Agent Teams、自动评审、定时、语音输入），
@@ -24,7 +24,7 @@ dsh-memory、better-sidebar、whale-widget，4 个 experimental（Agent Teams、
 
 | 抓手 | 位置 | 现状 |
 | --- | --- | --- |
-| `tool-ralph` | base 行 `disabled: true` | ✅ **已落盘**（2026-10-06，现场 `cordis.patch.yml` 第 12 条，重启后生效）；预检 0 问题、只改 1 行，row-key 合并已实测验证 |
+| `tool-ralph` | base 行 `disabled: true` | **M6 已撤回仓库声明**。`patches/` 里不再有这份开关，`dsht upgrade` 只核对还在目录里的声明 |
 | `session-query-sqlite` | base `openAt: never` | ✅ 已由 T3 打开（会话全文搜索） |
 | `llm-pi-ai.providers` | 已用 | 加 Provider = 加一节 |
 | `dsh-mcp-client` | 宿主包存在 | MCP 接入能力在手，未启用 |
@@ -32,19 +32,17 @@ dsh-memory、better-sidebar、whale-widget，4 个 experimental（Agent Teams、
 | `spill-policy` | `maxInlineTokens: 12500` | 大结果落盘阈值 |
 | `dsh-tool-web` | `searchTimeoutMs: 60000` | 联网搜索与抓取 |
 | `system-prompt` | base 已设 `personaPrefix` / `personaSuffix` | **不动**：base 自带「你是一个由 `{{model}}` 驱动的编码 agent」+「你的工作目录是 `{{cwd}}`」；锐边见下方记录 |
-| `agent-team` | bundle 插入行 `maxMembers: 8` | ✅ **已改 16**（2026-10-07，恢复包作者默认值），见下方记录 |
+| `agent-team` | bundle 插入行 `maxMembers: 8` | **M6 已撤回仓库声明**（2026-10-07 曾把上限写成 16）。仓库现状回到 bundle 的 8 |
 | `agent-loop.maxParallelToolCalls` | 未设 ⇒ 默认 `10` | **不动**：没有「并行度不够」的证据，调它只是赌 |
 | `subagent.maxActiveSubagents` | 未设 ⇒ 默认 `8` | **不动**：见下方记录（一次性运行不受它限制，所以工作流扇出不会撞它） |
-| `product-analytics` | base `enabled: true`（界面无开关） | ✅ **已落盘关闭**（2026-10-06，经用户确认），见下方记录 |
+| `product-analytics` | base `enabled: true`（界面无开关） | **M6 已撤回仓库声明**。关闭埋点不再是 `patches/` 里的权威声称 |
 
 ## 待办
 
 - [x] 用户指定 DeepSeek V4.1 Flash，并选择沿用现有 `opencode-go-chat` 路由；不新增重复 Provider
 - [ ] 接入 MCP server，把外部工具变成本地 DSH 工具
-- [x] **落盘 `tool-ralph`** —— 2026-10-06 完成（用户确认后落盘），见下方记录
 - [x] **写自有 skill** —— 2026-10-06 完成：`.dsh/skills/deepseek-up-t/SKILL.md` + 两条 junction + 离线单测 9/9，见下方记录
-- [x] **关闭桌面端产品埋点** —— 2026-10-06 完成（经用户确认后落盘），见下方记录
-- [x] **Agent Teams 成员上限 8 → 16** —— 2026-10-07 完成（L0 第 15 条，预检 0 问题），见下方记录
+- [x] **M6：撤回三份 T2 开关的仓库声明** —— `tool-ralph`、产品埋点关闭、`agent-team.maxMembers` 16。只删 `patches/` 里的声明，本机 `cordis.patch.yml` 不动。见下方记录
 - [x] **调 Agent 行为：先把「Agent 行为」到底是哪些旋钮读清楚** —— 2026-10-07 完成（四个 preset 的真实差异、`system-prompt` 全部键与两个陷阱、`subagent` 的 depth 与并发两道闸门、`agent-loop.maxParallelToolCalls`、dump 里一长串 `[disabled]` 的来历），见下方记录
 - [x] DeepSeek V4.1 Flash 真对话验收：运行时 Provider 注册、模型选择、测试会话回复 `OK` 全部通过（2026-10-07，`node vendor/route/verify-v41-flash.mjs`）
 - [ ] MCP server：尚无具体服务目标
@@ -57,6 +55,22 @@ dsh-memory、better-sidebar、whale-widget，4 个 experimental（Agent Teams、
 - `node src/cli.mjs doctor` 中「patch 引用的包可解析」保持 OK。
 
 ## 记录
+
+### 2026-10-15 · M6：撤回三份 T2 开关的仓库声明
+
+`patches/` 里的 L0 文件是权威声称：`dsht upgrade` 会拿每一份去对现场 `cordis.patch.yml`。对不上就报「现场 cordis.patch.yml 里没有这一条」（声明了，现场没有），退出码 1。这三份开关已经不再作为仓库声明存在：
+
+| 撤回的声明 | 它曾经声称的现场 |
+| --- | --- |
+| `T2-enable-ralph.yml` | `tool-ralph` `disabled: false` |
+| `T2-product-analytics-off.yml` | `product-analytics` `enabled: false` |
+| `T2-agent-team-members.yml` | `agent-team.maxMembers: 16` |
+
+三份文件已删除。`dsht upgrade` / `dsht accept` 的清单里不再有它们，所以升级检测不会再为这三行报「声明了但现场没有」。
+
+**这次只动仓库。** 本机 profile 的 `cordis.patch.yml` 没有改，也没有走任何 L0 落盘路径。机器上如果还留着当年写进去的行，那是现场自己的事；仓库不再拿一份声明去要求它。
+
+下面 2026-10-06 / 2026-10-07 的记录保留侦察结论。文中出现的那三个文件名是当时的路径，文件已经不在 `patches/` 里。
 
 ### 2026-10-06 · 侦察：`tool-ralph` 是一个被关掉的「全新 agent 迭代」能力
 
@@ -88,9 +102,9 @@ base 的注释原话：该工具的描述把 `ralph` 限制在「人类明确要
 它适合「用户明确要求全新 agent 迭代」的场景，不适合当作默认的长期工作方式
 （普通长期工作应该用 `goal` 工具，有界委派用 `subagent` / `workflow`）。
 
-**做了什么**
+**当时做了什么**（声明文件已在 M6 删除）
 
-`patches/T2-enable-ralph.yml` 声明式副本 —— 只写一行，不给 `config`：
+当时的声明只写一行，不给 `config`：
 
 ```yaml
 - id: tool-ralph
@@ -100,9 +114,9 @@ base 的注释原话：该工具的描述把 `ralph` 限制在「人类明确要
 **为什么只写一行**：patch 是按行键合并的（同 id 命中已存在的行，只覆盖给出的键），
 而 `config` 一旦给出是**整体替换**。所以不给 `config` 就继承了 base 的
 `subagentProvider: spawn` + `maxRounds: 64` —— 比 README 的默认 256 更保守。
-（这一点也是本项目 `patches/README.md` 里「L0 声明」那一类的意义所在。）
+（这一点也是本项目 `patches/README.md` 里「L0 声明」那一类的意义所在。M6 之后仓库里现存的 L0 声明都给了 `config`。）
 
-**怎么验的**（只读，没有落盘）
+**当时怎么验的**（只读；下面这条命令指向的文件已在 M6 删除）
 
 ```
 node src/cli.mjs precheck --patch patches\T2-enable-ralph.yml
@@ -116,7 +130,7 @@ node src/cli.mjs precheck --patch patches\T2-enable-ralph.yml
 **结论：能力本身可用且组合干净，但这是一次会改变「模型能看到什么工具」的行为开关，
 所以把声明和证据备好，等用户决定是否落盘 —— 不擅自替用户改 Agent 的行为边界。**
 
-**怎么落盘 / 怎么撤**
+**当时怎么落盘 / 怎么撤**（历史步骤。M6 已撤回仓库声明：不要按这里改本机 `cordis.patch.yml`，也不要把声明文件加回 `patches/`。）
 
 ```powershell
 # 落盘前先快照
@@ -203,11 +217,11 @@ node src/cli.mjs baseline write
 那不是 bug：`patches/` 里的声明是**权威描述**（claim），不是建议；放进去就等于声称
 「现场应该是这样」。这条语义以后要记住：**只想提建议时别放 `patches/`。**
 
-**怎么落的**（严格走六步环）：
+**当时怎么落的**（历史步骤，严格走六步环；声明文件已在 M6 删除，不要再按这里改本机 profile）：
 
 1. `node src/cli.mjs snapshot create -m "T2 关闭产品埋点 改动前"`
    → `20261006-084554-T2-关闭产品埋点-改动前`。
-2. `precheck --patch patches/T2-product-analytics-off.yml` 已在前面验过：退出码 0、问题 0、
+2. `precheck --patch` 对着当时的产品埋点声明验过（该文件已在 M6 删除）：退出码 0、问题 0、
    `~ 条目 product-analytics` / `- enabled: true` / `+ enabled: false`。
 3. 追加到 `$DSH_HOME/profiles/desktop/cordis.patch.yml` 末尾。
    **落盘前后的字节事实**：8130 B / 206 行 → **9138 B / 221 行**，行尾 LF，
@@ -360,7 +374,7 @@ personaPrefix: You are a coding agent powered by the {{model}} model.
   `+ maxMembers: 16`」，这是**唯一差异**的直接证据；
   ④ 查组合结果确认另外四个字段（`maxTasks: 256` / `maxPendingMessagesPerMember: 64` /
   `maxMessageBytes: 65536` / `disposalTimeoutMs: 5000`）**原样保留**；
-  ⑤ 声明文件 `patches/T2-agent-team-members.yml`；⑥ `baseline write` 重新固化。
+  ⑤ 当时写入声明文件（M6 已删除）；⑥ `baseline write` 重新固化。
 - **为什么五个字段全写**：patch 按 id **整体替换**该行的 `config`（不是深合并）。只写
   `maxMembers` 会让另外四个退回插件代码默认值 —— 它们恰好也相等，但不能靠这种巧合。
 - **撤**：删掉现场那一条，或

@@ -224,7 +224,7 @@
 
 **为什么五个字段全部写出来**：patch 是**按 id 整体替换该行的 config**（不是深合并），
 而该条目的五个字段在 schema 里全部 `.required()` —— 漏写任何一个那条条目都会校验失败。
-（对比 `tool-ralph`：那里只写 `disabled: false` 是安全的，因为**没给** `config`，于是完整继承 base 的。）
+（对比当时的 `tool-ralph` 开关：那里只写 `disabled: false` 是安全的，因为**没给** `config`，于是完整继承 base 的。那份声明已在 M6 从 `patches/` 撤回。）
 另据 `state/probe-config-schema.txt`，这几个字段只要求 `"minimum": 1`，**没有上界**，所以放大是合法的。
 
 **怎么验的**：`precheck --patch` 先离线跑一遍，差异**恰好 3 行**（`targetWords` / `targetCjkCharacters` /

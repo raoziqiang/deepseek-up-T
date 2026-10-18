@@ -104,7 +104,7 @@ C:\Users\Z1848\.dsh\profiles\
 | P2 | 鲸鱼启动动画未落盘 | 备份与当前 asar sha256 一致 | ✅ **已处置**（2026-10-06 晚）：落盘完成，`app.asar` 与 `state/staged/app.asar` 逐字节相同（121,421,984 B），备份完好可回滚；`dsht accept` 12 项自动判定全过 |
 | P3 | 4 个 bundle + 3 个 patch 包只存在于安装包内 | `doctor` WARN | 改造它们只能走 L3，风险最高，需单独立项 |
 | P4 | 会话全文搜索默认关闭 | base 里 `session-query-sqlite.openAt: never` | ✅ **已处置**（2026-10-06，改 `path` + `openAt: first-search`），待重启验收 |
-| P5 | `tool-ralph` 默认 disabled | base 行 `disabled: true` | 需要时用 overlay 打开 |
+| P5 | `tool-ralph` 默认 disabled | base 行 `disabled: true` | ✅ **M6 撤回仓库声明**（2026-10-15）：`patches/` 不再附带打开它的 overlay。base 保持默认关闭 |
 
 ## 2026-10-06 补充实测（三条会直接影响判断的事实）
 

@@ -18,6 +18,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runAccept, printAccept } from '../src/accept.mjs';
+import { resolvePaths } from '../src/paths.mjs';
 
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -202,17 +203,28 @@ console.log('── 报告措辞 ──');
 console.log('── 真现场的 L0 声明 ──');
 {
   const r = await run({ hash: false, url: 'http://127.0.0.1:1', timeoutMs: 1000 });
-  for (const f of ['T2-product-analytics-off.yml', 'T2-enable-ralph.yml', 'T3-session-search.yml', 'T3-session-title.yml']) {
-    const it = declOf(r, f);
-    check(`${f} 被找到且没有报「找不到声明文件」`, Boolean(it) && !/找不到声明文件/.test(it.detail ?? ''), it?.detail);
-    check(`${f} 判为 pass（声明与现场一致）`, it?.status === 'pass', it?.status);
+  const withdrawn = ['T2-product-analytics-off.yml', 'T2-enable-ralph.yml', 'T2-agent-team-members.yml'];
+  for (const f of withdrawn) {
+    check(`M6：${f} 不再是验收项`, !r.items.some((i) => i.id === f));
+    check(`M6：patches/ 里没有 ${f}`, !fs.existsSync(path.join(PROJECT_ROOT, 'patches', f)));
   }
+  check('M6：不再要求工具目录里有 ralph', !r.items.some((i) => i.id === 'manual-ralph'));
   const t1 = declOf(r, 'T1-whale-splash.yml');
   check('T1 声明存在（状态取决于有没有落盘，但必须找得到）', Boolean(t1), t1?.detail);
   check('T1 的文件名与 cordis 行 id 不同这件事被正确处理（不是靠 id 找文件）',
     Boolean(t1) && !/找不到声明文件/.test(t1.detail ?? ''));
-  const pa = declOf(r, 'T2-product-analytics-off.yml');
-  check('L0 项的 detail 里带上真正的 cordis id，便于对账', /product-analytics/.test(pa?.detail ?? ''), pa?.detail);
+  const livePatch = resolvePaths().cordisPatch;
+  if (!fs.existsSync(livePatch)) {
+    check('本机没有 cordis.patch.yml，跳过「T3 声明与现场一致」', true, livePatch);
+  } else {
+    for (const f of ['T3-session-search.yml', 'T3-session-title.yml']) {
+      const it = declOf(r, f);
+      check(`${f} 被找到且没有报「找不到声明文件」`, Boolean(it) && !/找不到声明文件/.test(it.detail ?? ''), it?.detail);
+      check(`${f} 判为 pass（声明与现场一致）`, it?.status === 'pass', it?.status);
+    }
+    const search = declOf(r, 'T3-session-search.yml');
+    check('L0 项的 detail 里带上真正的 cordis id，便于对账', /session-query-sqlite/.test(search?.detail ?? ''), search?.detail);
+  }
 }
 
 // ── 8. 待落盘的暂存包：验收命令不许对此沉默 ──
