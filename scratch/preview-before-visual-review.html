@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark">
+    <title>星鲸 · 启动动画预览</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif;
+        background: #020613;
+        color: #dbeafe;
+      }
+      * { box-sizing: border-box; }
+      html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+      body { background: #020613; }
+      #whale-stage {
+        position: fixed;
+        inset: 0;
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+      .controls {
+        position: fixed;
+        z-index: 2;
+        left: 24px;
+        bottom: 22px;
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        padding: 10px 14px;
+        border: 1px solid rgba(125, 211, 252, 0.25);
+        border-radius: 8px;
+        background: rgba(4, 12, 28, 0.88);
+        color: #cbdcf4;
+        font-size: 13px;
+      }
+      button {
+        min-height: 36px;
+        padding: 7px 13px;
+        border: 1px solid rgba(125, 211, 252, 0.5);
+        border-radius: 6px;
+        background: #0b1c36;
+        color: #e6f7ff;
+        font: inherit;
+        cursor: pointer;
+      }
+      button:hover { background: #123052; }
+      button:focus-visible, input:focus-visible {
+        outline: 2px solid #67e8f9;
+        outline-offset: 3px;
+      }
+      label { display: inline-flex; align-items: center; gap: 8px; }
+      input { accent-color: #38bdf8; }
+      .status {
+        position: fixed;
+        z-index: 2;
+        right: 24px;
+        bottom: 31px;
+        margin: 0;
+        color: #94a3b8;
+        font-size: 12px;
+        letter-spacing: 0.02em;
+      }
+      @media (max-width: 560px) {
+        .controls { left: 12px; bottom: 12px; gap: 12px; }
+        .status { right: 12px; bottom: 66px; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        button { transition: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="whale-stage" aria-label="星鲸跃过星海并激起涟漪"></canvas>
+    <div class="controls">
+      <button id="replay" type="button">重播星海</button>
+      <label><input id="reduce-motion" type="checkbox"> 减弱动态效果</label>
+    </div>
+    <p class="status" id="status" role="status" aria-live="polite">星鲸 · 约 6.8 秒</p>
+    <script type="module">
+      import { WhaleSplash, WHALE_SPLASH_DURATION_MS } from './whale-animation.js'
+
+      const canvas = document.getElementById('whale-stage')
+      const status = document.getElementById('status')
+      const reduceMotion = document.getElementById('reduce-motion')
+      let splash
+
+      function play() {
+        splash?.stop()
+        status.textContent = reduceMotion.checked
+          ? '减弱动态效果 · 静态收尾画面'
+          : '星鲸 · 约 ' + (WHALE_SPLASH_DURATION_MS / 1000).toFixed(1) + ' 秒'
+        splash = new WhaleSplash(canvas, {
+          durationMs: WHALE_SPLASH_DURATION_MS,
+          reducedMotion: reduceMotion.checked,
+          onPendant: () => { status.textContent = '星海渐隐 · 挂件随后淡入' },
+        })
+        splash.start()
+      }
+
+      document.getElementById('replay').addEventListener('click', play)
+      reduceMotion.addEventListener('change', play)
+      window.addEventListener('pagehide', () => splash?.stop(), { once: true })
+      window.__splash = () => splash
+      play()
+    </script>
+  </body>
+</html>

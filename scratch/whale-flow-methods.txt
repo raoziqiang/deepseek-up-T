@@ -1,0 +1,110 @@
+  // All wake elements use past deformed tail positions, not a separate timer.
+  tailAt(t){
+    const p=this.whalePose(t),seconds=t*this.durationMs/1000;
+    const point=deformWhalePoint(.91,.22,seconds),L=this.whale.len;
+    const x=point.x*.88*L/2,y=-point.y*.88*L/(880/478)/2;
+    return {x:p.x+Math.cos(p.rotation)*x-Math.sin(p.rotation)*y,
+      y:p.y+Math.sin(p.rotation)*x+Math.cos(p.rotation)*y,rotation:p.rotation,alpha:p.alpha};
+  }
+  prepareFlow(t){
+    const seconds=t*this.durationMs/1000,L=this.whale.len;
+    this.flowPose=this.whalePose(t);this.flowWaves=[];
+    if(this.reduced)return;
+    // Each half-stroke leaves a crest which grows after the whale has passed.
+    const interval=Math.PI/SWIM_RATE;
+    for(let emitted=.48;emitted<5.45;emitted+=interval){
+      const age=seconds-emitted;if(age<0||age>3.1)continue;
+      const tail=this.tailAt(emitted/(this.durationMs/1000));
+      const strength=smooth(0,.22,age)*Math.exp(-age*.63)*tail.alpha*(1-smooth(.91,1,t));
+      this.flowWaves.push({x:tail.x+age*L*.055,y:tail.y+age*L*.025,
+        angle:tail.rotation-.25,rx:L*(.11+age*.29),ry:L*(.06+age*.15),strength,age});
+    }
+  }
+  flowAt(x,y){
+    if(this.reduced)return {dx:0,dy:0,light:0};
+    const p=this.flowPose,L=this.whale.len,vx=x-p.x,vy=y-p.y;
+    const d=Math.hypot(vx/(L*.66),vy/(L*.38));
+    const influence=Math.exp(-d*d*1.5)*p.alpha*(1-smooth(.78,.94,p.u));
+    let dx=(vx*.15-L*.025)*influence,dy=vy*.25*influence,light=influence*.24;
+    for(const wave of this.flowWaves){
+      const ca=Math.cos(wave.angle),sa=Math.sin(wave.angle),ox=x-wave.x,oy=y-wave.y;
+      const lx=ca*ox+sa*oy,ly=-sa*ox+ca*oy;
+      const r=Math.hypot(lx/wave.rx,ly/wave.ry),band=(r-1)*wave.rx/(L*.075);
+      const crest=Math.exp(-band*band)*wave.strength;
+      const push=Math.sin(band*2.2)*crest*L*.045;
+      const n=Math.hypot(lx,ly*1.7)||1,nx=lx/n,ny=ly*1.7/n;
+      dx+=(ca*nx-sa*ny)*push;dy+=(sa*nx+ca*ny)*push;
+      light+=crest*.8;
+    }
+    return {dx,dy,light};
+  }
+  drawContinuum(t){
+    const c=this.ctx,L=this.whale.len,seconds=t*this.durationMs/1000,p=this.flowPose;
+    c.save();c.globalCompositeOperation='screen';
+    const envelope=p.alpha*(1-smooth(.80,.98,t));
+    const glow=c.createRadialGradient(p.x,p.y,0,p.x,p.y,L*.72);
+    glow.addColorStop(0,'rgba(35,126,173,'+(envelope*.095)+')');
+    glow.addColorStop(.5,'rgba(47,61,143,'+(envelope*.055)+')');glow.addColorStop(1,'rgba(0,0,0,0)');
+    c.fillStyle=glow;c.fillRect(0,0,this.width,this.height);
+    // Filaments are delayed tail trajectories. A stroke travels into the wake.
+    for(let strand=0;strand<13;strand++){
+      const spread=(strand-6)/6,points=[];
+      for(let j=0;j<=48;j++){
+        const age=j/48*2.25,pt=t-age/(this.durationMs/1000);
+        if(pt<.045)break;
+        const a=this.tailAt(pt),fan=L*spread*(.012+.14*Math.pow(age,1.2));
+        const curl=Math.sin(age*3.8-seconds*1.4+spread)*L*.025*age;
+        points.push({x:a.x+age*L*.08-Math.sin(a.rotation)*(fan+curl),
+          y:a.y+Math.cos(a.rotation)*(fan+curl),age});
+      }
+      if(points.length<2)continue;
+      const first=points[0],last=points[points.length-1];
+      const opacity=(.16+.18*(1-Math.abs(spread)))*envelope;
+      const grad=c.createLinearGradient(first.x,first.y,last.x,last.y);
+      grad.addColorStop(0,'rgba(137,231,247,'+opacity+')');
+      grad.addColorStop(.35,'rgba(104,158,239,'+opacity*.8+')');
+      grad.addColorStop(1,'rgba(129,105,216,0)');
+      c.strokeStyle=grad;c.lineWidth=strand%3===0?1.05:.5;c.beginPath();
+      points.forEach((q,i)=>i?c.lineTo(q.x,q.y):c.moveTo(q.x,q.y));c.stroke();
+      // Fine luminous grains travel on the same filaments, not in straight rows.
+      for(let j=3+(strand%3);j<points.length;j+=7){
+        const q=points[j],alpha=opacity*(1-q.age/2.25)*1.7;
+        c.fillStyle='rgba(172,226,255,'+alpha+')';c.beginPath();c.arc(q.x,q.y,.65+(strand%3)*.22,0,Math.PI*2);c.fill();
+      }
+    }
+    // Broad translucent crests read as bent space instead of flat water rings.
+    for(const wave of this.flowWaves){
+      const ca=Math.cos(wave.angle),sa=Math.sin(wave.angle);
+      const path=()=>{
+        c.beginPath();
+        for(let j=0;j<=100;j++){
+          const a=j/100*Math.PI*2,fold=1+.055*Math.sin(a*3-wave.age*2);
+          const x=Math.cos(a)*wave.rx*fold,y=Math.sin(a)*wave.ry*fold;
+          const px=wave.x+ca*x-sa*y,py=wave.y+sa*x+ca*y;
+          if(j)c.lineTo(px,py);else c.moveTo(px,py);
+        }c.closePath();
+      };
+      for(const [width,alpha] of [[18,.018],[7,.035],[1.1,.24]]){
+        path();c.lineWidth=width;c.strokeStyle='rgba(119,179,242,'+wave.strength*alpha+')';c.stroke();
+      }
+    }
+    c.restore();
+  }
+  drawStars(t,seconds){
+    const c=this.ctx,w=this.width,h=this.height;
+    c.drawImage(this.background,0,0,w,h);
+    for(const s of this.stars){
+      const x=(s.x*w+seconds*s.z*1.25)%w,y=s.y*h,f=this.flowAt(x,y);
+      const px=x+f.dx,py=y+f.dy;
+      const alpha=clamp((.22+s.z*.45)*(1+.14*Math.sin(s.phase+seconds*.65))+f.light*.42);
+      if(f.light>.08){
+        c.beginPath();c.moveTo(px-f.dx*.5,py-f.dy*.5);c.quadraticCurveTo(x,py,px,py);
+        c.lineWidth=.5+s.r*.4;c.strokeStyle='rgba(139,196,248,'+clamp(f.light*.30)+')';c.stroke();
+      }
+      c.fillStyle='rgba(179,216,242,'+alpha+')';c.beginPath();c.arc(px,py,s.r*(.7+s.z*.3)+Math.min(.7,f.light*.35),0,Math.PI*2);c.fill();
+      if(s.r>1.1&&s.z>.85){
+        c.strokeStyle='rgba(174,211,226,'+alpha*.30+')';c.lineWidth=.55;c.beginPath();
+        c.moveTo(px-3,py);c.lineTo(px+3,py);c.moveTo(px,py-3);c.lineTo(px,py+3);c.stroke();
+      }
+    }
+  }

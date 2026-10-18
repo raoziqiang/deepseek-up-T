@@ -1,5 +1,5 @@
 {
-  "capturedAt": "2026-10-09T12:41:59.534Z",
+  "capturedAt": "2026-10-09T15:55:13.632Z",
   "project": "deepseek-up-T",
   "home": "C:\\Users\\Z1848\\.dsh",
   "profile": "desktop",
@@ -23,8 +23,8 @@
     "dsh-up-t"
   ],
   "facts": {
-    "asarBytes": 121424120,
-    "asarHash": "bcc632167f186b22ce6cc6131037236bb164570a66a858fe83a02b78f05b1185",
+    "asarBytes": 121517805,
+    "asarHash": "6c23768d8316b4a5995fde8a0a0c95d18a4ed36fb0f1329f0b0b72f74fdcd7f3",
     "asarFiles": 12976,
     "asarPackages": 529,
     "asarDshPackages": 503,
@@ -119,7 +119,7 @@
       "id": "T4 插件 dsh-up-t 心跳",
       "level": "warn",
       "ok": false,
-      "detail": "dsh-up-t 0.1.0 · 2026-10-09T12:34:59.974Z（7 分钟前） · pid 35872  ← 该进程已经不在了"
+      "detail": "dsh-up-t 0.1.0 · 2026-10-09T15:36:14.446Z（19 分钟前） · pid 2600  ← 该进程已经不在了"
     },
     {
       "group": "安装包",
@@ -133,7 +133,7 @@
       "id": "app.asar 大小",
       "level": "info",
       "ok": true,
-      "detail": "115.8MB（121424120 字节）  sha256:bcc632167f186b22"
+      "detail": "115.9MB（121517805 字节）  sha256:6c23768d8316b4a5"
     },
     {
       "group": "安装包",

@@ -1,0 +1,64 @@
+{
+  "reducedState": {
+    "elapsed": 7300,
+    "playing": false,
+    "reduced": true,
+    "sceneOpacity": 0,
+    "petOpacity": 1,
+    "renderer": {
+      "mode": "webgl2-mesh",
+      "triangles": 32080,
+      "error": null
+    },
+    "pose": {
+      "x": 358.40000000000003,
+      "y": 766.4,
+      "rotation": -0.6599999999999999,
+      "alpha": 0,
+      "yaw": -0.32219561218599635,
+      "u": 1
+    }
+  },
+  "replayState": {
+    "elapsed": 904.3000000029801,
+    "playing": true,
+    "reduced": false,
+    "sceneOpacity": 1,
+    "petOpacity": 0,
+    "renderer": {
+      "mode": "webgl2-mesh",
+      "triangles": 32080,
+      "error": null
+    },
+    "pose": {
+      "x": 1161.2666925762028,
+      "y": 543.5001411795828,
+      "rotation": 0.48,
+      "alpha": 1,
+      "yaw": -0.013397564667646106,
+      "u": 0.14585483871015809
+    }
+  },
+  "finalState": {
+    "elapsed": 7300,
+    "playing": false,
+    "reduced": false,
+    "sceneOpacity": 0,
+    "petOpacity": 1,
+    "renderer": {
+      "mode": "webgl2-mesh",
+      "triangles": 32080,
+      "error": null
+    },
+    "pose": {
+      "x": 358.40000000000003,
+      "y": 766.4,
+      "rotation": -0.6599999999999999,
+      "alpha": 0,
+      "yaw": -0.32219561218599635,
+      "u": 1
+    }
+  },
+  "frameMedianMs": 6.200000000000273,
+  "frameP95Ms": 6.300000000000182
+}

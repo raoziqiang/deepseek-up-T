@@ -1,0 +1,22 @@
+{
+  "beginning": {
+    "renderer": {
+      "mode": "webgl2-mesh",
+      "triangles": 32080,
+      "error": null
+    },
+    "closeCalls": 0
+  },
+  "ended": {
+    "closeCalls": 1,
+    "opacity": "0"
+  },
+  "pendantState": {
+    "renderer": {
+      "mode": "webgl2-mesh",
+      "triangles": 32080,
+      "error": null
+    },
+    "width": 128
+  }
+}

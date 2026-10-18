@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>星鲸 · 动画回放</title>
+<style>
+:root{color-scheme:dark;font-family:"Segoe UI","Microsoft YaHei UI",sans-serif;color:#c5d7e5;background:#080c14}
+*{box-sizing:border-box}html,body{width:100%;height:100%;margin:0;overflow:hidden}
+#whale-stage{position:fixed;inset:0;width:100%;height:100%;pointer-events:none}
+#pet{position:fixed;right:36px;top:36px;width:160px;height:108px;opacity:0;touch-action:none;cursor:grab;border:0;background:none;padding:0}
+#pet:active{cursor:grabbing}#pet canvas{width:100%;height:100%;display:block}
+.controls{position:fixed;bottom:22px;left:28px;right:28px;display:flex;align-items:center;gap:18px;font-size:12px;color:#a8bdcf}
+button{font:inherit;color:#dbe8f1;background:#13202c;border:1px solid #354858;border-radius:5px;min-height:36px;padding:7px 13px;cursor:pointer}
+button:hover{background:#1d3040}button:focus-visible,input:focus-visible{outline:2px solid #a3cfdf;outline-offset:4px}
+label{display:inline-flex;gap:7px;align-items:center;white-space:nowrap}
+input{accent-color:#9ec9db}#timeline{width:min(26vw,260px);height:22px;cursor:pointer}
+#clock{font-variant-numeric:tabular-nums;white-space:nowrap;min-width:82px}
+#status{margin-left:auto;font-size:12px;color:#a8bdcf}
+@media(max-width:650px){.controls{left:16px;right:16px;bottom:16px;gap:12px;flex-wrap:wrap}#status{display:none}#timeline{width:110px}#pet{right:20px;top:24px;width:134px;height:90px}}
+::selection{background:#345568;color:#edf8ff}
+</style>
+</head>
+<body>
+<canvas id="whale-stage" aria-label="鲸鱼从右向左跃过星海"></canvas>
+<button id="pet" aria-label="鲸鱼挂件，可拖动" tabindex="-1"><canvas id="pet-canvas"></canvas></button>
+<div class="controls">
+<button id="replay">重播</button>
+<button id="pause">暂停</button>
+<input id="timeline" type="range" min="0" max="7300" step="10" value="0" aria-label="动画时间">
+<output id="clock">0.0 / 7.3 s</output>
+<label><input id="reduce-motion" type="checkbox">减弱动态</label>
+<span id="status" role="status">星海</span>
+</div>
+<script src="whale-animation.js"></script><script>
+const { WhaleSplash, drawWhale } = window
+const canvas=document.getElementById('whale-stage'),pet=document.getElementById('pet')
+const petCanvas=document.getElementById('pet-canvas'),petCtx=petCanvas.getContext('2d')
+const timeline=document.getElementById('timeline'),clock=document.getElementById('clock')
+const pause=document.getElementById('pause'),reduced=document.getElementById('reduce-motion'),status=document.getElementById('status')
+const sceneMs=WhaleSplash.DURATION_MS,total=sceneMs+1100
+const splash=new WhaleSplash(canvas,{reducedMotion:false})
+const clamp=x=>Math.min(1,Math.max(0,x)),ease=x=>{x=clamp(x);return x*x*(3-2*x)}
+let elapsed=0,playing=false,raf=0,origin=0,hiddenAt=null
+timeline.max=String(total)
+reduced.checked=matchMedia('(prefers-reduced-motion: reduce)').matches
+function draw(ms){
+  elapsed=Math.max(0,Math.min(total,ms))
+  splash.reduced=reduced.checked
+  splash.render(clamp(elapsed/sceneMs))
+  const sceneOpacity=1-ease((elapsed-sceneMs)/600)
+  const petOpacity=ease((elapsed-sceneMs-600)/480)
+  canvas.style.opacity=String(sceneOpacity)
+  pet.style.opacity=String(petOpacity);pet.style.pointerEvents=petOpacity>.1?'auto':'none';pet.tabIndex=petOpacity>.1?0:-1
+  const rect=pet.getBoundingClientRect(),dpr=Math.min(devicePixelRatio||1,2)
+  if(petCanvas.width!==Math.round(rect.width*dpr)||petCanvas.height!==Math.round(rect.height*dpr)){
+    petCanvas.width=Math.round(rect.width*dpr);petCanvas.height=Math.round(rect.height*dpr)
+  }
+  petCtx.setTransform(dpr,0,0,dpr,0,0);petCtx.clearRect(0,0,rect.width,rect.height)
+  if(petOpacity>0){
+    petCtx.save();petCtx.translate(rect.width/2,rect.height/2)
+    drawWhale(petCtx,rect.width*.98,rect.height,true,false,reduced.checked?0:elapsed/1000,-.10)
+    petCtx.restore()
+  }
+  timeline.value=String(elapsed);clock.textContent=(elapsed/1000).toFixed(1)+' / '+(total/1000).toFixed(1)+' s'
+  status.textContent=elapsed>sceneMs+600?'桌面挂件':elapsed>sceneMs?'星海渐隐':elapsed>4400?'落下 · 涟漪':elapsed>1800?'跃起': '游入星海'
+}
+function stop(){playing=false;cancelAnimationFrame(raf);raf=0;pause.textContent='继续'}
+function frame(now){if(!playing)return;draw(now-origin);if(elapsed>=total)stop();else raf=requestAnimationFrame(frame)}
+function play(reset=false){
+  stop();if(reduced.checked){draw(total);return}
+  if(reset||elapsed>=total)elapsed=0
+  origin=performance.now()-elapsed;playing=true;pause.textContent='暂停';raf=requestAnimationFrame(frame)
+}
+function seek(ms){stop();draw(ms);return inspect()}
+function inspect(){return {elapsed,playing,reduced:reduced.checked,sceneOpacity:+canvas.style.opacity,petOpacity:+pet.style.opacity,renderer:WhaleSplash.rendererInfo(),pose:splash.whalePose(clamp(elapsed/sceneMs))}}
+document.getElementById('replay').addEventListener('click',()=>play(true))
+pause.addEventListener('click',()=>playing?stop():play())
+timeline.addEventListener('input',()=>seek(+timeline.value))
+reduced.addEventListener('change',()=>play(true))
+window.addEventListener('resize',()=>{splash.resize();draw(elapsed)})
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden){hiddenAt=performance.now();cancelAnimationFrame(raf)}
+  else if(playing){origin+=performance.now()-(hiddenAt??performance.now());raf=requestAnimationFrame(frame)}
+})
+window.addEventListener('pagehide',()=>{stop();splash.stop()},{once:true})
+let drag=null
+pet.addEventListener('pointerdown',e=>{const r=pet.getBoundingClientRect();drag={x:e.clientX-r.left,y:e.clientY-r.top};pet.setPointerCapture(e.pointerId)})
+pet.addEventListener('pointermove',e=>{
+  if(!drag)return
+  pet.style.left=Math.max(0,Math.min(innerWidth-pet.offsetWidth,e.clientX-drag.x))+'px'
+  pet.style.top=Math.max(0,Math.min(innerHeight-pet.offsetHeight,e.clientY-drag.y))+'px';pet.style.right='auto'
+})
+pet.addEventListener('pointerup',()=>{drag=null})
+pet.addEventListener('pointercancel',()=>{drag=null})
+pet.addEventListener('keydown',e=>{
+  const delta={ArrowLeft:[-10,0],ArrowRight:[10,0],ArrowUp:[0,-10],ArrowDown:[0,10]}[e.key]
+  if(!delta)return
+  const r=pet.getBoundingClientRect()
+  pet.style.left=Math.max(0,Math.min(innerWidth-pet.offsetWidth,r.left+delta[0]))+'px'
+  pet.style.top=Math.max(0,Math.min(innerHeight-pet.offsetHeight,r.top+delta[1]))+'px';pet.style.right='auto';e.preventDefault()
+})
+window.addEventListener('whaleassetready',()=>draw(elapsed))
+window.whalePreview={seek,inspect,play}
+window.__splash=()=>splash
+play(true)
+</script>
+</body>
+</html>

@@ -1,0 +1,72 @@
+// The user's original transparent image is the visual authority. A subdivided
+// textured surface supplies gentle depth and articulation without replacing it.
+const VERTEX = '#version 300 es\n' + `
+precision highp float;
+in vec2 aUV;
+uniform float uTime;
+uniform float uYaw;
+out vec2 vUV;
+void main(){
+  vUV=aUV;
+  vec2 p=vec2((aUV.x-.5)*2.,(.5-aUV.y)*2.);
+  float tail=smoothstep(.46,.97,aUV.x);
+  float wave=sin(uTime*1.65-aUV.x*3.7);
+  p.y+=wave*.080*tail*tail;
+  float fin=smoothstep(.49,.86,aUV.y)*(1.-smoothstep(.52,.68,aUV.x))*smoothstep(.27,.39,aUV.x);
+  p.x+=sin(uTime*1.4+.7)*.024*fin;
+  p.y+=sin(uTime*1.4+.7)*.032*fin;
+  float depth=sin(aUV.x*3.14159)*sin(aUV.y*3.14159)*.10;
+  p.x+=depth*sin(uYaw)*.12;
+  p.y+=sin(uTime*.9)*.006*sin(aUV.x*3.14159);
+  // Leave room for the deformed silhouette at the texture edges.
+  gl_Position=vec4(p*.94,depth*.1,1.);
+}`
+const FRAGMENT = '#version 300 es\n' + `
+precision highp float;
+uniform sampler2D uImage;
+uniform float uTime;
+in vec2 vUV;
+out vec4 color;
+void main(){
+  vec4 tex=texture(uImage,vUV);
+  // Preserve the original line drawing and alpha. Light only breathes softly.
+  float breath=.98+.035*sin(uTime*.85+vUV.x*3.);
+  color=vec4(tex.rgb*breath,tex.a);
+}`
+class WhaleModel {
+  constructor(){
+    this.canvas=document.createElement('canvas');this.canvas.width=1056;this.canvas.height=574;
+    const gl=this.canvas.getContext('webgl2',{alpha:true,antialias:true,premultipliedAlpha:false,preserveDrawingBuffer:true});
+    if(!gl)throw Error('WebGL2 unavailable');this.gl=gl;
+    const compile=(type,source)=>{
+      const shader=gl.createShader(type);gl.shaderSource(shader,source);gl.compileShader(shader);
+      if(!gl.getShaderParameter(shader,gl.COMPILE_STATUS))throw Error(gl.getShaderInfoLog(shader));return shader;
+    };
+    const program=gl.createProgram(),vs=compile(gl.VERTEX_SHADER,VERTEX),fs=compile(gl.FRAGMENT_SHADER,FRAGMENT);
+    gl.attachShader(program,vs);gl.attachShader(program,fs);gl.linkProgram(program);
+    if(!gl.getProgramParameter(program,gl.LINK_STATUS))throw Error(gl.getProgramInfoLog(program));
+    gl.deleteShader(vs);gl.deleteShader(fs);this.program=program;gl.useProgram(program);
+    const vertices=[],indices=[],nx=100,ny=54;
+    for(let y=0;y<=ny;y++)for(let x=0;x<=nx;x++)vertices.push(x/nx,y/ny);
+    for(let y=0;y<ny;y++)for(let x=0;x<nx;x++){
+      const a=y*(nx+1)+x,b=a+nx+1;indices.push(a,b,a+1,b,b+1,a+1);
+    }
+    this.count=indices.length;this.vao=gl.createVertexArray();gl.bindVertexArray(this.vao);
+    gl.bindBuffer(gl.ARRAY_BUFFER,gl.createBuffer());gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(vertices),gl.STATIC_DRAW);
+    const loc=gl.getAttribLocation(program,'aUV');gl.enableVertexAttribArray(loc);gl.vertexAttribPointer(loc,2,gl.FLOAT,false,8,0);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,gl.createBuffer());gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array(indices),gl.STATIC_DRAW);
+    this.time=gl.getUniformLocation(program,'uTime');this.yaw=gl.getUniformLocation(program,'uYaw');
+    this.texture=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,this.texture);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+    gl.uniform1i(gl.getUniformLocation(program,'uImage'),0);gl.clearColor(0,0,0,0);
+  }
+  render(time=0,yaw=-.12){
+    const gl=this.gl;if(gl.isContextLost()||!fallback?.complete||!fallback.naturalWidth)return null;
+    gl.useProgram(this.program);gl.bindVertexArray(this.vao);gl.bindTexture(gl.TEXTURE_2D,this.texture);
+    if(!this.uploaded){gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,fallback);this.uploaded=true;}
+    gl.viewport(0,0,this.canvas.width,this.canvas.height);gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.uniform1f(this.time,time);gl.uniform1f(this.yaw,yaw);gl.drawElements(gl.TRIANGLES,this.count,gl.UNSIGNED_SHORT,0);
+    return this.canvas;
+  }
+}

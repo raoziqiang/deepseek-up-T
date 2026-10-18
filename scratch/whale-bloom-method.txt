@@ -1,0 +1,55 @@
+  drawContinuum(t){
+    const c=this.ctx,L=this.whale.len,seconds=t*this.durationMs/1000,p=this.flowPose;
+    const palette=['91,219,255','135,116,255','230,123,228','255,207,142'];
+    const fade=1-smooth(.86,1,t);
+    const glow=(x,y,r,rgb,alpha)=>{
+      if(alpha<.0005)return;
+      const g=c.createRadialGradient(x,y,0,x,y,r);
+      g.addColorStop(0,'rgba('+rgb+','+alpha+')');
+      g.addColorStop(.25,'rgba('+rgb+','+alpha*.7+')');
+      g.addColorStop(.65,'rgba('+rgb+','+alpha*.18+')');g.addColorStop(1,'rgba('+rgb+',0)');
+      c.fillStyle=g;c.fillRect(x-r,y-r,r*2,r*2);
+    };
+    c.save();c.globalCompositeOperation='screen';
+    glow(p.x,p.y,L*.56,palette[0],p.alpha*.12*fade);
+    // Airy overlapping color, without a drawn centerline or attached ribbons.
+    for(let i=0;i<28;i++){
+      const age=i/27*2.4,pt=t-age/(this.durationMs/1000);if(pt<.07)continue;
+      const a=this.tailAt(pt),spread=L*(.025+age*.065);
+      const x=a.x+age*L*.10+Math.sin(i*2.39+seconds*.3)*spread*.5;
+      const y=a.y+Math.cos(i*1.83+seconds*.45)*spread;
+      const opacity=.045*a.alpha*smooth(0,.13,age)*(1-age/2.6)*fade;
+      glow(x,y,L*(.085+age*.095),palette[i%3],opacity);
+    }
+    // Deterministic particle births make replay and timeline scrubbing identical.
+    for(const dust of this.prismaticDust){
+      const age=(seconds+dust.offset*dust.life)%dust.life,emitted=seconds-age;
+      if(emitted<.38||emitted>5.45)continue;
+      const a=this.tailAt(emitted/(this.durationMs/1000));
+      const life=smooth(0,.14,age)*(1-smooth(dust.life*.35,dust.life,age))*a.alpha*fade;
+      if(life<.005)continue;
+      const swirl=dust.angle+age*(.65+dust.spin);
+      const radius=L*(.018+age*.095)*dust.spread;
+      const x=a.x+age*L*(.045+dust.speed*.10)+Math.cos(swirl)*radius;
+      const y=a.y+Math.sin(swirl)*radius*.8-age*L*.035;
+      const size=(.65+dust.size*1.65)*Math.max(.7,L/600),rgb=palette[dust.color];
+      glow(x,y,size*7,rgb,life*.22);
+      c.save();c.translate(x,y);c.rotate(dust.angle+age*dust.spin);
+      c.fillStyle='rgba('+rgb+','+life*(.45+dust.size*.45)+')';c.beginPath();
+      c.ellipse(0,0,size*(dust.size>.78?1.7:1),size*.6,0,0,Math.PI*2);c.fill();
+      if(dust.size>.91){
+        c.strokeStyle='rgba(235,242,255,'+life*.6+')';c.lineWidth=.65;c.beginPath();
+        c.moveTo(-size*2.5,0);c.lineTo(size*2.5,0);c.moveTo(0,-size*2.5);c.lineTo(0,size*2.5);c.stroke();
+      }
+      c.restore();
+    }
+    // The refractive wave remains in the stars, with a soft colored crest.
+    for(const wave of this.flowWaves){
+      const ca=Math.cos(wave.angle),sa=Math.sin(wave.angle);
+      for(let i=0;i<24;i++){
+        const angle=i/24*Math.PI*2,x=Math.cos(angle)*wave.rx,y=Math.sin(angle)*wave.ry;
+        glow(wave.x+ca*x-sa*y,wave.y+sa*x+ca*y,L*.055,palette[i%3],wave.strength*.014);
+      }
+    }
+    c.restore();
+  }

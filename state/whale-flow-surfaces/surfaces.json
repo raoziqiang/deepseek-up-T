@@ -1,0 +1,28 @@
+{
+  "beginning": {
+    "renderer": {
+      "mode": "webgl2-reference-mesh",
+      "asset": "user-supplied-constellation-whale",
+      "imageReady": true,
+      "triangles": 10800,
+      "error": null,
+      "strokePeriod": 2.3710133234639947
+    },
+    "closeCalls": 0
+  },
+  "ended": {
+    "closeCalls": 1,
+    "opacity": "0"
+  },
+  "pendantState": {
+    "renderer": {
+      "mode": "webgl2-reference-mesh",
+      "asset": "user-supplied-constellation-whale",
+      "imageReady": true,
+      "triangles": 10800,
+      "error": null,
+      "strokePeriod": 2.3710133234639947
+    },
+    "width": 128
+  }
+}

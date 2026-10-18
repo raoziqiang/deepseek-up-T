@@ -1,0 +1,20 @@
+{
+  "scrub": 3200,
+  "paused": true,
+  "pauseStable": true,
+  "keyboardMoved": true,
+  "contacts": [
+    {
+      "at": 0.17275049880612642,
+      "x": 1.0364215301037718,
+      "y": 0.67,
+      "strength": 0.65
+    },
+    {
+      "at": 0.7279598726250696,
+      "x": 0.19469568643417542,
+      "y": 0.67,
+      "strength": 1
+    }
+  ]
+}

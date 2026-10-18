@@ -1,0 +1,73 @@
+{
+  "reducedState": {
+    "elapsed": 7300,
+    "playing": false,
+    "reduced": true,
+    "sceneOpacity": 0,
+    "petOpacity": 1,
+    "renderer": {
+      "mode": "webgl2-reference-mesh",
+      "asset": "user-supplied-constellation-whale",
+      "imageReady": true,
+      "triangles": 10800,
+      "error": null,
+      "strokePeriod": 2.3710133234639947
+    },
+    "pose": {
+      "x": 168.00000000000003,
+      "y": 670.6,
+      "rotation": -0.5,
+      "alpha": 0,
+      "yaw": -0.32219561218599635,
+      "u": 1
+    }
+  },
+  "replayState": {
+    "elapsed": 901.79999999851,
+    "playing": true,
+    "reduced": false,
+    "sceneOpacity": 1,
+    "petOpacity": 0,
+    "renderer": {
+      "mode": "webgl2-reference-mesh",
+      "asset": "user-supplied-constellation-whale",
+      "imageReady": true,
+      "triangles": 10800,
+      "error": null,
+      "strokePeriod": 2.3710133234639947
+    },
+    "pose": {
+      "x": 479.291566265168,
+      "y": 472.8667632434865,
+      "rotation": 0.3799685104151168,
+      "alpha": 1,
+      "yaw": -0.013683456986743059,
+      "u": 0.14545161290298547
+    }
+  },
+  "finalState": {
+    "elapsed": 7300,
+    "playing": false,
+    "reduced": false,
+    "sceneOpacity": 0,
+    "petOpacity": 1,
+    "renderer": {
+      "mode": "webgl2-reference-mesh",
+      "asset": "user-supplied-constellation-whale",
+      "imageReady": true,
+      "triangles": 10800,
+      "error": null,
+      "strokePeriod": 2.3710133234639947
+    },
+    "pose": {
+      "x": 168.00000000000003,
+      "y": 670.6,
+      "rotation": -0.5,
+      "alpha": 0,
+      "yaw": -0.32219561218599635,
+      "u": 1
+    }
+  },
+  "frameMedianMs": 6.299999999999727,
+  "frameP95Ms": 6.399999999999636
+}

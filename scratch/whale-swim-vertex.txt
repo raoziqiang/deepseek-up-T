@@ -1,0 +1,42 @@
+const SWIM_RATE = 2.65
+// CPU attachment points and the shader share the same stroke and deformation.
+function deformWhalePoint(u,v,seconds){
+  const phase=seconds*SWIM_RATE,aspect=880/478;
+  let x=(u-.5)*2,y=(.5-v)*2;
+  const fin=smooth(.52,.72,v)*(1-smooth(.56,.65,u))*smooth(.32,.43,u);
+  const angle=Math.sin(phase-.8)*.38*fin,ca=Math.cos(angle),sa=Math.sin(angle);
+  const qx=x+.16,qy=(y+.16)/aspect;
+  x=-.16+qx*ca-qy*sa;y=-.16+(qx*sa+qy*ca)*aspect;
+  const tail=smooth(.35,.95,u),wave=Math.sin(phase-u*4.6);
+  y+=wave*(.025+.30*tail*tail);
+  x+=Math.cos(phase-u*4.6)*.018*tail;
+  // The raised fluke turns around its own root as the stroke reaches the tail.
+  const fluke=smooth(.70,.91,u),a=Math.sin(phase-3.7)*.22*fluke;
+  const tx=x-.43,ty=(y-.22)/aspect;
+  x=.43+Math.cos(a)*tx-Math.sin(a)*ty;
+  y=.22+(Math.sin(a)*tx+Math.cos(a)*ty)*aspect;
+  return {x,y};
+}
+const VERTEX = '#version 300 es\n' + `
+precision highp float;
+in vec2 aUV;
+uniform float uTime;
+uniform float uYaw;
+out vec2 vUV;
+void main(){
+  vUV=aUV;
+  float phase=uTime*${SWIM_RATE.toFixed(2)},aspect=880./478.;
+  vec2 p=vec2((aUV.x-.5)*2.,(.5-aUV.y)*2.);
+  float fin=smoothstep(.52,.72,aUV.y)*(1.-smoothstep(.56,.65,aUV.x))*smoothstep(.32,.43,aUV.x);
+  float angle=sin(phase-.8)*.38*fin;
+  vec2 q=vec2(p.x+.16,(p.y+.16)/aspect);
+  p=vec2(-.16+q.x*cos(angle)-q.y*sin(angle),-.16+(q.x*sin(angle)+q.y*cos(angle))*aspect);
+  float tail=smoothstep(.35,.95,aUV.x),wave=sin(phase-aUV.x*4.6);
+  p.y+=wave*(.025+.30*tail*tail);
+  p.x+=cos(phase-aUV.x*4.6)*.018*tail;
+  float fluke=smoothstep(.70,.91,aUV.x),a=sin(phase-3.7)*.22*fluke;
+  vec2 tq=vec2(p.x-.43,(p.y-.22)/aspect);
+  p=vec2(.43+cos(a)*tq.x-sin(a)*tq.y,.22+(sin(a)*tq.x+cos(a)*tq.y)*aspect);
+  float depth=sin(aUV.x*3.14159)*sin(aUV.y*3.14159)*.10;
+  gl_Position=vec4(p*.88,depth*.1,1.);
+}`

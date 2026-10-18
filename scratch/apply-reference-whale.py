@@ -1,0 +1,25 @@
+from pathlib import Path
+import shutil
+root=Path.cwd();p=root/'vendor/whale/materials/whale-animation.js'
+shutil.copy2(p,root/'scratch/whale-before-user-reference.js')
+shutil.copy2(root/'vendor/whale/materials/whale-3d.png',root/'scratch/whale-before-user-reference.png')
+s=p.read_text(encoding='utf-8');start=s.index('const cross =');end=s.index('let model=null',start)
+s=s[:start]+(root/'scratch/whale-reference-model.txt').read_text(encoding='utf-8')+'\n'+s[end:]
+s=s.replace('/** Star whale: locally generated, articulated 3D geometry and contact-driven waves. */','/** User-supplied constellation whale, gently articulated without replacing its design. */')
+s=s.replace("fallback=new Image();fallback.src=new URL('whale-3d.png',script).href", "fallback=new Image();fallback.onload=()=>window.dispatchEvent(new Event('whaleassetready'));\n  fallback.src=new URL('whale-3d.png',script).href")
+s=s.replace("if(frame){ctx.drawImage(frame,-w/2,-w/1.864/2,w,w/1.864);return}", "if(frame){\n    ctx.save();ctx.shadowColor='rgba(101,225,255,.48)';ctx.shadowBlur=w*.018;\n    ctx.drawImage(frame,-w/2,-w/(880/478)/2,w,w/(880/478));ctx.restore();return\n  }")
+s=s.replace("ctx.save();ctx.fillStyle='#71b7ca';whalePath", "if(fallback)return; // Never substitute another silhouette while the supplied image loads.\n  ctx.save();ctx.fillStyle='#71b7ca';whalePath")
+s=s.replace("fog(w*.58,h*.40,w*.7,'rgba(22,40,67,.40)')", "fog(w*.58,h*.40,w*.7,'rgba(28,54,93,.50)')")
+s=s.replace("fog(w*.22,h*.65,w*.4,'rgba(23,67,83,.18)')", "fog(w*.22,h*.65,w*.4,'rgba(25,91,112,.25)')")
+s=s.replace("fog(w*.83,h*.14,w*.30,'rgba(52,48,83,.14)')", "fog(w*.83,h*.14,w*.40,'rgba(70,53,109,.20)')")
+s=s.replace("const t=(lo+hi)/2,p=this.whalePose(t),y=p.y+Math.sin(p.rotation)*this.whale.len*offset", "const t=(lo+hi)/2,p=this.whalePose(t),oy=rising?-.13:-.045,\n          y=p.y+(Math.sin(p.rotation)*offset+Math.cos(p.rotation)*oy)*this.whale.len")
+s=s.replace("return {at,x:(p.x+Math.cos(p.rotation)*this.whale.len*offset)/this.width,y:.67,strength}", "const oy=rising?-.13:-.045\n      return {at,x:(p.x+(Math.cos(p.rotation)*offset-Math.sin(p.rotation)*oy)*this.whale.len)/this.width,y:.67,strength}")
+s=s.replace("c.globalCompositeOperation='screen'\n    for(const event", "c.globalCompositeOperation='screen';c.shadowColor='rgba(99,218,247,.55)';c.shadowBlur=7\n    for(const event")
+s=s.replace("const x=previous.x+Math.cos(previous.rotation)*L*.34,y=previous.y+Math.sin(previous.rotation)*L*.34+Math.sin(i*2.4+seconds)*3", "const x=previous.x+(Math.cos(previous.rotation)*.34+Math.sin(previous.rotation)*.13)*L,\n        y=previous.y+(Math.sin(previous.rotation)*.34-Math.cos(previous.rotation)*.13)*L+Math.sin(i*2.4+seconds)*3")
+s=s.replace("mode:model?'webgl2-mesh':'fallback-image'", "mode:model?'webgl2-reference-mesh':'fallback-image',asset:'user-supplied-constellation-whale',imageReady:!!fallback?.naturalWidth")
+p.write_text(s,encoding='utf-8',newline='\n')
+shutil.copy2('D:/Z1848/Temp/codex-clipboard-2d1ee809-0218-41a2-a401-55b8f68205c3.png',root/'vendor/whale/materials/whale-3d.png')
+p=root/'vendor/whale/materials/preview.html';s=p.read_text(encoding='utf-8');s=s.replace("window.whalePreview=", "window.addEventListener('whaleassetready',()=>draw(elapsed))\nwindow.whalePreview=");p.write_text(s,encoding='utf-8',newline='\n')
+p=root/'vendor/whale/materials/renderer/pendant.js';s=p.read_text(encoding='utf-8');s=s.replace("// Keep the whale path's own 1.59 aspect ratio so the charm keeps its shape.", "// drawWhale preserves the supplied constellation image's own aspect ratio.");s=s.replace("window.addEventListener('resize', () => draw(performance.now()))", "window.addEventListener('resize', () => draw(performance.now()))\n  window.addEventListener('whaleassetready', () => draw(performance.now()))");p.write_text(s,encoding='utf-8',newline='\n')
+p=root/'vendor/whale/materials/renderer/whale-splash.js';s=p.read_text(encoding='utf-8');s=s.replace("  const reduced = window.matchMedia", "  window.addEventListener('whaleassetready', () => pendantEl?.__paint?.())\n  const reduced = window.matchMedia");p.write_text(s,encoding='utf-8',newline='\n')
+print('Original user image copied intact; reference-textured mesh installed.')
