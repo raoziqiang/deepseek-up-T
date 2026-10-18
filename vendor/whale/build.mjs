@@ -27,6 +27,9 @@ import {
   runStep,
   runAsarVerify,
   compareDeclared,
+  readJson,
+  readText,
+  sha256,
   fail,
 } from '../lib/harness.mjs';
 
@@ -41,7 +44,14 @@ function toolPath(value) {
 }
 
 const declFile = path.resolve(arg('--decl', path.join(PROJECT_ROOT, 'patches', 'T1-whale-splash.yml')));
-const defaultFrom = fs.existsSync(P.asarBackup) ? P.asarBackup : P.asar;
+const baseline = readJson(P.baselineFile);
+const installedHash = fs.existsSync(P.asar) ? await sha256(P.asar) : null;
+const versionChanged = Boolean(baseline && baseline.dshVersion !== readText(P.versionFile)?.trim());
+const archiveChanged = Boolean(baseline?.facts?.asarHash && installedHash
+  && baseline.facts.asarHash !== installedHash);
+// 升级后旧备份仍存在，但它属于旧版本；从它构建会把新版代码丢掉。
+const defaultFrom = versionChanged || archiveChanged
+  ? P.asar : fs.existsSync(P.asarBackup) ? P.asarBackup : P.asar;
 const from = path.resolve(arg('--from', defaultFrom));
 const out = path.resolve(arg('--out', STAGED_ASAR));
 
@@ -161,3 +171,14 @@ process.stdout.write(
   `原版大小 ${fs.statSync(from).size} 字节 → 暂存包 ${fs.statSync(out).size} 字节\n` +
   '落盘（需要先退出 Harness）：node vendor/whale/install.mjs --yes\n',
 );
+
+// 安装器必须知道这份暂存包究竟从哪份原版构建，升级后尤其不能拿旧备份核对。
+const manifest = {
+  schema: 1,
+  declaration: decl.id,
+  sourcePath: from,
+  sourceHash: await sha256(from),
+  stagedHash: await sha256(out),
+  sourceVersion: readText(P.versionFile)?.trim() ?? null,
+};
+fs.writeFileSync(`${out}.build.json`, `${JSON.stringify(manifest, null, 2)}\n`);

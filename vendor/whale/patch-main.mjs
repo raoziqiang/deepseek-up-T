@@ -71,6 +71,8 @@ const readCharmState = () => {
 let charmWindow;
 let charmDragOrigin;
 let charmPersistTimer;
+let charmFadeTimer;
+let charmRevealDeferred = false;
 const writeCharmState = (next) => {
 	const current = readCharmState();
 	const merged = { ...current, ...next };
@@ -89,19 +91,57 @@ const clampCharmPosition = (x, y) => {
 		y: Math.round(Math.min(Math.max(y, area.y), area.y + area.height - CHARM_SIZE))
 	};
 };
+/** Fade the native charm in after the startup scene has closed. */
+const fadeCharmIn = (window) => {
+	if (window === void 0 || window.isDestroyed()) return;
+	if (charmFadeTimer !== void 0) {
+		clearTimeout(charmFadeTimer);
+		charmFadeTimer = void 0;
+	}
+	if (typeof window.setOpacity !== "function") {
+		window.showInactive();
+		window.moveTop();
+		return;
+	}
+	window.setOpacity(0);
+	window.showInactive();
+	window.moveTop();
+	const startedAt = Date.now();
+	const tick = () => {
+		if (window.isDestroyed()) {
+			charmFadeTimer = void 0;
+			return;
+		}
+		const progress = Math.min(1, (Date.now() - startedAt) / 480);
+		window.setOpacity(1 - Math.pow(1 - progress, 3));
+		if (progress < 1) charmFadeTimer = setTimeout(tick, 16);
+		else charmFadeTimer = void 0;
+	};
+	tick();
+};
 const destroyCharm = () => {
 	if (charmWindow !== void 0 && !charmWindow.isDestroyed()) charmWindow.destroy();
 	charmWindow = void 0;
 	charmDragOrigin = void 0;
+	if (charmFadeTimer !== void 0) {
+		clearTimeout(charmFadeTimer);
+		charmFadeTimer = void 0;
+	}
 	if (charmPersistTimer !== void 0) {
 		clearTimeout(charmPersistTimer);
 		charmPersistTimer = void 0;
 	}
 };
-/** Create the charm window at its persisted position, and show it. */
-const showCharm = async () => {
+	/** Create the charm window at its persisted position, and show it. */
+const showCharm = async ({ fadeIn = false } = {}) => {
+	if (charmRevealDeferred) return charmWindow;
 	if (charmWindow !== void 0 && !charmWindow.isDestroyed()) {
-		charmWindow.showInactive();
+		if (fadeIn) fadeCharmIn(charmWindow);
+		else {
+			if (typeof charmWindow.setOpacity === "function") charmWindow.setOpacity(1);
+			charmWindow.showInactive();
+			charmWindow.moveTop();
+		}
 		return charmWindow;
 	}
 	const saved = readCharmState();
@@ -138,6 +178,7 @@ const showCharm = async () => {
 			webSecurity: true
 		}
 	});
+	if (fadeIn && typeof window.setOpacity === "function") window.setOpacity(0);
 	charmWindow = window;
 	// Float above full-screen apps too, without stealing focus.
 	window.setAlwaysOnTop(true, "screen-saver");
@@ -152,9 +193,13 @@ const showCharm = async () => {
 		if (charmWindow === window) charmWindow = void 0;
 	});
 	window.once("ready-to-show", () => {
-		if (!window.isDestroyed()) {
-			window.showInactive();
-			window.moveTop();
+		if (!window.isDestroyed() && !charmRevealDeferred) {
+			if (fadeIn) fadeCharmIn(window);
+			else {
+				if (typeof window.setOpacity === "function") window.setOpacity(1);
+				window.showInactive();
+				window.moveTop();
+			}
 		}
 	});
 	try {
@@ -174,14 +219,17 @@ const setCharmEnabled = async (enabled) => {
 	else destroyCharm();
 	return enabled;
 };
-/** The replay window matches the welcome window, so the splash looks native. */
-const REPLAY_SIZE = { width: 600, height: 700 };
+/** The replay window matches the active window (or full display work area) to seamlessly fill the view. */
 /** Safety net only: the replay page closes its own window when it is done. */
 const REPLAY_MAX_MS = 2e4;
 let charmReplayWindow;
 let charmReplayGuard;
 /** Play the startup animation once, in a short-lived non-interactive window. */
-const replaySplash = async () => {
+const replaySplash = async ({ revealCharmAfter = false } = {}) => {
+	if (revealCharmAfter) {
+		charmRevealDeferred = true;
+		if (charmWindow !== void 0 && !charmWindow.isDestroyed()) charmWindow.hide();
+	}
 	if (charmReplayWindow !== void 0 && !charmReplayWindow.isDestroyed()) charmReplayWindow.destroy();
 	charmReplayWindow = void 0;
 	if (charmReplayGuard !== void 0) {
@@ -189,11 +237,25 @@ const replaySplash = async () => {
 		charmReplayGuard = void 0;
 	}
 	const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+	const target = BrowserWindow.getAllWindows().find((w) => w !== charmWindow && w !== charmReplayWindow && !w.isDestroyed());
+	let bounds;
+	if (target !== void 0) {
+		const tb = target.getBounds();
+		if (target.isMaximized()) {
+			bounds = screen.getDisplayMatching(tb).workArea;
+		} else if (tb.width > 200 && tb.height > 200) {
+			bounds = tb;
+		} else {
+			bounds = area;
+		}
+	} else {
+		bounds = area;
+	}
 	const window = new BrowserWindow({
-		width: REPLAY_SIZE.width,
-		height: REPLAY_SIZE.height,
-		x: Math.round(area.x + Math.max(0, (area.width - REPLAY_SIZE.width) / 2)),
-		y: Math.round(area.y + Math.max(0, (area.height - REPLAY_SIZE.height) / 2)),
+		width: bounds.width,
+		height: bounds.height,
+		x: bounds.x,
+		y: bounds.y,
 		frame: false,
 		transparent: true,
 		hasShadow: false,
@@ -217,11 +279,20 @@ const replaySplash = async () => {
 	window.setAlwaysOnTop(true, "screen-saver");
 	window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
 	window.webContents.on("will-navigate", (event) => event.preventDefault());
+	let finalized = false;
 	const clear = () => {
+		if (finalized) return;
+		finalized = true;
 		if (charmReplayWindow === window) charmReplayWindow = void 0;
 		if (charmReplayGuard !== void 0) {
 			clearTimeout(charmReplayGuard);
 			charmReplayGuard = void 0;
+		}
+		if (revealCharmAfter) {
+			charmRevealDeferred = false;
+			if (readCharmState().enabled) showCharm({ fadeIn: true }).catch((error) => {
+				console.error("desktop charm: could not fade in", error);
+			});
 		}
 	};
 	window.once("closed", clear);

@@ -49,9 +49,50 @@ function parseDshArgs(argv, version, manageDesktopProfile = false) { ... }
    "<安装目录>\DeepSeek Harness.exe" "<app.asar>\dsh\node_modules\@deepseek-ai\dsh\lib\bin.js" \
        --profile _probe [--patch <file>]... --dump-config
    ```
-4. 把 stderr 分类成「问题 / 提醒」，把 stdout 按顶层条目切开，与上一次 precheck 的结果逐条目比对。
+4. 把 stderr 分类成「问题 / 提醒 / 其它」，把 stdout 按顶层条目切开，与上一次 precheck 的结果逐条目比对。
 
 真实 `$DSH_HOME` 全程只读。
+
+## 判据：三件事同时成立才算通过（`judgeRun`）
+
+| # | 条件 | 不成立时 |
+|---|---|---|
+| 1 | 退出码 `0` | 失败（`null` 也算，超时/被杀） |
+| 2 | stderr 里没有真问题（`skipping profile bundle` / `patch: entry … not found` / `dsh: error:`） | 失败 |
+| 3 | **dump 里至少有一个顶层条目** | 失败，并打印 `[empty-dump] dump 里一个顶层条目都没有（模式 …，stdout N 字节）：这次预检什么都没验到，不能算通过。` |
+
+第 3 条是 2026-10-07 补的：在此之前判据只有前两条，于是一次**什么都没 dump 出来**的
+预检（stdout 空、退出码 0、stderr 干净）会被判成通过，命令照样打印「结论：组合可用。」
+—— 一个条目都没有的绿灯是最坏的一种假答案，因为它连「我什么都没验到」都不说。
+
+`dsh: warning:` 只进「提醒」，不阻塞。认不出来的其它行进「其它输出」并原样显示：
+它们**不参与结论**（真实的一次成功预检 stderr 是 **0 字节**），但也不许被悄悄丢掉。
+
+## 基线不会被一次失败的跑冲掉（`settleDumpFiles`）
+
+`state/probe-dump.txt` 是**上一次真的 dump 出来的组合**。只有这一次跑出了可用结果
+（退出码 0 且有条目）才会更新它，并且把旧的转存到 `.prev`；跑失败时：
+
+- `probe-dump.txt` 与 `probe-dump.txt.prev` **一字未动**（下次还有得比）；
+- 本次原始输出写到 `state/probe-dump.txt.failed`；
+- 末行改说「基线未动，仍是 …」；
+- 跑成功时顺手删掉上一次的 `.failed` 残留（否则会让人以为这次也没成）。
+
+修正前这三行是无条件执行的：一次失败把基线写成空文件之后，下一次预检拿空基线做对比，
+会报出「201 个条目全部新增」。**一个诊断工具弄丢自己的参照点，比它不报错还糟。**
+
+注意「可用」与「通过」是两件事：一次 dump 完整、但 stderr 里有 `patch: entry not found`
+的预检，结论是**不通过**，而它的 dump 仍是对当前组合的忠实记录，该进基线。
+
+## diff 的两处讲究
+
+- **行差异按出现次数算，不按集合。** 真实 dump 的 201 个条目里有 7 个内部本来就有重复行
+  （`preset-standard` / `preset-ptc` 各有三行 `config:`，`permission` 有两行 `approval: ask`）。
+  按集合比的话，「三行 `config:` 变成两行」会报成「改了这条，但一行都列不出来」
+  （`changed: [{ removed: [], added: [] }]`）。
+- **条目顺序变了要单独报**（`↕ 公共条目的顺序变了`）。顺序就是装载顺序，两个插件对调
+  而配置一字未变时，集合比较的结论是「完全一致」。单纯增删条目不算顺序变化
+  （留下来的条目相对次序没动）。
 
 ## 三个必须踩准的点（都踩过）
 
@@ -84,6 +125,7 @@ node src/cli.mjs precheck --json               # 机器可读
   junction  profile/node_modules   exists
   junction  profiles/node_modules  exists
   退出码    0
+  条目数    201
   问题      0
 
 与上一次预检相比：0 新增 / 0 移除 / 1 修改
@@ -97,7 +139,7 @@ node src/cli.mjs precheck --json               # 机器可读
 结论：组合可用。profile 层的 cordis.patch.yml 没有热重载，需重启 DSH 才生效。
 ```
 
-产物：`state/probe-dump.txt`（当前组合结果）、`state/probe-dump.txt.prev`（上一次）、`state/probe-dump.txt.err`（原始 stderr）。全部已 gitignore——里面有 junction 和本机绝对路径。
+产物：`state/probe-dump.txt`（当前组合结果）、`state/probe-dump.txt.prev`（上一次）、`state/probe-dump.txt.err`（原始 stderr）、`state/probe-dump.txt.failed`（**只在跑失败时出现**：本次没有产出可用结果时的原始输出，此时的基线没有被动过）。全部已 gitignore——里面有 junction 和本机绝对路径。
 
 ## 边界（别把预检当成万能）
 
@@ -106,6 +148,18 @@ node src/cli.mjs precheck --json               # 机器可读
 - **不是 boot**。服务依赖、插件启动自检、顺序相关的 patch 命中，都要真正启动才算数。
 - **顺序相关**：patch 的 id 索引只描述**当前**这一层之前的索引，后面叠加上来的层可能引入新 id。
 - 结论口径：「组合可用」= 这一层能被 loader 接受且命中预期条目，**不等于**功能验证通过。
+
+## 这套判据自己怎么测的
+
+`node test/precheck.test.mjs`（**27 条**，**不 boot Electron**）：`analyzeStderr` /
+`splitDumpEntries` / `diffDumps` / `judgeRun` 打在合成输入上；`settleDumpFiles` 打在
+系统临时目录里的显式路径上（断言失败那一跑之后基线**一字未动**）；真实基线与
+真实 stderr 作为只读样本对账；真实 dump 的差异按当前基线动态核对正反方向，
+因为成功预检后当前与 `.prev` 可能相同，不应把某次 `agent-team` 差异写死成永恒断言。
+
+最后三条是**源码结构断言**（CLI 里 `!r.saved` 必须排在 `r.diff === null` 之前等）——
+它们钉住的是措辞与次序，**不证明** CLI 真的跑通了：真跑一次 `dsht precheck` 要 300 秒的
+Electron dump，不可能进单测。那一层只能靠人跑一次真实预检。
 
 ## 为什么这件事值得单独做一层
 

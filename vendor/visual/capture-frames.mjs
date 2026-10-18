@@ -4,6 +4,9 @@
 //
 // 归拢自 tools/capture-frames.mjs（与所在目录无关，直接搬）。
 // Usage: node vendor/visual/capture-frames.mjs <previewUrl> <outDir> [--times 0.05,0.3,...]
+//          [--size 1280x800] [--api renderAt]
+// `--api renderAt` scrubs plugins/dsh-whale-splash (window.DshWhaleSplash.renderAt)
+// instead of the welcome-window splash (window.__splash).
 import { mkdir, writeFile } from 'node:fs/promises'
 import { createHash, randomBytes } from 'node:crypto'
 import { connect } from 'node:net'
@@ -16,10 +19,14 @@ const times = (timesArg >= 0 ? process.argv[timesArg + 1] : '0.08,0.25,0.42,0.6,
   .split(',')
   .map(Number)
 
+const flag = (name) => { const i = process.argv.indexOf(name); return i >= 0 ? process.argv[i + 1] : undefined }
+const [sizeW, sizeH] = (flag('--size') ?? '600x700').split('x').map(Number)
+const API = flag('--api') ?? 'splash'
+
 const CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
 const PORT = 9333
-const WIDTH = 600
-const HEIGHT = 700
+const WIDTH = sizeW
+const HEIGHT = sizeH
 
 await mkdir(outDir, { recursive: true })
 
@@ -217,11 +224,13 @@ await new Promise((r) => setTimeout(r, 1800))
 
 // Freeze the engine's rAF loop and drive render() directly per capture time.
 const hasSplash = await cdp.send('Runtime.evaluate', {
-  expression: 'typeof window.__splash === "function" ? !!window.__splash() : false',
+  expression: API === 'renderAt'
+    ? 'typeof window.DshWhaleSplash?.renderAt === "function"'
+    : 'typeof window.__splash === "function" ? !!window.__splash() : false',
   returnByValue: true,
 })
 if (hasSplash.result.value !== true) {
-  console.error('capture: window.__splash() unavailable; cannot scrub frames')
+  console.error(`capture: ${API === 'renderAt' ? 'DshWhaleSplash.renderAt' : 'window.__splash()'} unavailable; cannot scrub frames`)
   chrome.kill()
   process.exit(1)
 }
@@ -230,13 +239,16 @@ const written = []
 for (const t of times) {
   // Reproduce exactly what the engine draws at progress t.
   await cdp.send('Runtime.evaluate', {
-    expression: `(() => {
+    expression: API === 'renderAt'
+      ? `window.DshWhaleSplash.renderAt(${t}).then(() => true)`
+      : `(() => {
       const s = window.__splash()
       s.stop()
       s.reduced = false
       s.render(${t}, 2400)
       return true
     })()`,
+    awaitPromise: true,
     returnByValue: true,
   })
   const shot = await cdp.send('Page.captureScreenshot', { format: 'png' })

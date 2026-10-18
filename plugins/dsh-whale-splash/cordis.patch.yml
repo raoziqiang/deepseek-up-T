@@ -1,0 +1,9 @@
+# dsh-whale-splash —— DSH bundle patch
+#
+# 主窗口启动动画：星空鲸鱼游过界面、荡起星空涟漪，最后落到左下角变成科幻鲸鱼娘。
+# 安装方式与 dsh-up-t 相同（junction + profile 的 dsh.profile.bundles 里加 "dsh-whale-splash"），
+# 见 README.md。
+
+- insert:
+    - id: dsh-whale-splash
+      name: dsh-whale-splash

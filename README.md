@@ -102,7 +102,7 @@ deepseek-up-T/
 
 ## 状态
 
-当前为 **M3：构建链闭环、升级检测就位、T4 脚手架落地**。
+当前为 **M4：五条工作线持续验收；升级重打链路已补齐跨版本来源与备份轮换**。
 
 - **M0 已完成**：`env` / `doctor` / `snapshot` / `baseline` 四个命令，基线固化，git 初始化。
 - **M1 已完成**：`dsht precheck`（权威组合预检）、`dsht asar ls|cat|grep`（只读读安装包里**真正在跑的那份代码**）、
@@ -110,9 +110,9 @@ deepseek-up-T/
 - **M2 已完成**：
   - ✅ `vendor/` 工具链：asar 三件套（list/verify/write）+ `whale/build.mjs`（按声明构建暂存包）
     + `whale/install.mjs`（三道保险落盘）；`../tools/` 的 23 个脚本**已全部归拢**（另有
-    `vendor/visual/` 6 个视觉验证、`vendor/route/` 8 个 Provider 探针）。
-  - ✅ `patches/T1-whale-splash.yml`：11 条目（4 改 7 增）声明驱动构建通过，
-    `state/staged/app.asar` 已就绪，**只差退出 Harness 后落盘**。
+    `vendor/visual/` 6 个视觉验证、`vendor/route/` 9 个 Provider 探针）。
+  - ✅ `patches/T1-whale-splash.yml`：13 条目声明驱动构建、演练、实际落盘与重启验收通过；
+    最新 replay 加固版的安装包 SHA256 与构建记录一致，启动动画已在桌面端观察到。
   - ✅ 旧 `app.asar.tmp` 已确认是**坏构建**并删除（重复 import 会让主进程起不来）。
 - **M3 已完成**：
   - ✅ `dsht upgrade` —— 升级检测：区分「被升级覆盖」与「从未落盘」，报素材过期与 L0 漂移。
@@ -120,9 +120,8 @@ deepseek-up-T/
     落盘仍留给人挑时间；素材过期时**先不构建**，因为拿旧素材打补丁会静默丢掉新版本代码。
   - ✅ `precheck --profile-json <文件>` —— 用**候选** profile 清单预检，改动前就能知道会不会炸。
   - ✅ T3 缓存经济学结案：命中率 98.3%、17 次折叠净 **+92.35M tok** ⇒ 缓存层没有问题可修。
-  - 🚧 T4 脚手架 `plugins/dsh-up-t` 已落盘（宿主路由 + 六条操作 + 心跳 + 握手 + 设置页 + 左下角胶囊，
-    离线单测覆盖到这些形态；候选预检与 `doctor` 全过），**只差重启 DSH 后确认界面里真的出现了**。
-    `dsht accept` 会在重启后把这件事一次问完。
+  - ✅ T4 插件 `plugins/dsh-up-t` 已落盘；重启后 `dsht accept` 已证实操作通道、宿主心跳与
+    渲染层 bundle/capsule 握手；设置页在真实桌面端可见，`app.asar` 大小与改造判定正确。
   - ✅ 落盘链路可**离线演练**：`install.mjs --to <临时目标>`（或双击 `install-whale.cmd /dry`）在不退出
     Harness、不动在用安装包的前提下跑同一段声明核对；`test/install.test.mjs` 60 条断言守着它。
   - ✅ **唯一一条回头路也能先演练**：`install-whale.cmd /rollback /dry`（不动在用安装包）→
@@ -140,6 +139,15 @@ deepseek-up-T/
     `listAsarPaths` 的输出顺序随 DFS 变（`--limit` 截出来的是哪 N 条不稳定）、`walkAsar`/`asarStats`
     拿到 `readAsarHeader()` 的整个返回值时**静默吐 0 个条目**、带 `g` 标志的正则在 `grep` 里因
     `lastIndex` 变成「第一次命中、第二次不命中」。前两项现在两端一致，后两项从静默改成响亮报错。
+  - ✅ **预检的判据与基线也有回归测试**：`test/precheck.test.mjs`（27 条，**不 boot Electron**）。
+    `dsht precheck` 是落盘之前唯一那道门，而它的判据此前是内联的，于是三个洞谁也问不出来：
+    ① **什么都没 dump 出来也算通过** —— stdout 空、退出码 0、stderr 干净时它会打印
+    「结论：组合可用。」（一个条目都没有的绿灯是最坏的假答案）；② **一次失败的预检把上一条
+    好基线冲成空文件**，下一次拿空基线比对，报出「201 个条目全部新增」；③ diff 按集合算行差异，
+    而真实 dump 的 201 个条目里有 7 个内部本来就有重复行（`preset-standard` 有三行 `config:`），
+    于是「三行变两行」报成「改了这条，一行都列不出来」；条目顺序变化则完全不算 diff
+    （两个插件对调＝「完全一致」）。现在判据要求**三个条件同时成立**，跑失败时基线一字未动、
+    原始输出另存 `.failed`，行差异按出现次数算，顺序变化单独报。
 
 > ⚠️ `cordis.patch.yml` 与 profile `package.json` 的改动**不会热重载**，必须重启 DSH 才生效；
 > `app.asar` 的改动必须**连托盘一起退出 Harness** 才能落盘。重启后请按

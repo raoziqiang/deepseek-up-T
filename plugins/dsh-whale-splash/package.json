@@ -1,0 +1,32 @@
+{
+  "name": "dsh-whale-splash",
+  "version": "0.1.0",
+  "description": "deepseek-up-T: main-window launch animation - a constellation whale swims across the UI, stirring star ripples, then settles in the bottom-left corner as a sci-fi whale girl.",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "deepseek-up-t"
+  ],
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "assets",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "license": "MIT",
+  "private": true,
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

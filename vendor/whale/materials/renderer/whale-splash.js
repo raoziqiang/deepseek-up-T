@@ -13,7 +13,7 @@
   'use strict'
 
   const STORAGE_KEY = 'dsh-whale-pendant-position'
-  const DURATION_MS = 4200
+  const DURATION_MS = window.WhaleSplash?.DURATION_MS ?? 6200
 
   const canvas = document.getElementById('whale-stage')
   if (canvas === null) return
@@ -84,25 +84,21 @@
       ctx.clearRect(0, 0, w, h)
 
       const dark = document.body.hasAttribute('data-ds-dark-theme')
-      // Cord from the top of the charm box down to the ring.
-      const ringY = h * 0.26
-      ctx.strokeStyle = dark ? 'rgba(154,169,196,0.85)' : 'rgba(126,147,184,0.85)'
-      ctx.lineWidth = Math.max(1.2, w * 0.022)
-      ctx.beginPath()
-      ctx.moveTo(w / 2, 0)
-      ctx.lineTo(w / 2, ringY - w * 0.06)
-      ctx.stroke()
 
-      ctx.strokeStyle = '#d9b45e'
-      ctx.lineWidth = Math.max(1.4, w * 0.04)
+      // Soft starlight halo behind the whale
+      const halo = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w * 0.48)
+      halo.addColorStop(0, dark ? 'rgba(56, 189, 248, 0.32)' : 'rgba(96, 165, 250, 0.28)')
+      halo.addColorStop(0.55, dark ? 'rgba(99, 102, 241, 0.14)' : 'rgba(56, 189, 248, 0.10)')
+      halo.addColorStop(1, 'rgba(0, 0, 0, 0)')
+      ctx.fillStyle = halo
       ctx.beginPath()
-      ctx.arc(w / 2, ringY, w * 0.07, 0, Math.PI * 2)
-      ctx.stroke()
+      ctx.arc(w / 2, h / 2, w * 0.48, 0, Math.PI * 2)
+      ctx.fill()
 
-      // The whale body, at the path's own 1.59 aspect ratio.
-      const len = w * 0.88
+      // The whale body, centered at the path's own 1.59 aspect ratio
+      const len = w * 0.85
       ctx.save()
-      ctx.translate(w / 2, ringY + len / 1.59 * 0.55 + h * 0.06)
+      ctx.translate(w / 2, h / 2)
       window.drawWhale(ctx, len, len / 1.59, true, !dark)
       ctx.restore()
     }
@@ -204,11 +200,19 @@
     pendantEl = el
     attachDrag(el, initial)
     canvas.classList.add('is-done')
-    canvas.addEventListener('transitionend', () => canvas.remove(), { once: true })
-    // If a transition never fires (reduced motion), remove it on a timer.
-    setTimeout(() => canvas.remove(), 900)
+    let faded = false
+    const reveal = () => {
+      if (faded) return
+      faded = true
+      canvas.remove()
+      requestAnimationFrame(() => el.classList.add('is-visible'))
+    }
+    canvas.addEventListener('transitionend', reveal, { once: true })
+    // Reduced motion has no canvas fade; otherwise leave a short, clean gap.
+    setTimeout(reveal, reduced ? 0 : 760)
   }
 
+  window.addEventListener('whaleassetready', () => pendantEl?.__paint?.())
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
   if (reduced || typeof window.WhaleSplash !== 'function') {
     // No canvas animation available: go straight to the charm.

@@ -156,6 +156,10 @@ async function cmdSnapshot({ flags, positional, opts }) {
 
   if (sub === 'create' || sub === 'new' || sub === 'save') {
     const { id, dir, meta } = await createSnapshot({ label: opts.message ?? '' });
+    if (flags.has('--json')) {
+      process.stdout.write(`${JSON.stringify({ id, dir, meta }, null, 2)}\n`);
+      return 0;
+    }
     console.log(`已创建快照 ${id}`);
     console.log(`  位置   ${dir}`);
     for (const f of meta.files) {
@@ -167,6 +171,10 @@ async function cmdSnapshot({ flags, positional, opts }) {
 
   if (sub === 'list' || sub === 'ls') {
     const items = listSnapshots();
+    if (flags.has('--json')) {
+      process.stdout.write(`${JSON.stringify({ items }, null, 2)}\n`);
+      return 0;
+    }
     if (!items.length) { console.log('暂无快照。用 `node src/cli.mjs snapshot create -m "说明"` 创建。'); return 0; }
     console.log(table(
       items.map((m) => [
@@ -406,10 +414,15 @@ function cmdPrecheck({ flags, opts }) {
       patches,
       profilePackageJson: r.probe.override,
       status: r.run.status,
+      entries: r.entries,
       problems: r.problems,
       notes: r.notes,
+      other: r.other,
       diff: r.diff,
+      saved: r.saved,
+      keptBaseline: r.keptBaseline,
       dumpPath: r.dumpPath,
+      failedPath: r.failedPath,
     }, null, 2)}\n`);
     return r.ok ? 0 : 1;
   }
@@ -425,14 +438,22 @@ function cmdPrecheck({ flags, opts }) {
   }
   for (const l of r.probe.links) console.log(`  junction  ${pad(l.name, 22)} ${l.result}`);
   console.log(`  退出码    ${r.run.status}`);
+  console.log(`  条目数    ${r.entries}`);
   console.log(`  问题      ${r.problems.length}`);
   for (const p of r.problems) console.log(`    ${TAG.error} [${p.kind}] ${p.text}`);
   if (r.notes.length) {
     console.log(`  提醒      ${r.notes.length} 条（schema 层面的宽松校验提示，不阻塞）`);
     for (const n of r.notes.slice(0, 5)) console.log(`    ${TAG.info} ${n}`);
   }
+  if (r.other.length) {
+    console.log(`  其它输出  ${r.other.length} 行（既不是问题也不是提醒，未计入结论）`);
+    for (const o of r.other.slice(0, 5)) console.log(`    ${TAG.info} ${o}`);
+  }
 
-  if (r.diff === null) {
+  if (!r.saved) {
+    console.log('\n本次没有产出可用的 dump，所以**没有**动上一条基线（否则下次就没得比了）。');
+    console.log(`本次的原始输出  ${r.failedPath}`);
+  } else if (r.diff === null) {
     console.log('\n（首次预检，没有可比对的上一次结果；本次结果已保存为基线）');
   } else if (r.diff.count === 0) {
     console.log('\n与上一次预检相比：组合结果完全一致');
@@ -445,9 +466,13 @@ function cmdPrecheck({ flags, opts }) {
       for (const l of c.removed) console.log(`        - ${l.trim()}`);
       for (const l of c.added) console.log(`        + ${l.trim()}`);
     }
+    if (r.diff.reordered) {
+      console.log(`    ↕ 公共条目的顺序变了（顺序就是装载顺序）：${r.diff.reorderedIds.slice(0, 5).join(', ')}`
+        + `${r.diff.reorderedIds.length > 5 ? ` 等 ${r.diff.reorderedIds.length} 个` : ''}`);
+    }
   }
 
-  console.log(`\n组合结果    ${r.dumpPath}`);
+  console.log(r.saved ? `\n组合结果    ${r.dumpPath}` : `\n组合结果    基线未动，仍是 ${r.dumpPath}`);
   console.log(r.ok
     ? '结论：组合可用。profile 层的 cordis.patch.yml 没有热重载，需重启 DSH 才生效。'
     : '结论：组合有问题，先修掉上面列出的条目再重启 DSH。');

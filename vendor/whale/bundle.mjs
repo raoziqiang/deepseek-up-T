@@ -16,6 +16,9 @@ if (src === undefined || out === undefined) {
 }
 
 const text = await readFile(src, 'utf8')
+// Preserve the exact supplied PNG bytes. Embedded data is origin-clean for
+// WebGL even when the preview is opened directly from file://.
+const whaleImage = await readFile(path.join(path.dirname(src), 'whale-3d.png'))
 
 // Collect the trailing `export { ... }` / `export { ... }` and `export function`
 // declarations, then rewrite them as window assignments.
@@ -26,6 +29,7 @@ let body = text.replace(/^export function (\w+)/gm, (_m, name) => {
   exported.add(name)
   return `function ${name}`
 })
+body = body.replace("const WHALE_IMAGE_DATA = ''", `const WHALE_IMAGE_DATA = 'data:image/png;base64,${whaleImage.toString('base64')}'`)
 // `export class Name` -> `class Name`
 body = body.replace(/^export class (\w+)/gm, (_m, name) => {
   exported.add(name)

@@ -484,7 +484,7 @@ await checkAsync('action 路由：GET 无头也答一句（好让人用浏览器
   // 而「确认要验收吗」这种问题会教人习惯性点掉确认框 —— 那个习惯迟早会点掉一个真的写操作）。
   assert.ok(j.actions.includes('accept'), '重启后验收必须挂在界面上');
   assert.equal(mod.ACTIONS.accept.writes, false, 'accept 只读，不得标成写盘类');
-  assert.deepEqual(Array.from(mod.ACTIONS.accept.argv({})), ['accept']);
+  assert.deepEqual(Array.from(mod.ACTIONS.accept.argv({})), ['accept', '--json']);
 });
 
 await checkAsync('action 路由：specs 表完整，且写盘类操作都标了 writes（界面据此二次确认）', async () => {
@@ -500,6 +500,7 @@ await checkAsync('action 路由：specs 表完整，且写盘类操作都标了 
   const byName = Object.fromEntries(specs.map((s) => [s.name, s]));
   for (const name of ['doctor', 'upgrade', 'precheck', 'snapshotList', 'snapshotCreate', 'upgradeStage', 'accept']) {
     assert.ok(byName[name], `specs 里缺 ${name}`);
+    assert.equal(mod.ACTIONS[name].json, true, `${name} 要有机器可读结果，设置页才能给出简明结论`);
   }
   assert.equal(byName.doctor.writes, false);
   assert.equal(byName.upgrade.writes, false);
@@ -564,7 +565,56 @@ await checkAsync('runAction 真能把命令跑起来（顺带钉住「spawn 这�
   assert.equal(r.writes, false);
   assert.ok(r.ms >= 0);
   assert.ok(typeof r.stdout === 'string' && r.stdout.length > 0, 'stdout 不该是空的');
+  assert.ok(Array.isArray(r.json?.items), '快照列表应该返回 JSON 条目');
+  assert.match(r.display, /快照列表：共/);
   assert.ok(r.root.endsWith('deepseek-up-T'));
+});
+
+check('Electron 操作必须用独立 Node，不能退回会误读 ASAR 的 Electron 可执行文件', () => {
+  const bundled = 'C:\\dsh\\node.exe';
+  assert.equal(mod.chooseActionNode({ electron: false, current: 'C:\\node.exe', bundled, exists: () => false }), 'C:\\node.exe');
+  assert.equal(mod.chooseActionNode({ electron: true, current: 'C:\\Harness.exe', bundled, exists: () => true }), bundled);
+  assert.throws(() => mod.chooseActionNode({ electron: true, current: 'C:\\Harness.exe', bundled, exists: () => false }), /找不到 DSH 自带的独立 Node/);
+});
+
+check('按钮结果把体检和升级报告压成结论，并保留真实失败原因', () => {
+  const doctor = mod.actionSummary('doctor', {
+    summary: { total: 2, error: 1, warn: 0 },
+    checks: [{ ok: false, level: 'error', id: 'app.asar', detail: '读不到', hint: '检查安装目录' }],
+  });
+  assert.match(doctor, /2 项，1 错误/);
+  assert.match(doctor, /app.asar：读不到/);
+  assert.match(doctor, /建议：检查安装目录/);
+  const upgrade = mod.actionSummary('upgradeStage', {
+    verdict: 'unchanged', needsReapply: [], neverApplied: [], stale: [], l0Drift: [],
+    staged: { attempted: false, ok: true, reason: '没有需要重打的声明' },
+  });
+  assert.match(upgrade, /没有检测到升级/);
+  assert.match(upgrade, /没有执行重打：没有需要重打的声明/);
+});
+
+check('验收、预检和快照摘要保留关键结论及失败修法', () => {
+  const accept = mod.actionSummary('accept', {
+    summary: { pass: 2, fail: 1, skip: 0, manual: 1 },
+    items: [
+      { status: 'fail', name: '宿主路由', detail: '连不上', fix: '启动 Harness' },
+      { status: 'manual', name: '启动动画' },
+    ],
+  });
+  assert.match(accept, /1 失败/);
+  assert.match(accept, /修法：启动 Harness/);
+  assert.match(accept, /需目视确认：启动动画/);
+  const precheck = mod.actionSummary('precheck', {
+    ok: false, entries: 201, problems: [{ kind: 'config', text: '缺少配置' }], notes: [],
+    diff: { added: [], removed: [], changed: [], reordered: false }, saved: false,
+  });
+  assert.match(precheck, /201 个条目，1 个问题/);
+  assert.match(precheck, /缺少配置/);
+  assert.match(precheck, /未更新预检基线/);
+  assert.match(mod.actionSummary('snapshotList', { items: [{ id: 'snap-1' }] }), /共 1 份[\s\S]*snap-1/);
+  assert.match(mod.actionSummary('snapshotCreate', {
+    id: 'snap-2', dir: 'D:\\snap-2', meta: { files: [{ present: true }], asar: { sha256: 'abc' } },
+  }), /snap-2[\s\S]*1 个配置文件/);
 });
 
 

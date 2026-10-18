@@ -27,7 +27,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+// Electron 把 app.asar 当虚拟目录：node:fs.statSync(app.asar).size 在宿主中可能是 0。
+// 状态页需要磁盘上归档文件的真实大小；普通 Node 测试环境没有 original-fs，就用原生 fs。
+const require = createRequire(import.meta.url);
+let physicalFs = fs;
+try { physicalFs = require('original-fs'); } catch { /* 普通 Node */ }
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -223,7 +230,7 @@ function findInstall() {
     if (tried.has(root)) continue;
     tried.add(root);
     const asar = path.join(root, 'resources', 'app.asar');
-    if (!fs.existsSync(asar)) { rejected.push({ dir: root, asar, why: '不存在' }); continue; }
+    if (!physicalFs.existsSync(asar)) { rejected.push({ dir: root, asar, why: '不存在' }); continue; }
     const size = sizeOrNull(asar);
     if (size === null) { rejected.push({ dir: root, asar, why: 'stat 失败' }); continue; }
     if (size === 0) { rejected.push({ dir: root, asar, why: '0 字节' }); continue; }
@@ -240,7 +247,7 @@ function findInstall() {
 }
 
 function sizeOrNull(file) {
-  try { return fs.statSync(file).size; } catch { return null; }
+  try { return physicalFs.statSync(file).size; } catch { return null; }
 }
 
 /** 只有正数才是证据。0 与 null 一样表示「这份事实拿不到」。 */
@@ -323,7 +330,7 @@ function stagedFacts(inst) {
     return out;
   }
   let st = null;
-  try { st = fs.statSync(out.file); } catch { /* 还没构建过 */ }
+  try { st = physicalFs.statSync(out.file); } catch { /* 还没构建过 */ }
   if (!st) {
     out.why = '还没构建过暂存包（state/staged/app.asar 不存在）—— 界面上「重打到暂存包」那个按钮就是干这个的';
     return out;
@@ -331,7 +338,7 @@ function stagedFacts(inst) {
   out.bytes = evidenceOrNull(st.size);
   out.mtimeMs = typeof st.mtimeMs === 'number' ? st.mtimeMs : null;
   try {
-    const live = fs.statSync(inst.asar);
+    const live = physicalFs.statSync(inst.asar);
     out.installedMtimeMs = typeof live.mtimeMs === 'number' ? live.mtimeMs : null;
   } catch { /* 拿不到在用的 mtime：判定表会降级成 differs */ }
   return { ...out, ...stagedVerdict(out) };
@@ -453,34 +460,32 @@ export const ACTIONS = {
     label: '重启后验收',
     hint: 'L3/L0 声明、宿主路由、渲染层握手一次问完（只读；观感类项要你自己看）',
     writes: false,
-    // 不给 --json：这条命令的价值是那份人能读的报告（哪几项没过 + 每项的修法），
-    // 面板本来就是渲染 stdout 文本的。
-    argv: () => ['accept'],
-    json: false,
+    argv: () => ['accept', '--json'],
+    json: true,
     timeoutMs: 300000,
   },
   precheck: {
     label: '组合预检',
     hint: '用隔离探针家跑一次权威 dump（会写 state/probe-home）',
     writes: true,
-    argv: () => ['precheck'],
-    json: false,
+    argv: () => ['precheck', '--json'],
+    json: true,
     timeoutMs: 600000,
   },
   snapshotList: {
     label: '快照列表',
     hint: '列出已有快照',
     writes: false,
-    argv: () => ['snapshot', 'list'],
-    json: false,
+    argv: () => ['snapshot', 'list', '--json'],
+    json: true,
     timeoutMs: 30000,
   },
   snapshotCreate: {
     label: '留一份快照',
     hint: '改动之前先冻结 profile 控制面',
     writes: true,
-    argv: (input) => ['snapshot', 'create', '-m', cleanLabel(input?.message) || '界面上留的快照'],
-    json: false,
+    argv: (input) => ['snapshot', 'create', '-m', cleanLabel(input?.message) || '界面上留的快照', '--json'],
+    json: true,
     timeoutMs: 60000,
   },
 };
@@ -520,12 +525,107 @@ function parseJsonOrNull(text) {
   try { return JSON.parse(text); } catch { return null; }
 }
 
+/** 给按钮一份能直接读懂的结论，原始输出只留作展开诊断。 */
+export function actionSummary(name, report) {
+  if (!report || typeof report !== 'object') return null;
+  if (name === 'doctor') {
+    const s = report.summary;
+    if (!s) return null;
+    const lines = [`体检：${s.total} 项，${s.error} 错误，${s.warn} 警告。`];
+    for (const item of report.checks ?? []) {
+      if (item.ok) continue;
+      lines.push(`${item.level === 'error' ? '错误' : '警告'} · ${item.id}：${item.detail}`);
+      if (item.hint) lines.push(`  建议：${item.hint}`);
+    }
+    return lines.join('\n');
+  }
+  if (name === 'upgrade' || name === 'upgradeStage') {
+    const labels = {
+      unchanged: '没有检测到升级或安装包变化', upgraded: '检测到 Harness 升级',
+      'asar-changed': '安装包内容有变化', 'profile-changed': 'profile 组合有变化',
+      'profile-drift': 'profile 声明与现场不一致', 'no-baseline': '没有基线，无法比较',
+    };
+    const lines = [`升级检测：${labels[report.verdict] ?? report.verdict ?? '结果未知'}。`];
+    const reapply = report.needsReapply ?? [];
+    const never = report.neverApplied ?? [];
+    const stale = report.stale ?? [];
+    const drift = report.l0Drift ?? [];
+    lines.push(`需重打 ${reapply.length} 项；未落盘 ${never.length} 项；过期素材 ${stale.length} 项；配置漂移 ${drift.length} 项。`);
+    if (report.staged && name === 'upgradeStage') {
+      const stage = report.staged;
+      lines.push(stage.attempted
+        ? `重打${stage.ok ? '成功' : '失败'}：${stage.reason ?? stage.ids?.join(', ') ?? ''}`
+        : `没有执行重打：${stage.reason ?? '当前无需重打'}`);
+      if (stage.stderr && !stage.ok) lines.push(stage.stderr.trim());
+    } else if (report.staged?.status === 'pending') {
+      lines.push('暂存包比在用安装包新，尚未落盘。');
+    }
+    if (reapply.length) lines.push(`需重打：${reapply.join(', ')}`);
+    if (stale.length) lines.push(`先修素材：${stale.join(', ')}`);
+    if (drift.length) lines.push(`配置漂移：${drift.join(', ')}`);
+    if ((reapply.length || stale.length || drift.length) && report.plan?.length) {
+      lines.push(`建议步骤：\n${report.plan.join('\n')}`);
+    }
+    return lines.join('\n');
+  }
+  if (name === 'accept') {
+    const s = report.summary;
+    if (!s || !Array.isArray(report.items)) return null;
+    const lines = [`重启后验收：${s.pass} 通过，${s.fail} 失败，${s.skip} 未验证，${s.manual} 项需目视确认。`];
+    for (const item of report.items) {
+      if (item.status !== 'fail' && item.status !== 'skip') continue;
+      lines.push(`${item.status === 'fail' ? '失败' : '未验证'} · ${item.name}：${item.detail}`);
+      if (item.fix) lines.push(`  修法：${item.fix}`);
+    }
+    if (s.manual) lines.push(`需目视确认：${report.items.filter((item) => item.status === 'manual').map((item) => item.name).join('、')}`);
+    return lines.join('\n');
+  }
+  if (name === 'precheck') {
+    if (typeof report.entries !== 'number' || !Array.isArray(report.problems)) return null;
+    const lines = [`组合预检：${report.ok ? '可用' : '有问题'}；${report.entries} 个条目，${report.problems.length} 个问题，${report.notes?.length ?? 0} 条提醒。`];
+    for (const problem of report.problems) lines.push(`问题 · ${problem.kind}：${problem.text}`);
+    if (report.diff) lines.push(`较上次：${report.diff.added?.length ?? 0} 新增、${report.diff.removed?.length ?? 0} 移除、${report.diff.changed?.length ?? 0} 修改${report.diff.reordered ? '，装载顺序变化' : ''}。`);
+    if (!report.saved) lines.push('本次未更新预检基线；请展开原始输出查看原因。');
+    return lines.join('\n');
+  }
+  if (name === 'snapshotList') {
+    if (!Array.isArray(report.items)) return null;
+    const lines = [`快照列表：共 ${report.items.length} 份。`];
+    for (const item of report.items.slice(0, 8)) lines.push(`${item.id}${item.incomplete ? '（不完整）' : ''}`);
+    if (report.items.length > 8) lines.push(`其余 ${report.items.length - 8} 份请展开原始输出。`);
+    return lines.join('\n');
+  }
+  if (name === 'snapshotCreate') {
+    if (!report.id || !report.dir) return null;
+    const files = report.meta?.files?.filter((item) => item.present).length ?? 0;
+    return `已创建快照 ${report.id}\n位置：${report.dir}\n保存 ${files} 个配置文件；app.asar：${report.meta?.asar ? '已记录校验值' : '未记录'}。`;
+  }
+  return null;
+}
+
 function tailAppend(acc, chunk) {
   const next = acc + chunk;
   return next.length > MAX_STREAM ? next.slice(-MAX_STREAM) : next;
 }
 
 let actionChain = Promise.resolve();
+
+/** Electron 即使设了 ELECTRON_RUN_AS_NODE，fs 仍会把 app.asar 当虚拟目录。 */
+export function chooseActionNode({ electron, current, bundled, exists = fs.existsSync }) {
+  if (!electron) return current;
+  if (bundled && exists(bundled)) return bundled;
+  throw new Error(`找不到 DSH 自带的独立 Node：${bundled ?? '(路径未知)'}。请先修复 DSH 运行时，避免用 Electron 误读 app.asar。`);
+}
+
+async function actionNode(root) {
+  if (!process.versions?.electron) return process.execPath;
+  const { resolvePaths } = await import(pathToFileURL(path.join(root, 'src', 'paths.mjs')).href);
+  return chooseActionNode({
+    electron: true,
+    current: process.execPath,
+    bundled: resolvePaths().bundledNode,
+  });
+}
 
 /** 把操作串成一条链：同一个宿主进程里一次只跑一个。 */
 export function runAction(name, input) {
@@ -551,14 +651,18 @@ async function executeAction(name, input) {
   const cli = path.join(root, 'src', 'cli.mjs');
   const argv = spec.argv(input);
   const started = Date.now();
+  let node;
+  try { node = await actionNode(root); }
+  catch (error) { return { ok: false, action: name, label: spec.label, error: error.message }; }
 
   return new Promise((resolve) => {
     let child;
     try {
-      child = spawn(process.execPath, [cli, ...argv], {
+      const env = { ...process.env };
+      delete env.ELECTRON_RUN_AS_NODE;
+      child = spawn(node, [cli, ...argv], {
         cwd: root,
-        // 宿主可能是 Electron：以 Node 身份跑它，任何纯 Node 脚本都能用。
-        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+        env,
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
@@ -584,14 +688,18 @@ async function executeAction(name, input) {
     child.stdout.on('data', (c) => { stdout = tailAppend(stdout, c.toString('utf8')); });
     child.stderr.on('data', (c) => { stderr = tailAppend(stderr, c.toString('utf8')); });
     child.on('error', (err) => finish({ ok: false, ms: Date.now() - started, error: String(err?.message ?? err), stdout, stderr }));
-    child.on('close', (code) => finish({
+    child.on('close', (code) => {
+      const parsed = spec.json ? parseJsonOrNull(stdout) : null;
+      finish({
       ok: code === 0,
       code,
       ms: Date.now() - started,
       stdout,
       stderr,
-      json: spec.json ? parseJsonOrNull(stdout) : null,
-    }));
+      json: parsed,
+      display: actionSummary(name, parsed),
+      });
+    });
   });
 }
 

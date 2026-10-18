@@ -1,7 +1,7 @@
 /**
  * The on-demand splash replay.
  *
- * Loaded into a short-lived, 600x700 frameless window by the desktop charm's
+ * Loaded into a short-lived frameless overlay by the desktop charm's
  * "Replay animation" menu item. It plays the same animation the welcome window
  * plays at startup, then closes its own window -- the main process keeps only a
  * safety-net timer, so the animation's duration lives in exactly one place.
@@ -9,7 +9,7 @@
 ;(() => {
   'use strict'
 
-  const DURATION_MS = 4200
+  const DURATION_MS = window.WhaleSplash?.DURATION_MS ?? 6200
   /** Give the last frame a moment after the fade-out before the window goes. */
   const CLOSE_AFTER_FADE_MS = 140
   /** How long a still frame (reduced motion) stays on screen. */
@@ -49,6 +49,9 @@
     window.matchMedia('(prefers-reduced-motion: reduce)').matches ||
     typeof window.WhaleSplash !== 'function'
   ) {
+    window.addEventListener('whaleassetready', () => {
+      try { drawStill() } catch (err) { console.error('replay: failed to draw the still frame', err) }
+    }, { once: true })
     try {
       drawStill()
     } catch (err) {

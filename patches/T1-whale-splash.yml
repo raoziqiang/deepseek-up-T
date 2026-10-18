@@ -1,9 +1,8 @@
 # patches/T1-whale-splash.yml
 #
 # T1（外观与体验）的第一次 L3 改造声明。
-# 状态：**已落盘**（2026-10-06 晚：完全退出 Harness → install-whale.cmd → 重启）。
-#   现场安装包 app.asar 121,421,984 B（sha256 2c6d8b4bf4716498…），与 state/staged/app.asar 逐字节相同；
-#   原版备份 app.asar.whale-backup 121,348,951 B（983ca71114e6dfd3…）完好保留，回滚：install.mjs --rollback。
+# 状态：2026-10-09 现场已安装的是早先 13 条目版本；本次星海 3D 鲸鱼改造含 14 条目，
+#   目前仅在源码与暂存构建中，尚未写入正在使用的 app.asar。
 #
 # 素材分两类（这一点决定了「一份全新 clone 能不能构建」）：
 #   · **本项目手写的素材**在 `vendor/whale/materials/`（welcome/pendant 两页、动画模块源、挂件 preload），
@@ -43,7 +42,7 @@ target:
       source: ../../.probe/session-controller.js
       patcher: vendor/whale/patch-session-controller.mjs
 
-    # ── 新增条目（9 个）──
+    # ── 新增条目（10 个）──
     - path: renderer/whale.css
       action: insert
       source: ../vendor/whale/materials/renderer/whale.css
@@ -72,9 +71,12 @@ target:
       action: insert
       source: ../vendor/whale/materials/whale-animation.js      # 经 bundle 成经典脚本（CSP 不允许 ESM）
       bundler: vendor/whale/bundle.mjs
+    - path: lib/welcome/whale-3d.png
+      action: insert
+      source: ../vendor/whale/materials/whale-3d.png             # 用户指定原始透明星光鲸鱼；纹理与降级共用
 
 verify:
-  expect_diff_entries: 13
+  expect_diff_entries: 14
   syntax_check:
     - lib/welcome/whale-animation.js
     - renderer/whale-splash.js
@@ -94,5 +96,5 @@ notes: |
   已知限制：
   1. Harness 升级会整体覆盖 app.asar，本次改造需要重新落盘（见 T5 的升级检测待办）。
   2. 启动窗口有严格 CSP，动画模块必须打成经典脚本，不能用 ESM。
-  3. 当前模型不支持读图，所以鲸鱼形状的结论来自像素描摹（vendor/visual/trace-whale.mjs）
-     而不是直接观看截图。
+  3. 鲸鱼必须保留用户提供的原图。WebGL2 使用原图纹理网格实现柔和的 2.5D 变形，
+     不重建或替换鲸鱼造型；脚本内嵌同一 PNG 字节以支持本地文件纹理。无 WebGL2 时直接绘制原图。

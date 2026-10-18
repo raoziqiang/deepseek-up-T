@@ -24,6 +24,7 @@
 // 再加个参数才能跑的救急命令，等于在最需要它的时候先失败一次。它仍然过同一个守卫。
 import fs from 'node:fs';
 import path from 'node:path';
+import { hashFile, refreshBackup } from './backup.mjs';
 import {
   P,
   PROJECT_ROOT,
@@ -32,6 +33,7 @@ import {
   readPatchDecl,
   runAsarVerify,
   compareDeclared,
+  readJson,
   fail,
 } from '../lib/harness.mjs';
 
@@ -103,6 +105,36 @@ function main() {
     );
   }
 
+  const manifestPath = `${staged}.build.json`;
+  const manifest = readJson(manifestPath);
+  if (!manifest || manifest.schema !== 1 || manifest.declaration !== decl.id) {
+    return fail(`暂存包缺少匹配的构建来源记录：${manifestPath}\n请重新运行 node vendor/whale/build.mjs。`);
+  }
+  if (hashFile(staged) !== manifest.stagedHash) {
+    return fail('暂存包与构建来源记录的 sha256 不一致，请重新构建。');
+  }
+  const installedHash = hashFile(P.asar);
+  const backupHash = fs.existsSync(P.asarBackup) ? hashFile(P.asarBackup) : null;
+  const baseline = readJson(P.baselineFile);
+  const archiveChanged = Boolean(baseline?.facts?.asarHash
+    && installedHash !== baseline.facts.asarHash);
+  const versionChanged = Boolean(baseline && manifest.sourceVersion
+    && baseline.dshVersion !== manifest.sourceVersion);
+  const sourceIsInstalled = manifest.sourceHash === installedHash;
+  const sourceIsBackup = manifest.sourceHash === backupHash;
+  if (!sourceIsInstalled && !sourceIsBackup) {
+    return fail('构建来源既不是当前安装包，也不是当前原版备份；请重新检测并构建。');
+  }
+  if ((archiveChanged || versionChanged) && !sourceIsInstalled) {
+    return fail('安装包已变更，但暂存包仍从旧备份构建；请从当前安装包重新构建。');
+  }
+  const source = sourceIsBackup && !archiveChanged && !versionChanged ? P.asarBackup : P.asar;
+  if (hashFile(source) !== manifest.sourceHash) {
+    return fail('构建来源在构建后又被改动；请重新构建。');
+  }
+  // 在演练或真落盘之前就核对完整差异；失败时绝不触碰安装目录。
+  verifyArchive(staged, decl, source, declFile);
+
   // ── 演练路径（--to）：不碰在用安装包，因此不需要退出 Harness ────────────────
   // 刻意用 copyFileSync 而不是 renameSync：真落盘那条路会把暂存包**移走**，
   // 而演练跑完之后人还要接着用同一个暂存包去落盘。
@@ -125,7 +157,7 @@ function main() {
         `  目标  ${target}\n` +
         `  在用  ${P.asar}（未被改动）\n`,
       );
-      return verifyAgainst(target, decl, declFile, { rehearsal: true });
+      return verifyAgainst(target, decl, declFile, { rehearsal: true, source });
     }
   }
 
@@ -136,7 +168,14 @@ function main() {
     `\n暂存包  ${staged}\n  ${stagedInfo.size} 字节，${stagedInfo.mtime.toISOString()}\n`,
   );
 
-  if (!fs.existsSync(P.asarBackup)) {
+  if (source === P.asar && backupHash && backupHash !== installedHash) {
+    try {
+      const rotated = refreshBackup(P.asar, P.asarBackup);
+      process.stdout.write(`旧版原版备份已保留：${rotated.archived}\n本版本原版备份已刷新：${P.asarBackup}\n`);
+    } catch (error) {
+      return fail(error.message);
+    }
+  } else if (!fs.existsSync(P.asarBackup)) {
     fs.copyFileSync(P.asar, P.asarBackup);
     process.stdout.write(`已备份原版安装包 -> ${P.asarBackup}\n`);
   } else {
@@ -155,7 +194,7 @@ function main() {
   }
 
   // ── 用声明核对实际差异 ────────────────────────────────────────────────────
-  return verifyAgainst(P.asar, decl, declFile, { rehearsal: false });
+  return verifyAgainst(P.asar, decl, declFile, { rehearsal: false, source: P.asarBackup });
 }
 
 /** `child` 是否落在 `parent` 目录内（含相等）。用于拒绝「往安装目录里演练」。 */
@@ -199,8 +238,8 @@ function verifyRollback(target, { rehearsal }) {
  * 或者哪条不是声明里写的，都算失败。两条路共用同一段代码，是为了不让
  * 「演练通过」和「真落盘通过」变成两套可能各说各话的判据。
  */
-function verifyAgainst(target, decl, declFile, { rehearsal }) {
-  const check = runAsarVerify(P.asarBackup, target, decl.expect);
+function verifyArchive(target, decl, source, declFile) {
+  const check = runAsarVerify(source, target, decl.expect);
   if (!check.ok) {
     process.stderr.write(
       `\n核对失败：预期 ${decl.expect} 个差异，实际 ${check.problems.length} 个。\n` +
@@ -221,8 +260,13 @@ function verifyAgainst(target, decl, declFile, { rehearsal }) {
     process.exit(1);
   }
 
+  return actual.size;
+}
+
+function verifyAgainst(target, decl, declFile, { rehearsal, source }) {
+  const count = verifyArchive(target, decl, source, declFile);
   process.stdout.write(
-    `\n完成：${actual.size} 个条目按声明改动，其余全部逐字节一致。\n` +
+    `\n完成：${count} 个条目按声明改动，其余全部逐字节一致。\n` +
     (rehearsal
       ? '这是演练：在用安装包一个字都没动。真要落盘请在退出 Harness 后跑同样的命令、去掉 --to。\n'
       : '启动 DeepSeek Harness 即可看到新的启动界面与桌面挂件。\n' +

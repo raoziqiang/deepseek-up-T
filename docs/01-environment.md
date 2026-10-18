@@ -29,10 +29,9 @@ SyntaxError: Identifier 'readFileSync' has already been declared
 （素材已搬进仓库 `vendor/whale/materials/`，重建后与搬家前那一份 sha256 完全相同，
 唯一区别是 bundle banner 里那句「从哪一份源生成」不再指向仓库外的路径；
 2026-10-06 又加了 replay 两件 —— `renderer/replay.html` + `renderer/replay.js`，声明条目 11 → 13）。
-**在用的安装包**（2026-10-06 21:36 落盘的那一份）是 121,421,984 字节 / sha256 `2c6d8b4b…`；
-暂存包此后又加了一版 replay 健壮性修复（见 `tracks/T1-appearance/README.md`），
-所以现在**暂存包比在用安装包新 692 字节，处于「待落盘」状态** —— 再跑一次
-`install-whale.cmd`（或 `node vendor/whale/install.mjs --yes`）就同步了。
+**在用的安装包**已于 2026-10-07 更新至 replay 健壮性修复版：121,422,676 字节，
+sha256 前缀 `c70bde8f3fe24c88`，与构建记录一致；原版备份仍为 121,348,951 字节。
+`state/staged/app.asar` 可能因离线回归测试再次生成，判断是否待落盘要看 `dsht upgrade` 或设置页当前状态。
 
 ## DSH 用户态（DSH_HOME）
 

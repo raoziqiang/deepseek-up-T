@@ -17,6 +17,7 @@
   if (canvas === null || charm === null) return
 
   const ctx = canvas.getContext('2d')
+  if (ctx === null) return
   let dpr = 1
   let size = 96
 
@@ -51,37 +52,59 @@
     ctx.translate(w / 2, h / 2 + bob)
     ctx.rotate(sway)
 
-    // Cord from the top of the window to the ring.
-    ctx.strokeStyle = dark ? 'rgba(154,169,196,0.8)' : 'rgba(126,147,184,0.8)'
-    ctx.lineWidth = Math.max(1.2, size * 0.018)
+    // Soft celestial starlight halo behind the charm
+    const halo = ctx.createRadialGradient(0, 0, 0, 0, 0, size * 0.48)
+    halo.addColorStop(0, dark ? 'rgba(56, 189, 248, 0.35)' : 'rgba(96, 165, 250, 0.30)')
+    halo.addColorStop(0.55, dark ? 'rgba(99, 102, 241, 0.15)' : 'rgba(56, 189, 248, 0.12)')
+    halo.addColorStop(1, 'rgba(0, 0, 0, 0)')
+    ctx.fillStyle = halo
     ctx.beginPath()
-    ctx.moveTo(0, -h / 2)
-    ctx.lineTo(0, -size * 0.34)
-    ctx.stroke()
+    ctx.arc(0, 0, size * 0.48, 0, Math.PI * 2)
+    ctx.fill()
 
-    ctx.strokeStyle = '#d9b45e'
-    ctx.lineWidth = Math.max(1.4, size * 0.03)
-    ctx.beginPath()
-    ctx.arc(0, -size * 0.30, size * 0.055, 0, Math.PI * 2)
-    ctx.stroke()
+    // Orbiting celestial stardust sparkles
+    if (!reduced) {
+      const starAngles = [0.4, 1.8, 3.2, 4.6, 5.8]
+      const starDists = [0.42, 0.46, 0.44, 0.47, 0.43]
+      for (let i = 0; i < starAngles.length; i++) {
+        const angle = starAngles[i] + (now / 3800) * (i % 2 === 0 ? 1 : -0.8)
+        const dist = size * starDists[i]
+        const sx = Math.cos(angle) * dist
+        const sy = Math.sin(angle) * dist
+        const twinkle = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(now / 550 + i * 1.7))
+        ctx.fillStyle = `rgba(224, 242, 254, ${twinkle * 0.85})`
+        ctx.beginPath()
+        ctx.arc(sx, sy, Math.max(0.8, size * 0.015), 0, Math.PI * 2)
+        ctx.fill()
+      }
+    }
 
     ctx.save()
-    ctx.translate(0, size * 0.06)
-    ctx.shadowColor = 'rgba(0,0,0,0.35)'
-    ctx.shadowBlur = size * 0.16
-    ctx.shadowOffsetY = size * 0.05
-    // Keep the whale path's own 1.59 aspect ratio so the charm keeps its shape.
-    const len = size * 0.80
-    window.drawWhale(ctx, len, len / 1.59, size > 40, !dark)
+    ctx.shadowColor = dark ? 'rgba(56, 189, 248, 0.45)' : 'rgba(31, 79, 168, 0.35)'
+    ctx.shadowBlur = size * 0.20
+    // drawWhale preserves the supplied constellation image's own aspect ratio.
+    const len = size * 0.85
+    window.drawWhale(ctx, len, len / 1.864, size > 40, !dark, reduced ? 0 : now / 1000, -0.12)
     ctx.restore()
     ctx.restore()
   }
 
+  let frameId = 0
+  let lastDraw = -Infinity
   const loop = (now) => {
-    draw(now)
-    requestAnimationFrame(loop)
+    if (document.hidden) { frameId = 0; return }
+    if (now - lastDraw >= 32) { draw(now); lastDraw = now }
+    frameId = reduced ? 0 : requestAnimationFrame(loop)
   }
-  requestAnimationFrame(loop)
+  frameId = requestAnimationFrame(loop)
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { cancelAnimationFrame(frameId); frameId = 0 }
+    else if (!frameId) frameId = requestAnimationFrame(loop)
+  })
+  themeMedia.addEventListener('change', () => draw(performance.now()))
+  window.addEventListener('resize', () => draw(performance.now()))
+  window.addEventListener('whaleassetready', () => draw(performance.now()))
+  window.addEventListener('pagehide', () => cancelAnimationFrame(frameId), { once: true })
 
   // ── Window dragging ────────────────────────────────────────────────────────
   // The OS moves the window through the main process; we send screen-space

@@ -99,6 +99,10 @@ node vendor/whale/install.mjs --yes    # 需要先完全退出 Harness
       `test/asar-cli.test.mjs`（19 条），三层（纯函数打在自造合成归档上 / CLI 退出码与输出 / 真实归档只读抽查）；
       顺带修掉四个真问题（grep 路径带前导斜杠粘不进 `cat`、`listAsarPaths` 输出顺序随 DFS 变、
       `walkAsar`/`asarStats` 拿错参数时静默吐 0、带 `g` 的正则在 grep 里漏报），见下方记录。
+- [x] **预检的判据与基线（`src/precheck.mjs`）也有回归测试了** —— 2026-10-07 完成：
+      `test/precheck.test.mjs`（27 条，不 boot Electron，靠显式路径与合成输入）；顺带修掉三个真问题
+      （空 dump 也算通过 / 失败的跑把上一条基线冲成空文件 / diff 按集合算行差异而真实 dump 里
+      7 个条目有重复行、条目顺序变化完全不算 diff），见下方记录。
 
 ## 验收
 
@@ -1196,7 +1200,25 @@ bbox aspect 1.59、`tail columns 2-run = 53`、左/右质量 59.8% / 40.2%）。
 手工复验 `dsht doctor`（0 错误 2 警告、503 DSH 插件）与真发现场 `dsht asar grep "managed exclusively"`
 （输出 `dsh/node_modules/@deepseek-ai/dsh/lib/bin.js:36`，无前导斜杠、可直接粘进 `asar cat`）。
 
+### 2026-10-07 · 升级后重打的来源、备份轮换与预检回归
 
+- **问题**：Harness 真升级会替换 `app.asar`，旧 `app.asar.whale-backup` 仍在。若默认继续拿旧备份构建，
+  会把新版本代码覆盖回旧版；即使声明差异数正确，来源仍可能错。
+- **改动**：`build.mjs` 在基线版本或安装包哈希变化时默认从新安装包构建，并写
+  `state/staged/app.asar.build.json` 记录来源/产物哈希。`install.mjs` 落盘前核对这两个哈希及声明差异，
+  升级安装时将旧备份按哈希留档，再把新版本原版设为当前回滚基准。`write.mjs` 对 Windows 暂存包
+  覆盖式 rename 的 `EPERM` 提供保留旧产物的复制回退；清理残留失败不再误触发回滚。
+- **验证**：离线模拟新安装包与旧备份并存，证明自动选新来源、拒绝旧来源冒充、演练不碰安装目录；
+  备份轮换与同名冲突独立测试；真实 `precheck --json` 为 201 条、0 问题；`npm test` 17/17 套通过；
+  `doctor` 0 错误、2 个既有警告。真 Harness 升级仍需到发生时按完整链路验收。
+- **恢复**：修改前的 profile 快照为 `20261007-000438-开发前基线-2026-10-07`。
+  安装包层若需回退，完全退出 Harness 后运行 `node vendor/whale/install.mjs --rollback`；
+  跨版本旧原版备份另存为 `app.asar.whale-backup.<hash16>`，不会被刷新操作抹掉。
+- **实际落盘收据**：用户同意退出运行中的 DSH 后，`install.mjs --yes` 将 13 条目暂存包安装到
+  `resources/app.asar`；实装 SHA256 `c70bde8f3fe24c88b89e0b9c70b66eb931f3a01212e11ef507c30665a7941855`
+  与构建记录完全一致。重启后 `dsht accept` 为 12 pass / 0 fail / 1 skip（skip 是暂存包已被安装器消费）、
+  7 项保留人工观感提示；真实启动动画与设置页已在桌面看到。完成验收后才运行 `baseline write`，
+  固化 Harness 44.0.0、13 个 bundle、15 条 patch；`doctor` 为 0 错误、2 个既有警告。
 
 
 

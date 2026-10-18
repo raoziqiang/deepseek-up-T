@@ -150,8 +150,10 @@ up-T · ?             ← 黄点：没有原版备份可比 / 宿主没回应
 「重打到暂存包」跑的是 `upgrade --stage --json --no-hash`：它**只写 `state/staged/`，不碰安装目录**，
 所以可以随便点；真正落盘（`vendor/whale/install.mjs --yes`）永远由人在 Harness 退出后做。
 
-怎么跑起来的：宿主可能是 Electron，所以用 `process.execPath` + `ELECTRON_RUN_AS_NODE=1`
-以纯 Node 身份跑 `src/cli.mjs`（`src/` 零依赖，只用了内置模块）。
+怎么跑起来的：宿主是 Electron，操作通道用 `src/paths.mjs` 定位 DSH 自带的独立 Node，
+再由它运行 `src/cli.mjs`（`src/` 零依赖，只用了内置模块）。不能用
+`process.execPath` + `ELECTRON_RUN_AS_NODE=1` 代替：那条路仍会受 Electron 的 ASAR 虚拟文件系统影响，
+把实体 `app.asar` 误报为 0 字节，继而把目录和补丁都误报为缺失。
 项目根由 `findProjectRoot()` 从插件目录往上找（≤5 层，要求有 `src/cli.mjs` 且包名对得上）；
 `PACKAGE_ROOT` 走 `fs.realpathSync.native()` —— 插件是以 **junction** 装进 profile 的，
 不解析真实路径就会去改 junction 那一侧的目录，而且**不报任何错**。

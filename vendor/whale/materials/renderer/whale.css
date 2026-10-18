@@ -1,3 +1,12 @@
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+}
+
 /* The whale splash layer sits above the welcome UI until the charm settles. */
 #whale-stage {
   position: fixed;
@@ -8,7 +17,10 @@
   height: 100%;
   pointer-events: none;
   opacity: 1;
-  transition: opacity 520ms ease-out;
+  border-radius: 0;
+  overflow: hidden;
+  box-shadow: none;
+  transition: opacity 600ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 #whale-stage.is-done {
@@ -30,12 +42,21 @@
   -webkit-user-select: none;
   user-select: none;
   app-region: no-drag;
-  filter: drop-shadow(0 6px 14px rgba(31, 79, 168, 0.35));
-  transition: transform 160ms ease-out;
+  filter: drop-shadow(0 8px 24px rgba(56, 189, 248, 0.45));
+  opacity: 0;
+  transform: scale(0.92);
+  transition:
+    opacity 420ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 420ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.whale-pendant.is-visible {
+  opacity: 1;
+  transform: scale(1);
 }
 
 .whale-pendant:hover {
-  transform: scale(1.06);
+  transform: scale(1.08);
 }
 
 .whale-pendant.is-dragging {

@@ -45,6 +45,12 @@ const SPLASH_ENTRY = 'renderer/whale-splash.js';
 // 在用的安装包里还没有它的时候，只跳过 replay 那一节，其余断言照跑。
 const REPLAY_ENTRY = 'renderer/replay.js';
 
+// This VM deliberately has no GPU or Image. GPU visuals are reviewed in real Chrome.
+function unexpectedWarnings(p) {
+  const expected = 'Whale 3D fallback: WebGL2 unavailable';
+  assert.ok(p.warns.filter(w => w === expected).length <= 1, '降级告警不能逐帧重复');
+  return Array.from(p.warns).filter(w => w !== expected);
+}
 const results = [];
 const RUNS = []; // 每次沙箱运行记一笔，最后横向看有没有哪一次是靠异常收场的
 async function check(name, fn) {
@@ -121,7 +127,7 @@ console.log(
 const CTX_METHODS = [
   'beginPath', 'bezierCurveTo', 'save', 'restore', 'fill', 'moveTo', 'translate',
   'stroke', 'fillRect', 'arc', 'rect', 'clip', 'quadraticCurveTo', 'closePath',
-  'roundRect', 'lineTo', 'scale', 'setTransform', 'clearRect', 'ellipse', 'rotate',
+  'roundRect', 'lineTo', 'scale', 'setTransform', 'clearRect', 'ellipse', 'rotate', 'drawImage',
 ];
 
 function makeCtx2d() {
@@ -570,8 +576,8 @@ function makePage({
   return page;
 }
 
-/** 跑到时间线末尾（默认时长 4200ms / 每帧 420ms ⇒ 11 帧足够到 t=1）。 */
-function runToEnd(page, frames = 12) {
+/** 跑到时间线末尾（从共享动画时长计算帧数，每帧推进 420ms）。 */
+function runToEnd(page, frames = Math.ceil(page.sandbox.WhaleSplash.DURATION_MS / 420) + 2) {
   page.pump(frames, 420);
   return page;
 }
@@ -579,6 +585,14 @@ function runToEnd(page, frames = 12) {
 // ── ① 跨文件契约：打包出来的东西真的是 whale-splash.js 要的 ──────────────
 
 let page = makePage();
+
+await check('三维表面的纹理与随包原图逐字节相同，保留用户指定鲸鱼', () => {
+  const image = readAsarEntry(found.file, 'lib/welcome/whale-3d.png');
+  const embedded = /const WHALE_IMAGE_DATA = 'data:image\/png;base64,([^']+)'/.exec(ANIMATION_SRC);
+  assert.ok(embedded, '独立文件预览所需的原图纹理未嵌入');
+  assert.ok(Buffer.from(embedded[1], 'base64').equals(image));
+  assert.ok(image.equals(fs.readFileSync(path.join(PROJECT, 'vendor/whale/materials/whale-3d.png'))));
+});
 
 await check('打包后的动画脚本暴露了 WhaleSplash / drawWhale / whalePath / __WHALE_PIXEL__', () => {
   assert.equal(typeof page.sandbox.WhaleSplash, 'function', 'window.WhaleSplash 不是函数 —— 打包或导出漏了，动画会整段跳过');
@@ -595,7 +609,8 @@ await check('两份脚本都是经典脚本（没有 ESM 语法：启动窗口�
 await check('脚本一加载完就起了帧循环，但还没有往画布上画任何东西', () => {
   assert.equal(page.stageCtx.ops.length, 0, '加载完就画了东西？（第一个帧回调才该画）');
   assert.equal(page.rafCalls, 1, '两段脚本都是 defer，加载完应当已经 start() 并排了第一帧');
-  assert.equal(page.created.length, 0, '加载阶段不该创建任何节点（挂件要等动画结束）');
+  assert.equal(page.pendant(), null, '挂件要等动画结束');
+  assert.ok(page.created.every(el => el.parentNode === null), '预计算画布不能覆盖页面');
 });
 
 // ── ② 时间线真的推进 ────────────────────────────────────────────────────
@@ -605,20 +620,22 @@ await check('第一帧就画了背景（setTransform → clearRect → 渐变 �
   const ops = Array.from(page.stageCtx.ops);
   assert.ok(ops.includes('setTransform'), '没有 setTransform：DPR 缩放没设，画面会偏小/模糊');
   assert.ok(ops.includes('clearRect'), '没有 clearRect：上一帧不会擦掉，会糊成一片');
-  assert.ok(page.stageCtx.gradients.length > 0, '一个渐变都没建：背景没画');
-  assert.ok(ops.includes('fillRect'));
+  assert.ok(ops.includes('drawImage'), '预计算背景没有合成到场景');
+  assert.ok(page.created.some(el => el.ctx2d?.gradients.length > 0 && el.ctx2d.ops.includes('fillRect')), '离屏背景没有画出');
 });
 
-await check('跑到末尾：鲸鱼路径真的被画过（bezierCurveTo 出现很多次）', () => {
+await check('无 WebGL 与图片时仍画出降级主体，并明确报告降级', () => {
   runToEnd(page);
-  const beziers = Array.from(page.stageCtx.ops).filter((o) => o === 'bezierCurveTo').length;
-  assert.ok(beziers >= 13, `只画了 ${beziers} 段贝塞尔曲线 —— 鲸鱼路径有 13 段，说明主体没画出来`);
+  assert.equal(page.sandbox.WhaleSplash.rendererInfo().mode, 'fallback-image');
+  assert.equal(page.sandbox.WhaleSplash.rendererInfo().error, 'WebGL2 unavailable');
+  assert.ok(page.created.some(el => el.ctx2d?.ops.includes('ellipse') && el.ctx2d.ops.includes('fill')));
+  assert.deepEqual(Array.from(page.warns), ['Whale 3D fallback: WebGL2 unavailable']);
 });
 
 await check('所有传给画布的数值参数都是有限数（NaN 是 canvas 最典型的静默失败）', () => {
   assert.ok(RUNS.length >= 1);
   for (const p of RUNS) {
-    const bad = Array.from(p.stageCtx.bad);
+    const bad = [p.stageCtx, ...p.created.map(el => el.ctx2d).filter(Boolean)].flatMap(ctx => Array.from(ctx.bad));
     assert.deepEqual(Array.from(bad), [], `${SPLASH_ENTRY}: ${bad.slice(0, 5).join(' | ')}`);
   }
 });
@@ -626,24 +643,30 @@ await check('所有传给画布的数值参数都是有限数（NaN 是 canvas �
 await check('时间到点后交出挂件：body 里出现 .whale-pendant，画布拿到 is-done', () => {
   assert.ok(page.pendant() !== null, '跑完了却没有挂件 —— 用户会看到一个静止的空白启动页');
   assert.ok(page.stage.classList.contains('is-done'));
+  assert.ok(!page.pendant().classList.contains('is-visible'), '场景淡出前挂件不能显示');
   assert.ok(page.stage.listenerCount('transitionend') > 0, '没有 transitionend 兜底：淡出后的画布可能永远留着');
-  assert.ok(page.timeouts.some((t) => t.ms >= 900), '没有那个「动画没触发也要移除画布」的定时器');
+  assert.ok(page.timeouts.some((t) => t.ms >= 600 && t.ms <= 1000), '没有那个「动画没触发也要移除画布」的定时器');
 });
 
 await check('挂件的兜底移除真的生效（transitionend 不来也不会压住界面）', () => {
-  const timer = page.timeouts.find((t) => t.ms >= 900);
+  const timer = page.timeouts.find((t) => t.ms >= 600 && t.ms <= 1000);
   timer.fn();
   assert.equal(page.stage.removed, true);
   assert.ok(!page.body.children.includes(page.stage));
+  page.pump(1, 16);
+  assert.ok(page.pendant().classList.contains('is-visible'), '场景移除后应显示挂件');
 });
 
-await check('pagehide 之后帧循环停下（不会在窗口藏起来之后继续空转）', () => {
-  assert.ok(page.frames.size > 0, '跑到末尾后应当还有 idleFrame 在排队');
-  page.dispatchWindow('pagehide');
-  assert.equal(page.frames.size, 0, 'stop() 没有取消 raf');
-  const before = page.rafCalls;
-  page.pump(3, 420);
-  assert.equal(page.rafCalls, before, '停了之后还在注册新帧');
+await check('pagehide 停止活动动画，完成后也不继续空转', () => {
+  assert.equal(page.frames.size, 0, '完成后仍在空转');
+  const active = makePage();
+  active.pump(1, 100);
+  assert.ok(active.frames.size > 0);
+  active.dispatchWindow('pagehide');
+  assert.equal(active.frames.size, 0);
+  const before = active.rafCalls;
+  active.pump(3, 420);
+  assert.equal(active.rafCalls, before);
 });
 
 // ── ③ 交互：拖动 / 键盘 / 主题 / 位置记忆 ────────────────────────────────
@@ -716,34 +739,44 @@ await check('主题翻转：body 记下深色标记，并让挂件重画（颜�
   const inner = el.children.find((c) => c.tagName === 'CANVAS');
   assert.ok(inner, '挂件里没有画布节点');
   const ops = Array.from(inner.ctx2d.ops);
-  assert.ok(ops.includes('bezierCurveTo'), '重画时没有画鲸鱼');
+  assert.ok(ops.includes('ellipse'), '重画时没有画鲸鱼');
   assert.equal(inner.ctx2d.bad.length, 0, '重画时把 NaN 喂给了画布');
 });
 
-// ── ④ 深浅两套皮肤真的不一样（不是只换了个变量名） ────────────────────────
+// ── ④ 主题绘制与动作轨迹 ────────────────────────
 
-await check('drawWhale 的 light 参数真的改变配色（浅色皮肤不再用深色那一套）', () => {
-  const darkCtx = makeCtx2d();
-  const lightCtx = makeCtx2d();
-  page.sandbox.drawWhale(darkCtx, 100, 63, true, false);
-  page.sandbox.drawWhale(lightCtx, 100, 63, true, true);
-  const fills = (ctx) => Array.from(ctx.ops).filter((o) => o === 'fill').length;
-  assert.ok(fills(darkCtx) > 0 && fills(lightCtx) > 0, '两种皮肤都没有填充色块');
-  const palette = (ctx) => Array.from(new Set(ctx.styledHistory.filter(([k]) => k === 'fillStyle' || k === 'strokeStyle').map(([, v]) => String(v))));
-  assert.notDeepEqual(palette(darkCtx), palette(lightCtx), '深浅两套皮肤的调色板一模一样 —— light 参数被忽略了');
-  assert.equal(darkCtx.bad.length, 0);
-  assert.equal(lightCtx.bad.length, 0);
+await check('同一鲸鱼在深浅主题下均能绘制，画布变换保持配对', () => {
+  for (const light of [false, true]) {
+    const ctx = makeCtx2d();
+    page.sandbox.drawWhale(ctx, 100, 63, true, light);
+    assert.ok(ctx.ops.includes('fill'));
+    assert.equal(ctx.ops.filter(x => x === 'save').length, ctx.ops.filter(x => x === 'restore').length);
+    assert.equal(ctx.bad.length, 0);
+  }
 });
 
-await check('whalePath 画 11 段贝塞尔（形状契约，改路径就会在这里露出来）', () => {
-  const ctx = makeCtx2d();
-  page.sandbox.whalePath(ctx, 200, 126);
-  const n = Array.from(ctx.ops).filter((o) => o === 'bezierCurveTo').length;
-  // 11 是鲸鱼身体本体的段数（鱼鳍另 2 段在 finPath 里，不从这里过）。
-  // 这个数字的意义是「路径还在、没被改塌」，所以改动路径时这里**应该**失败。
-  assert.equal(n, 11);
-  assert.equal(Array.from(ctx.ops).filter((o) => o === 'moveTo').length, 1, '路径应当只有一个起点');
-  assert.equal(ctx.bad.length, 0);
+await check('宽窄窗口均向左跃起再落下，沿经过的路径持续留下波峰', () => {
+  for (const [width, height] of [[600, 700], [1280, 800]]) {
+    const p = makePage({ innerWidth: width, innerHeight: height });
+    const animation = new p.sandbox.WhaleSplash(p.stage);
+    const poses = Array.from({length: 11}, (_, i) => animation.whalePose(i / 10));
+    assert.ok(poses.every((pose, i) => i === 0 || pose.x <= poses[i - 1].x));
+    assert.ok(animation.whalePose(.46).y < animation.whalePose(.16).y);
+    assert.ok(animation.whalePose(.46).y < animation.whalePose(.76).y);
+    animation.prepareFlow(.55);
+    assert.ok(animation.flowWaves.length >= 2, '游动途中应有多个仍在扩散的波峰');
+    assert.ok(animation.flowWaves.every(w => w.rx > 0 && w.ry > 0 && w.strength > 0));
+    const wave = animation.flowWaves[0];
+    const influence = animation.flowAt(wave.x + Math.cos(wave.angle) * wave.rx, wave.y + Math.sin(wave.angle) * wave.rx);
+    assert.ok(influence.light > 0, '尾迹必须影响星点，不能只有装饰线');
+    const tail = animation.tailAt(.55);
+    assert.ok(Number.isFinite(tail.x) && Number.isFinite(tail.y));
+    animation.reduced = true; animation.prepareFlow(.55);
+    assert.equal(animation.flowWaves.length, 0);
+    const still = animation.flowAt(tail.x, tail.y);
+    assert.equal(still.dx, 0); assert.equal(still.dy, 0);
+    animation.stop();
+  }
 });
 
 // ── ⑤ 三条降级路径 ──────────────────────────────────────────────────────
@@ -757,7 +790,7 @@ await check('减动效偏好：不跑动画，直接出挂件（但挂件本身�
   // 挂件自己的画布是 div 里的那个 <canvas> 孩子（div 本身没有 2d 上下文）。
   const inner = p.pendant().children.find((c) => c.tagName === 'CANVAS');
   assert.ok(inner, '挂件里没有画布节点');
-  assert.ok(Array.from(inner.ctx2d.ops).includes('bezierCurveTo'), '挂件上的鲸鱼没画出来');
+  assert.ok(Array.from(inner.ctx2d.ops).includes('ellipse'), '挂件上的鲸鱼没画出来');
   assert.deepEqual(Array.from(p.errors), []);
 });
 
@@ -779,7 +812,7 @@ await check('存储被禁（企业策略 / 隐私模式）：挂件仍在，拖�
   el.dispatch('pointerup', { pointerId: 1 });
   assert.ok(storage.attempts >= 2, '存储被禁时应当尝试过读写（这条断言防止测试根本没碰到存储）');
   assert.deepEqual(Array.from(p.errors), []);
-  assert.deepEqual(Array.from(p.warns), []);
+  assert.deepEqual(unexpectedWarnings(p), []);
 });
 
 // ── ⑤-bis 挂件菜单里的「Replay animation」：renderer/replay.js ────────────
@@ -792,15 +825,15 @@ await check('存储被禁（企业策略 / 隐私模式）：挂件仍在，拖�
 if (REPLAY_SRC === null) {
   console.log(`  skip  ${REPLAY_ENTRY} 不在${found.label}里 —— 跳过 Replay 那一节`);
 } else {
-  await check('replay.js 是经典脚本，动画时长只在它自己这一份里', () => {
+  await check('replay.js 是经典脚本，并使用共享动画时长', () => {
     assert.ok(
       !/^\s*(?:import|export)\s/m.test(REPLAY_SRC),
       'replay.js 里出现了 ESM 语句 —— 它是以 <script defer> 经典脚本加载的，会整段语法报错',
     );
-    const m = /const DURATION_MS = (\d+)/.exec(REPLAY_SRC);
-    assert.ok(m, 'replay.js 里找不到 DURATION_MS —— 时长被搬到别处，就会有两个真相');
-    const dur = Number(m[1]);
-    assert.ok(dur > 0 && dur <= 20000, `DURATION_MS=${dur} 不合理（主进程的安全网是 20s）`);
+    assert.ok(REPLAY_SRC.includes('window.WhaleSplash?.DURATION_MS'));
+    assert.ok(SPLASH_SRC.includes('window.WhaleSplash?.DURATION_MS'));
+    const dur = page.sandbox.WhaleSplash.DURATION_MS;
+    assert.ok(dur > 0 && dur <= 20000);
   });
 
   await check('Replay：动画跑完自己淡出，关窗排进定时器而不是立刻关', () => {
@@ -823,7 +856,7 @@ if (REPLAY_SRC === null) {
   await check('Replay + 减动效：直接画一张静止的鲸鱼，然后关窗', () => {
     const p = makePage({ script: 'replay', reduce: true });
     assert.equal(p.rafCalls, 0, '减动效时不该起动画帧循环');
-    assert.ok(Array.from(p.stageCtx.ops).includes('bezierCurveTo'), '静止那一帧没有画鲸鱼');
+    assert.ok(Array.from(p.stageCtx.ops).includes('ellipse'), '静止那一帧没有画鲸鱼');
     assert.equal(p.stageCtx.bad.length, 0, '静止那一帧里有非有限数坐标 —— 真浏览器会一声不吭什么都不画');
     assert.ok(p.stage.classList.contains('is-done'), '减动效时没有淡出就走');
     assert.equal(p.closes, 0, '减动效时窗口立刻就关了 —— 那张静止的鲸鱼没人看得见');
@@ -870,10 +903,10 @@ if (REPLAY_SRC === null) {
         };
       },
     });
-    assert.equal(p.warns.length, 1);
+    assert.equal(unexpectedWarnings(p).length, 1);
     assert.ok(String(p.warns[0]).includes('failed to start'), `告警内容对不上：${p.warns[0]}`);
     assert.ok(
-      Array.from(p.stageCtx.ops).includes('bezierCurveTo'),
+      Array.from(p.stageCtx.ops).includes('ellipse'),
       '动画起不来时应当退回画一张静止的鲸鱼，而不是留一块空白',
     );
     assert.equal(p.closes, 0);
@@ -885,13 +918,13 @@ if (REPLAY_SRC === null) {
 
 // ── ⑥ 收尾：没有一次运行是靠异常收场的 ────────────────────────────────────
 
-await check('所有沙箱运行里都没有异常、也没有控制台告警', () => {
+await check('所有沙箱运行无异常，只有预期的 WebGL 不可用降级诊断', () => {
   assert.ok(RUNS.length >= 6, `只跑了 ${RUNS.length} 次沙箱，覆盖不够（这条会假通过）`);
   const errs = RUNS.flatMap((p) => Array.from(p.errors).map((e) => String(e && e.message ? e.message : e)));
   assert.deepEqual(errs, []);
   // 故意制造失败的那几次运行（expectWarns）不看这条总账 —— 它们自己的用例里
   // 已经逐字断言了「该有哪一条告警」，这里仍然不允许出现计划外的告警。
-  const warns = RUNS.filter((p) => !p.expectWarns).flatMap((p) => Array.from(p.warns));
+  const warns = RUNS.filter((p) => !p.expectWarns).flatMap((p) => unexpectedWarnings(p));
   assert.deepEqual(warns, []);
 });
 

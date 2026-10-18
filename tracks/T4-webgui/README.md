@@ -13,6 +13,14 @@
   界面通道**：Harness 升级不碰 L1，所以这些面板会跟着一起活下来。
 - 胶囊上现在有两件要人动手才会变的事：**待落盘**（暂存包比在用安装包新）与 Harness 版本。
 
+### 2026-10-07 · 设置页操作按钮修复与真机验收
+
+用户在运行中的 DSH 点击「体检」等按钮时，曾看到缺少 `C:\Users\Z1848\.dsh`、profile 目录和 `app.asar` 的错误。根因是宿主用 Electron 可执行文件配 `ELECTRON_RUN_AS_NODE` 启动 CLI；子进程仍受 Electron 的 ASAR 虚拟文件系统影响，误读实体归档。操作通道现在改用 DSH 自带的独立 Node；找不到它时明确报错，不再退回 Electron。设置页优先显示体检/升级检测摘要，完整 JSON 折叠在「展开原始输出」。
+
+重启 DSH 后，按设置页同一路由逐一执行 `doctor`、`upgrade`、`accept`、`snapshotList`、`upgradeStage`、`precheck`、`snapshotCreate`，七项均退出码 0。实际页面七个按钮也逐个点击成功；带 ⚠ 的三项均经过二次确认。`upgradeStage` 正确报告当前没有需要重打的声明，`snapshotCreate` 从页面创建了 `20261007-005801-界面上留的快照`。体检为 22 项、0 错误、2 警告；两条警告说明部分包只随安装包提供，并非此次按钮故障。完整测试 `npm test` 为 17/17 套通过。
+
+随后把原本占满设置页的「重启后验收」「组合预检」「快照列表」「留一份快照」也统一改为 JSON + 简明摘要，失败项仍带修法，完整原文仍可展开。为了排除托盘旧进程复用，完整退出 DSH（所有进程均消失）再启动；七条真实操作路由再次均退出码 0、返回可解析 JSON 和非空摘要。此次验收为 13 通过、0 失败、0 未验证，预检为 201 条目、0 问题。
+
 ## 插件声明方式（照抄 `dsh-better-sidebar/package.json`）
 
 ```json
@@ -72,7 +80,16 @@
 - [x] 用一个「开关」证明槽位不只适合挂整页 —— 2026-10-06 完成：`settings.general.item` 里那一行「桌面鲸鱼挂件」（接上出货 Harness 里没人调用的 `window.dshWhaleCharm` 桥），见下方第十步记录
 - [x] 让设置页与开关**真的被渲染一遍**（而不是只验形状）—— 2026-10-06 完成：`test/settings.test.mjs` 用外壳真实 React + 迷你 hook 主机，共 41 条断言，见下方第十一步记录
 - [x] 把「我改的东西还没落盘」变成界面上看得见的一件事 —— 2026-10-07 完成：`status.json` 新增 `staged` 事实（五态判定表 `stagedVerdict`）+ 胶囊自己变橙写「待落盘」+ 设置页一行说清怎么落盘，见下方第十二步记录
-- [ ] 重启 DSH 后确认胶囊与设置页真的出现
+- [x] 重启 DSH 后确认设置页真实出现、bundle/capsule 两条渲染握手到达；设置页显示安装包真实大小与改造判定（2026-10-07）。胶囊可见性仍受用户的隐藏偏好控制。
+
+### 2026-10-07 · 修正 Electron 虚拟 ASAR 造成的“0 字节”假报告
+
+实际落盘重启后，设置页曾把存在的 `app.asar` 报成「0 字节」，但独立 `doctor` 读到
+121,422,676 字节。原因是 Electron 的 `node:fs` 将 `.asar` 当作虚拟目录；状态页需要的是
+磁盘文件本身。宿主插件改用 Electron 的 `original-fs` 读取安装包与暂存包的物理 stat，
+普通 Node 测试环境回退到 `node:fs`。再次重启后，`status.json` 报
+`asarBytes=121422676`、`backupBytes=121348951`、`judgedBy=size`、0 个被否候选；
+桌面设置页同步显示 115.8 MB / 115.7 MB 与「已被改造」。
 
 ## 验收
 
@@ -404,7 +421,8 @@ ctx.slots.inject("settings.general.item", () => ctx.slots.register(
 `WebRoute = { kind: 'exact' | 'prefix', path, handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void> }`
 ⇒ **handler 拿得到 `req.method` 与 `req.headers`，所以一条路由就能同时服务 GET 与 POST**，
 不需要注册两条（`register` 对重复的 `(kind, path)` 直接 throw）。
-宿主里跑 Node 脚本的现成做法在 `src/precheck.mjs:111-130`：`ELECTRON_RUN_AS_NODE=1` + `process.execPath`。
+当时参考 `src/precheck.mjs`，用 `ELECTRON_RUN_AS_NODE=1` + `process.execPath` 启动按钮命令；
+真机使用时发现 Electron 的 ASAR 虚拟文件系统仍在，现已改为 DSH 自带的独立 Node（见本文件顶部 2026-10-07 修复记录）。
 
 **四条约束**
 1. **白名单，永不经过 shell**：操作在宿主侧 `ACTIONS` 表里写死 argv；用户输入只能填进「快照备注」
@@ -618,4 +636,3 @@ Web 前端，也就是 `dsh.client.inject` 那一类（`dsh-better-sidebar` 的�
 它打印了 web 的帮助，然后**照样启动**了那个 profile，且它按组合配置去绑 19387 —— 与用户正在跑的
 实例撞端口，于是进程就那么挂着。已终止，确认 19387 始终由原实例（PID 30488）持有、未抢走端口，
 残留子进程也已消失。**结论：验证要靠离线单测与 `--dump-config`，不要为了「看效果」去 boot 一个实例。**
-

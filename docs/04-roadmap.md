@@ -10,12 +10,13 @@
 **目标**：启动、界面、常驻元素都符合自己的审美与习惯。
 
 **当前状态**
+- **2026-10-11 最新变更：光晕与飘彩版完成第五轮代码修订，视觉复看待完成，尚未落盘。**按用户要求参考 Three.js Bloom 和 Codrops 粒子案例，移除尾后线束，改为柔光、青蓝/紫粉星云和独立漂散彩色粒子；原图鲸鱼与游动保留。行为检查 26/26、资源与构建检查通过。浏览器安全策略阻止 file:// 预览且禁止绕过，本轮未完成实际视觉复看，也没有新版录像。原地址预览和暂存包已更新，在用安装包未改动。
 - `whale-motion/` 有完整的启动动画素材与渲染管线（192 帧 PNG + `render.py` + `render.mjs`）。
 - `vendor/whale/build.mjs`（由 `../tools/build-whale.mjs` 重写而来，改为按 `patches/T1-whale-splash.yml` 声明驱动）已经能「生成 → 语法检查 → 重打包 → 逐字节核对」，产物 `state/staged/app.asar`。
 - `dsh-whale-widget@0.3.18` 已装（L1），提供 Web 右下角余额小鲸鱼、气泡、音效、角色。
 - `.dsh/whale-audio`、`.dsh/whale-bubble-imgs`、`.dsh/whale-roles` 是它的数据目录（目前多为空）。
 - **动画已落盘**（2026-10-06 晚：`app.asar` 121,421,984 B，sha256 与 `state/staged/app.asar` 一致；原版备份完好，见 P2 / P1）。
-- 启动窗口那几段脚本**已有行为级离线单测**（`test/splash.test.mjs`，**23** 条断言）：用 `node:vm` 造假浏览器，
+- 启动窗口那几段脚本**已有行为级离线单测**（`test/splash.test.mjs`，**26** 条断言）：用 `node:vm` 造假浏览器，
   把归档里的 `lib/welcome/whale-animation.js`、`renderer/whale-splash.js` 与 `renderer/replay.js` 按页面同样的顺序真跑一遍，
   推进整条时间线，模拟拖动/键盘/主题翻转/存储被禁，并检查**每个画布参数都是有限数**（NaN 是 canvas 最典型的静默失败）；
   `replay.js` 在归档里缺席时（尚未落盘的旧版本）只跳过 replay 那一节，其余照跑 —— 读不到产物不算「通过」，也不谎报失败。
@@ -26,8 +27,9 @@
   `vendor/whale/patch-main.mjs` 新增 `replaySplash()` 真开一个短命无框窗口（600×700、不可交互、`REPLAY_MAX_MS = 2e4` 安全网），
   `test/splash.test.mjs` 19 → **25** 条钉住「动画播完自己收场，不赖着不走」（其中两条是**故意让画面画不出来**的失败路径：
   没有画布、`drawWhale`/`WhaleSplash` 抛异常时，重播窗口必须立刻/按时自己关掉，而不是留一块 20 秒的置顶空白方块挡着界面）。
-  **已构建核对，并于 2026-10-06 21:36 落盘**（`expect_diff_entries` 13 条已是现场实况）；此后又修了一版 replay 健壮性，
-  暂存包 121,422,676 B **比在用安装包新 692 字节 ⇒ 待落盘**（`install-whale.cmd` 再跑一次即同步）。
+  **已构建核对，并于 2026-10-06 21:36 首次落盘**（`expect_diff_entries` 13 条已是现场实况）；
+  replay 健壮性修复随后于 2026-10-07 再次落盘。当前在用 `app.asar` 为 121,422,676 B，
+  构建记录与安装包哈希一致，重启后验收通过。
 - **手写素材已入库**：`vendor/whale/materials/`（**12 个文件 / 53 KB**，后两件就是上面的 replay）。搬进去之后重建验证过 ——
   产物与搬家前 **sha256 完全相同**（搬家前后各构建一次比对）。`action: patch` 的三份原版缓存仍不入库
   （从任意一份 `app.asar` 可原样重抽，且构建时逐字节校验）。
@@ -44,8 +46,8 @@
 **候选动作**
 1. ✅ **清理 `app.asar.tmp` 残留**（P1）—— 已完成：确认它是坏构建（抽出来的 `lib/main.js` 过不了
    `node --check`，落盘会让主进程起来就抛 SyntaxError），已删除；`doctor` 现在报「无残留 `app.asar.tmp`」。
-2. 🚧 **落盘鲸鱼启动动画**（P2）：`build` 与落盘是两步，落盘要等 Harness 完全退出 —— **这一步归你**。
-   已落盘过一次（2026-10-06 21:36），此后重建的暂存包含重播修复，仍在等下一次落盘。
+2. ✅ **落盘鲸鱼启动动画**（P2）：最新 replay 修复已于 2026-10-07 在 Harness 完全退出后落盘，
+   重启后通过 `accept` 与安装包哈希核对；启动画面已在桌面端观察。
 3. ~~把 `dsh-whale-widget` 当主战场~~ —— **已被取代**：本项目自建 `plugins/dsh-up-t`（L1），
    挂件菜单的开关由它提供，见 T4。
 
@@ -96,9 +98,9 @@
 **目标**：同样的活少花时间少花 token。
 
 **候选动作**
-1. **开会话全文搜索**（P4）。默认 `openAt: never` 时侧边栏只能按标题和工作区名匹配；打开后可以对历史会话内容检索。这是投入产出比最高的一项。✅ 已落地，待重启验收。
+1. **开会话全文搜索**（P4）。默认 `openAt: never` 时侧边栏只能按标题和工作区名匹配；打开后可以对历史会话内容检索。这是投入产出比最高的一项。✅ 已落地，并已在运行中的桌面界面用历史正文词命中测试会话。
 2. **缓存与压缩参数**：`spill-policy.maxInlineTokens`、`tool-result-pruner.thresholdChars`、`compaction-basic`。✅ 已核实、**无需改动**。缓存侧已结案（命中率 98.3%、压缩净 +92.35M）。阈值侧：`spill-policy` 是**仅追加**的（不破坏 KV Cache），完整结果落文件可 `read`/`grep` 读回；`tool-result-pruner` **只在压缩压力下运行**、原始事件留在仅追加日志里可回放（无损），但**从第一个变化的 token 起**会让 KV Cache 失效。⇒ 两处都**维持默认**：调高 `maxInlineTokens` 只是让更多内容内联、反而加重压力；调低 pruner 阈值是用「省一次摘要」换「破坏缓存」。**没有实测病灶就不开刀**；将来若真的要动，先动 `maxInlineTokens` 并用 `acp_cache` 复测命中率。详见 `tracks/T3-efficiency/README.md`。
-3. **会话标题质量**：`session-title-llm` 原来只有 `targetWords: 5` / `targetCjkCharacters: 10` —— 10 个汉字的标题无法区分同主题的多次会话，是纯读数损失。✅ 2026-10-06 已调为 `8` / `16` / `maxOutputTokens: 96`（`maxInputBytes` 与 `timeoutMs` 刻意不动），现场 `cordis.patch.yml` 第 13 条，声明副本 `patches/T3-session-title.yml`；**待重启验收**。
+3. **会话标题质量**：`session-title-llm` 原来只有 `targetWords: 5` / `targetCjkCharacters: 10` —— 10 个汉字的标题无法区分同主题的多次会话，是纯读数损失。✅ 2026-10-06 已调为 `8` / `16` / `maxOutputTokens: 96`（`maxInputBytes` 与 `timeoutMs` 刻意不动），现场 `cordis.patch.yml` 第 13 条，声明副本 `patches/T3-session-title.yml`；重启后配置声明已核对。
 4. **交互习惯**：`ui-conversation.busyEnter: steer` 已设。✅ 斜杠命令与快捷键已梳理（7 个斜杠命令；快捷键由 `@deepseek-ai/dsh-client-shortcuts` 提供、**按设备可重绑**，`Ctrl+/` 开速查面板，桌面端存 Electron `userData/keybindings.json`）。**不加配置**：默认值已覆盖主要动作，改默认反而破坏既有肌肉记忆。见 `tracks/T3-efficiency/README.md`。
 5. **记忆**：`@furongjun1999/dsh-memory` 与 `billion-context` 已在，梳理它们的写入/召回策略。✅ 三个插件机制正交（压缩 / 长期记忆 / 只读观测），**都不动**；2026-10-07 把灵枢 **33 个配置键逐项读完**（两个独立来源互相印证），结论仍是全部维持默认，并实测自动记忆确实在写（`_audit.jsonl` 有 `actor=dsh-memory` / `clearance=internal` 记录）。顺带查出两件原本不知道的事：写入凭据在**包外**密钥环 `~/.mdcg/token`（首启自动签发 ⇒ 升级/重装不会带走），以及**热重载会让灵枢静默降级**（`apply failed: cannot create effect on inactive context` ⇒ 改完必须重启 Harness）。详见 `tracks/T3-efficiency/README.md`。
 
@@ -159,8 +161,8 @@
 3. ✅ **把高频操作做成按钮** —— 2026-10-06 落地：宿主新增 `/dsh-up-t/action`
    （白名单 + `POST` + `x-dsh-up-t` 自定义头 + 串行执行；`GET` 只列动作、永不执行），
    设置页按它给的 `specs` 渲染按钮（体检 / 升级检测 / 组合预检 / 快照列表 / 留一份快照）。
-   命令行由 `process.execPath` + `ELECTRON_RUN_AS_NODE=1` 以纯 Node 身份跑，
-   **数组形式 spawn、永不经过 shell**。会写盘的操作先二次确认。
+   命令行由 DSH 自带的独立 Node 运行，**数组形式 spawn、永不经过 shell**；
+   Electron 自身即使加 `ELECTRON_RUN_AS_NODE=1` 也会误读 ASAR，不用于操作通道。会写盘的操作先二次确认。
    离线单测从 24 条涨到 **44 条**：路由数与守卫链、`GET` 只列动作且永不执行、一次真 spawn、
    「答「不」时一个请求都不发」、把整张 `specs` 表与 `writes` 语义钉住的一条、心跳两步走
    （`apply` / `ready`）与设置页心跳行的三条，以及**握手通道**的三条
@@ -183,6 +185,9 @@
    （大小不同而时间戳拿不到 ⇒ `differs`，绝不硬猜）。判定与 I/O 拆开是为了不去改那个 121 MB 产物
    造测试数据。`test/plugin.test.mjs` 55 → **57**、`test/capsule.test.mjs` 16 → **18**，全套 10/10。
    见 `tracks/T4-webgui/README.md` 第十二步记录。
+6. ✅ **按钮真机修复与结果摘要**（2026-10-07）：七个设置页按钮逐个点击，均退出码 0；
+   三个写盘操作的二次确认也已实际走通。按钮现在统一返回 JSON，面板优先显示体检、升级、验收、
+   预检和快照的结论，完整输出可展开。见 `tracks/T4-webgui/README.md`。
 
 **验收**：界面上出现自建面板；刷新/热重载后仍在；Harness 升级后仍在。
 
@@ -207,7 +212,7 @@
   真解析得到、组件在真 React 下不抛错、aria 与中英文案全对），**行为层**用自写迷你 hook 主机
   跑 `useEffect` 里的数据流（拉状态、30 秒轮询、桥的 `state()`/`onChange`、失败回退、卸载撤监听）。
   此前 `test/plugin.test.mjs` 用 stub 的 React 只钉住了槽位注册的**形状**，组件函数从未被调用过 ——
-  「形状对」与「渲染过」之间的那类失败（白屏且无报错）照不到。全套 **14 套**测试。
+  「形状对」与「渲染过」之间的那类失败（白屏且无报错）照不到。全套 **15 套**测试。
 - ✅ **「构建了但忘了落盘」现在终端也会自己报出来**：`doctor` 的「安装包」段与 `upgrade` 的报告末尾各有一条
   `暂存包`（五态：`pending` 待落盘 / `behind` 暂存更旧别用 / `same-size` / `differs` 判不出方向 /
   `unavailable` 拿不到）。判定表在 `src/staged.mjs`，与 `plugins/dsh-up-t/lib/index.js` 那份
@@ -284,6 +289,7 @@
 8. ✅ **快照回滚的离线单测**（2026-10-07）：`test/snapshot-restore.test.mjs`（12 条），顺带修掉 `f.src` 绝对路径、越界写入、同秒 id 覆盖三个真缺陷，并让 `diff` 与 `restore` 对同一行说同一句话。
 9. ✅ **`vendor/asar/` 三件套的回归测试 + `write.mjs` 的三条「写哪儿」守卫**（2026-10-07）：`test/asar-tools.test.mjs`（15 条），顺带堵住「输出落进安装目录」与「覆盖原版备份」两条真隐患（见上）。
 10. ✅ **只读读归档那条路（`src/asar.mjs` + `dsht asar ls|cat|grep`）的回归测试**（2026-10-07）：`test/asar-cli.test.mjs`（19 条），顺带修掉四个真问题 —— grep 路径带前导斜杠（粘不进 `cat`）、`listAsarPaths` 输出顺序随 DFS 变、`walkAsar`/`asarStats` 拿错参数时静默吐 0、带 `g` 的正则在 grep 里漏报（见上）。
+11. ✅ **预检的判据与基线（`src/precheck.mjs`）的回归测试**（2026-10-07）：`test/precheck.test.mjs`（27 条，不 boot Electron），顺带修掉三个真问题 —— **空 dump 也算通过**（一个条目都没有却打印「组合可用」）、**失败的预检把上一条基线冲成空文件**（下一次报「201 个条目全部新增」）、diff 按集合算行差异（真实 dump 里 7 个条目有重复行，「三行 `config:` 变两行」列不出任何一行）与条目顺序变化不算 diff（插件对调＝「完全一致」）。
 
 **验收**：在一台干净的机器上，`doctor` → 应用补丁 → 落盘 → 复验，全程无需人工记忆任何步骤。
 
@@ -294,9 +300,9 @@
 | 里程碑 | 内容 | 状态 |
 | --- | --- | --- |
 | **M0** | 项目骨架 + 环境基线 + `doctor` / `snapshot` / `baseline` | ✅ 已完成 |
-| **M1** | 权威组合预检 `precheck` + 只读安装包工具 `asar` + T3 会话搜索开启 | ✅ 2026-10-06 重启后验收：4 份 L0 声明与现场一致（`dsht upgrade` 全 OK）；只剩「按会话内容搜索真能命中」要你亲手搜一次（见下方 M1 验收） |
-| **M2** | T5 `../tools/` 归拢进 `vendor/`（构建链闭环）+ T1 鲸鱼动画落盘 | ✅ 2026-10-06 晚全部完成：构建链闭环 + 落盘（12 项自动判定全过；观感那一眼归你） |
-| **M3** | T2 新增 Provider + T4 自建 Web 插件样板 | 🚧 T4 样板**已落地并重启验收**（L1 插件 + 设置页 + 操作按钮 + 桌面挂件开关；10:48 重启后操作通道与两条握手通道实测在线）；T2 新增 Provider 卡在**需要用户给出目标**（baseURL + key，或 MCP 服务器） |
+| **M1** | 权威组合预检 `precheck` + 只读安装包工具 `asar` + T3 会话搜索开启 | ✅ 2026-10-07 真实 `precheck` 201 条、0 问题；`session/search` 与桌面界面均以正文词命中测试会话 |
+| **M2** | T5 `../tools/` 归拢进 `vendor/`（构建链闭环）+ T1 鲸鱼动画落盘 | ✅ 2026-10-07 最新 13 条目构建已实际落盘；重启后 `accept` 12 pass / 0 fail / 1 skip，安装包哈希与构建记录一致，启动动画已在桌面端观察 |
+| **M3** | T2 模型路由 + T4 自建 Web 插件样板 | ✅ T4 样板**已落地并重启验收**（L1 插件 + 设置页 + 操作按钮 + 桌面挂件开关；10:48 重启后操作通道与两条握手通道实测在线）；T2 沿用 OpenCode Go 的 DeepSeek V4.1 Flash，真实测试会话回复 `OK`；preset 按用户要求不改 |
 | **M4** | 升级重打自动化 | 🚧 检测 + **半自动重打**（`upgrade --stage`）+ **离线演练落盘**（`--to`）+ **离线演练回滚**（`--rollback --to`）+ **一键脚本三条路**（`install-whale.cmd` 的 `/dry` `/rollback /dry` `/rollback`）已交付；自动落盘**不做**（要人挑时间，见 `docs/03-workflow.md`） |
 | **M5** | T2/T3 落地批次：启用 `tool-ralph`、会话标题更长、上下文阈值核实、关闭产品埋点、写项目 skill | ✅ **已全部落盘并重启验收**（ralph / 标题 / 埋点开关 / skill；10:48 重启后 `dsht upgrade` 报 4 份 L0 声明全部 OK）；阈值核实结论是**维持不动**；灵枢记忆策略已梳理（三个插件机制正交，都不动），2026-10-07 补完 33 个配置键逐项体检 + 自动记忆实测 |
 
@@ -309,10 +315,10 @@
 - [x] 能检查 L0 声明与现场 `cordis.patch.yml` 是否漂移
 - [x] 已用「篡改基线版本号」的模拟升级跑通重打分支（报告正确、退出码 1、基线原样还原）
 - [x] 落盘这一步本身可离线演练并核对（`install.mjs --to`；`test/install.test.mjs` 60 条，且在 Harness 开着时也能跑）；回滚同样可演练（`install-whale.cmd /rollback /dry`），三条路都收在双击脚本里
-- [ ] 用**真实**的一次 Harness 升级走一遍：升级 → `dsht upgrade` → 重打 → 落盘 → 复验
-      （**已知坑，届时注意**：升级会整体替换 `app.asar`，而 `install.mjs` 对已存在的备份**保留不刷新**，
-      所以升级后 `build.mjs` 的默认 `--from` 指向的是**旧版备份** ⇒ 届时要显式 `--from <新安装包>` 重抽素材重打，
-      或先刷新备份。素材过期的检测基准此时**恰好**指回新安装包，会如实报出这三条过期——那是真警报，不是误报）
+- [x] 用离线模拟升级检验跨版本重打：新安装包与旧备份并存时，默认构建来源自动指向新安装包；
+      暂存包写入来源哈希记录，演练安装拒绝拿旧备份冒充新来源；旧备份轮换和恢复由独立测试覆盖。
+- [ ] 用**真实**的一次 Harness 升级走一遍：升级 → `dsht upgrade` → 重抽过期素材 → 重打 → 落盘 → 复验。
+      新版原版素材必须从升级后的安装包重抽；`action: patch` 的逐字节来源核对会阻止旧素材覆盖新版代码。
 - [x] `dsht accept` 把重启后的验收变成一条只读命令（L3/L0 声明 + 宿主路由 + 渲染层握手；FAIL/SKIP/MANUAL 三种结论分开，观感类不计入退出码）
 
 ### M1 的验收标准
@@ -320,7 +326,7 @@
 - [x] `dsht precheck` 能吐出与运行中应用一致的组合结果，退出码语义明确
 - [x] `dsht asar ls|cat|grep` 能只读地读安装包里**真正在跑的那份代码**
 - [x] `session-query-sqlite` 的 `path` + `openAt: first-search` 已写入 profile patch，且预检 diff 恰好只有这两行
-- [ ] **重启 DSH 后**，按会话内容搜索能命中（这一步只能由人来做）
+- [x] **运行中的 DSH** 通过 `session/search` 按本次测试会话的正文词「两个字母」命中该会话（2026-10-07）；界面搜索入口另行复核
 
 ### M2 的验收标准
 

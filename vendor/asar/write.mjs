@@ -19,6 +19,7 @@
 // 一律原样透传，绝不从数据区拷贝或重写。
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { P, assertHarnessStopped, fail } from '../lib/harness.mjs';
 
 const JSON_START = 16;
@@ -184,7 +185,33 @@ function main() {
   fs.mkdirSync(path.dirname(out), { recursive: true });
   const tmp = `${out}.writing`;
   fs.writeFileSync(tmp, Buffer.concat([prefix, json, ...chunks]));
-  fs.renameSync(tmp, out);
+  try {
+    fs.renameSync(tmp, out);
+  } catch (error) {
+    // Windows 上有进程以不共享 DELETE 的方式短暂打开暂存包时，覆盖式 rename
+    // 会报 EPERM，尽管同一个文件仍可写。只对安装目录外的已有产物退回复制；
+    // 先保留旧产物，复制失败时可以恢复。安装包本体始终由 install.mjs 管。
+    if (!['EPERM', 'EACCES'].includes(error.code) || !fs.existsSync(out)
+      || isInside(out, P.resourcesDir) || out === path.resolve(P.asar)) throw error;
+    const previous = `${out}.previous-${crypto.randomUUID()}`;
+    fs.copyFileSync(out, previous);
+    try {
+      fs.copyFileSync(tmp, out);
+      if (fs.statSync(tmp).size !== fs.statSync(out).size) {
+        throw new Error('暂存包复制后大小不一致');
+      }
+    } catch (copyError) {
+      fs.copyFileSync(previous, out);
+      fs.rmSync(previous, { force: true });
+      throw copyError;
+    }
+    // 清理失败不能走上面的恢复分支：此时新产物已完整复制，恢复旧包会把成功写入变成假失败。
+    for (const obsolete of [tmp, previous]) {
+      try { fs.rmSync(obsolete, { force: true }); }
+      catch (cleanupError) { process.stderr.write(`清理残留失败：${obsolete}（${cleanupError.code}）\n`); }
+    }
+    process.stdout.write('Windows 未允许覆盖式重命名，已备份旧暂存包并复制新产物。\n');
+  }
   process.stdout.write(`写入 ${out}（共 ${order.length} 个条目，替换 ${sets.length} 个）\n`);
 }
 

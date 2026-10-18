@@ -357,8 +357,16 @@
               r && r.error
                 ? h("p", { style: { color: "#c0392b", margin: "6px 0 0" } }, r.error)
                 : null,
-              r && r.stdout ? h(TextBlock, { key: "out", text: r.stdout }) : null,
-              r && r.stderr ? h(TextBlock, { key: "err", text: "stderr:\n" + r.stderr }) : null,
+              r && r.display ? h(TextBlock, { key: "summary", text: r.display }) : null,
+              r && !r.display && r.stdout ? h(TextBlock, { key: "out", text: r.stdout }) : null,
+              r && !r.display && r.stderr ? h(TextBlock, { key: "err", text: "stderr:\n" + r.stderr }) : null,
+              r && r.display && (r.stdout || r.stderr)
+                ? h("details", { key: "raw", style: { marginTop: "8px" } },
+                    h("summary", null, "展开原始输出"),
+                    r.stdout ? h(TextBlock, { text: r.stdout }) : null,
+                    r.stderr ? h(TextBlock, { text: "stderr:\n" + r.stderr }) : null,
+                  )
+                : null,
               r && !r.stdout && !r.stderr && !r.error
                 ? h("p", { style: { opacity: 0.6, margin: "6px 0 0" } }, "（没有输出）")
                 : null,

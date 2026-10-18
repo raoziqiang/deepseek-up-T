@@ -10,8 +10,8 @@
   覆盖 `openai-completions` / `openai-responses` / `anthropic-messages` 三种 wire protocol，
   约 30 个模型；凭据走 `OPENCODE_GO_API_KEY`（存于 `.dsh/.credentials.yaml`）。
 - 每条路由钉了稳定的 `x-opencode-session` 头（网关缺 session 会回 400）。
-- `agent-default-model`：`opencode-go-chat` / `glm-5.3`（用户在 GUI 里改过；2026-10-07 的预检
-  把它列成 L0 里唯一一处与上次不同项，从 `deepseek-account` / `deepseek-flash` / `reasoningEffort: high` 变来）。
+- `agent-default-model`：当前现场为 `opencode-go-chat` / `deepseek-v4.1-flash`；
+  2026-10-07 的模型选择器与真实 `OK` 回复已核对。早先记录的 `glm-5.3` 是当时快照，非现值。
 - `agent-preset-registry`：`default: standard`、`selectedDefault: cordis`
   ⇒ **新会话跑的是 `preset-cordis`**，它与 `preset-standard` 的唯一差别是多一个 `tool-cordis`。
 - `subagent`：`maxDepth: 2`（base/包默认 1）；`agent-team`：`maxMembers: 16`（本项目 2026-10-07 改，bundle 原本 8）。
@@ -39,15 +39,16 @@ dsh-memory、better-sidebar、whale-widget，4 个 experimental（Agent Teams、
 
 ## 待办
 
-- [ ] 新增 Provider：往 `llm-pi-ai.providers` 加一节（`apiKeyEnv` + `api` + `baseURL` + `models`）
+- [x] 用户指定 DeepSeek V4.1 Flash，并选择沿用现有 `opencode-go-chat` 路由；不新增重复 Provider
 - [ ] 接入 MCP server，把外部工具变成本地 DSH 工具
 - [x] **落盘 `tool-ralph`** —— 2026-10-06 完成（用户确认后落盘），见下方记录
 - [x] **写自有 skill** —— 2026-10-06 完成：`.dsh/skills/deepseek-up-t/SKILL.md` + 两条 junction + 离线单测 9/9，见下方记录
 - [x] **关闭桌面端产品埋点** —— 2026-10-06 完成（经用户确认后落盘），见下方记录
 - [x] **Agent Teams 成员上限 8 → 16** —— 2026-10-07 完成（L0 第 15 条，预检 0 问题），见下方记录
 - [x] **调 Agent 行为：先把「Agent 行为」到底是哪些旋钮读清楚** —— 2026-10-07 完成（四个 preset 的真实差异、`system-prompt` 全部键与两个陷阱、`subagent` 的 depth 与并发两道闸门、`agent-loop.maxParallelToolCalls`、dump 里一长串 `[disabled]` 的来历），见下方记录
-- [ ] 新增 Provider / MCP —— 用户已选「暂时跳过」，需要目标再开
-- [ ] **另存一份 preset**：新建/覆盖 preset 只能靠 bundle 补丁（插入一行 `@deepseek-ai/dsh-agent-preset` 或按 id 覆盖）再用 `plugin_manager` 装进 profile；现在只是把它记清楚了，没有目标就不动手
+- [x] DeepSeek V4.1 Flash 真对话验收：运行时 Provider 注册、模型选择、测试会话回复 `OK` 全部通过（2026-10-07，`node vendor/route/verify-v41-flash.mjs`）
+- [ ] MCP server：尚无具体服务目标
+- [x] preset：用户明确要求「不改」；保持现有选择
 
 ## 验收
 

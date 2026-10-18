@@ -2,14 +2,32 @@
 
 > 启动、界面、常驻元素都符合自己的审美与习惯。
 
+## 最新进度 · 2026-10-12
+
+### 主窗口启动动画插件 `plugins/dsh-whale-splash`（L1，待安装）
+
+- 星空鲸鱼游过主界面、尾鳍荡起星空涟漪，收尾俯冲到左下角化作科幻鲸鱼娘并常驻；最后一圈涟漪推开幕布露出界面。鲸鱼沿用用户指定原图与同一套 WebGL2 摆尾。
+- 走 L1 注入行，不碰安装包；`test/whale-splash-plugin.test.mjs` 16/16，离线预览逐帧与实时播放已看过（`state/whale-splash-plugin/`）。
+- 2026-10-13 已装进 desktop profile：junction + `dsh.profile.bundles` 末尾的 `dsh-whale-splash`；装前快照 `20261013-001300-装-dsh-whale-splash-前`，候选清单预检通过（202 条目、0 问题）。需重启 Harness 后第一次打开主窗口才播放。
+
+## 进度 · 2026-10-11
+
+### 光晕与飘彩（第五轮，已构建，视觉复看待完成）
+
+- 按用户反馈移除尾后的线束与硬线圈，改为分层柔光、青蓝/紫粉星云、260 个独立漂移旋转的彩色粒子，少量暖金点缀。用户指定原图与上一轮游动保留。
+- 实际查看 Three.js 官方 Unreal Bloom 演示，并阅读 Codrops 发光粒子教程，借鉴亮核/柔光分层、生命周期与波状漂移。完整来源见交付目录 `VISUAL-REVIEW.md`。
+- 行为检查 26/26、资源检查全部通过；构建 8 个 JS 语法检查通过，14 项声明差异，其余 11,466 项一致。
+- **新版视觉复看未完成**：浏览器工具安全策略阻止本地 file:// 预览且禁止绕过。未导出新录像，旧 v4 录像不能作为本版证明。
+- 原地址预览与暂存包已更新至 `D:\Z1848\output\deepseek-up-T-cosmic-whale-20261009\`。在用安装包未替换；需要新版截图或录像继续视觉复看。
+
 ## 现状
 
 - 启动动画素材与管线在 `../whale-motion/`（192 帧 PNG、`render.py`、`cutout.py`、`tune_mask.py`）。
 - 构建与落盘工具已归拢到 `vendor/whale/`（`build.mjs`、`install.mjs` + 三个 patcher + `bundle.mjs`），声明在 `patches/T1-whale-splash.yml`。
 - `dsh-whale-widget@0.3.18` 已装为 **L1 插件**：Web 右下角余额小鲸鱼、气泡点击序列、音效、角色、动图。
 - 数据目录：`.dsh/whale-audio`、`.dsh/whale-bubble-imgs`、`.dsh/whale-roles`（多数为空）。
-- **动画已落盘**（2026-10-06 晚）：安装包 `app.asar` 121,421,984 B（sha256 `2c6d8b4bf4716498…`），与 `state/staged/app.asar` 逐字节相同；原版备份 121,348,951 B（`983ca71114e6dfd3…`）完好保留，随时可回滚（`install.mjs --rollback`）。`dsht accept` 12 项自动判定全过。
-- 暂存包 `state/staged/app.asar`（121,422,676 B，**13** 条目按声明改动，其余 11,466 条目逐字节一致）—— 落盘时 `install.mjs` 拿同一判据自检过（verify --expect 13）。**注意它比在用安装包新 692 字节**（2026-10-06 又修了一版 replay 健壮性，见下方记录），要生效得再落盘一次。
+- **最新动画与 replay 加固已落盘**（2026-10-07）：安装包 `app.asar` 121,422,676 B（sha256 `c70bde8f3fe24c88…`），与构建记录哈希一致；原版备份 121,348,951 B（`983ca71114e6dfd3…`）完好保留。`dsht accept` 12 pass / 0 fail，启动动画在真实桌面端可见。
+- 暂存包已被安装器消费；13 条目按声明改动，其余 11,466 条目逐字节一致。重启后的胶囊/设置页握手与备份状态已核对。
 
 ## 主战场
 
@@ -26,7 +44,7 @@
 ## 待办
 
 - [x] 清理 `app.asar.tmp` 残留（115.8 MB）——**已确认是坏构建**（见下「记录」），已删除
-- [x] 鲸鱼启动动画落盘 —— 2026-10-06 晚完成（完全退出 Harness → 双击 `install-whale.cmd` → 重启）。`dsht accept` 里「T1 鲸鱼启动动画已落盘」「app.asar 已被改造」均过；观感那一眼（启动画卷 → 鲸鱼 → 挂件动画）仍归你，见下方「验收」。
+- [x] 鲸鱼启动动画落盘 —— 2026-10-07 最新 13 条目版已重装并重启；`dsht accept` 中「T1 鲸鱼启动动画已落盘」「app.asar 已被改造」均过，启动动画已在桌面端观察。挂件的开关与交互仍按下方独立验收项。
 - [x] 把主题/气泡等偏好从 asar 侧迁到 `dsh-whale-widget` 的 L1 设置 —— **侦察后结论是「本来就不该这么做」**：`dsh-whale-widget` 0.3.18 的 `package.json` 只声明 `dsh.bundle.patch`，**没有任何 `Config` schema**，它的偏好本来就不在 asar 里，而是落在 `$DSH_HOME\.dshw-size.json` / `.dshw-turn.json` / `.dshw-usage.json`（设备本地，随用随写）。四层改造面（L0–L3）管的是**组合与代码**，不管这层用户数据。⇒ 这条待办的前提是错的，撤销；真要改默认值应改 widget 自己的默认值（L1 包内），而不是「迁到 L1 设置」（见下方记录）。
 - [x] 桌面挂件窗口的**开关**（设置 →「通用」里那一行）—— 2026-10-06 完成：出货 Harness 有整套挂件机制，却没有任何代码调用 `window.dshWhaleCharm`，于是 `whale-charm.json` 永远是 `enabled: false`、挂件永不出现且不报错。开关改由 L1 插件 `dsh-up-t` 提供（`settings.general.item`），**不碰安装包、硬刷新即生效**。见下方记录与 [plugins/dsh-up-t/README.md](../../plugins/dsh-up-t/README.md)。
 - [x] 桌面挂件菜单的「Replay animation」原本是空操作（`"replay"` 发给主窗口，而启动画面在欢迎窗口）—— 2026-10-06 已修：改 `vendor/whale/patch-main.mjs`，让主进程**自己**开一个短命 replay 窗口（`REPLAY_MAX_MS = 2e4` 安全网），新增 `renderer/replay.html` + `renderer/replay.js` 两个 `insert`（`expect_diff_entries` 11 → 13），`test/splash.test.mjs` 19 → **23** 条。见下方记录。**已构建核对，并于 2026-10-06 晚随落盘进安装包**（`expect_diff_entries` 已是 13 条实况）。
@@ -49,18 +67,17 @@
 3. `node src/cli.mjs doctor` 中原版备份与当前 `app.asar` 的 sha256 **不再一致**（证明确实落盘了）。
 4. 回滚：`node vendor/whale/install.mjs --rollback`，或 `node src/cli.mjs snapshot restore <id>`（仅覆盖 profile 控制面）。
 
-## 落盘操作清单（T1）——为什么是「你点，而不是我点」
+## 落盘操作清单（T1）
 
-> **2026-10-06 晚已执行过一遍**（落盘 + 重启 + `baseline write` 都走完了）。这一节留在这里，
+> **2026-10-07 最新构建已由本项目工具完成落盘、重启、验收与 `baseline write`。**这一节留在这里，
 > 作为**重装 / 升级后重打 / 回滚**的操作清单 —— 步骤不变，只是不再有「等你做」的含义。
 
-**这一步必须由你在 Harness 关闭的状态下执行**，原因不是权限，而是**因果**：
+**这一步必须在 Harness 完全关闭的状态下执行**，原因不是权限，而是**因果**：
 
 - 覆盖 `app.asar` 要求 Harness **完全退出**（Electron 把 `app.asar` memory-map 了，共享冲突会 EPERM）；
-- 而这个 agent 会话**就跑在 Harness 里面** —— 你完全退出 Harness 的同一刻，我也停了。
-  所以「你退出后我落盘」这个顺序在物理上不成立。
+- 如果开发会话本身就在 Harness 里，退出 Harness 会中断该会话；应从外部进程执行安装器。
 
-因此交付一个**自带守卫的独立脚本**：`install-whale.cmd`（双击即可）。
+因此保留一个**自带守卫的独立脚本**：`install-whale.cmd`（双击即可）。
 
 **怎么做**
 
