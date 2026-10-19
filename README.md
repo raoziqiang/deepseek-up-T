@@ -1,6 +1,10 @@
 # deepseek-up-T
 
-**DSH 改造控制台。** 把散落的一次性改造动作，收敛成「有基线、有快照、有体检、可回滚、可复现」的工程。
+界面上只做三件事：**开机动画**、**背景**（自带静夜 / 晨雾 / 流光，也能用自己的 GIF、WebP、APNG、PNG、JPG）、**余额还能用几次**。
+
+设置页不再放体检、升级、快照、暂存包、心跳这些维护项。鲸鱼主题的启动动画插件已从仓库拿掉。维护安装包的命令还在终端里（`node src/cli.mjs`），给改安装包的人用，不出现在界面上。
+
+下面仍是这套终端工具的说明。
 
 - 项目位置：`D:\Z1848\harness-ds\deepseek-up-T\`
 - 改造目标：本机 **DeepSeek Harness**（安装于 `D:\Program Files (x86)\deepseekharness`）
@@ -76,7 +80,7 @@ deepseek-up-T/
 │   └── 06-precheck.md      权威组合预检：为什么 CLI 做不到、怎么绕、边界在哪
 ├── patches/                L0/L3 改动的声明式副本（可审计、可重放）
 ├── plugins/                自建 DSH 插件（L1 层，升级幸存）
-│   └── dsh-up-t/           T4 样板：界面左下角显示改造状态的小胶囊
+│   └── dsh-up-t/           设置页：开机动画、背景、余额提示
 ├── test/                   回归测试（`npm test`）
 ├── tracks/                 五条工作线的落地目录
 │   ├── T1-appearance/      外观与体验

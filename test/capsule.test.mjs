@@ -1,19 +1,4 @@
-// deepseek-up-T :: 左下角胶囊（plugins/dsh-up-t/assets/client.js）的离线行为级单测
-//
-// 为什么要有它，而不是「看一眼代码觉得没问题」：
-// 这段脚本整段包在一个 `try { … } catch (e) { console.warn(…) }` 里 —— 这是**刻意的**
-// （挂件坏了绝不能影响主界面），代价是**任何异常都会变成「界面上什么都没有」**：
-// 没有胶囊、没有报错、没有任何堆栈。用户重启 Harness 之后能看到的只有「说好的胶囊呢」。
-//
-// 而且它是注入行里唯一真正跑在渲染层的代码：宿主侧的心跳与路由全绿，也不代表它跑起来了。
-//
-// 所以这里不检查「语法对不对」，而是**把它真的跑一遍**：给一个最小的假 DOM、
-// 假 localStorage、假 fetch（回一份真实形状的 status.json），然后断言
-//   ① 胶囊真的出现在 DOM 里；
-//   ② 点一下面板真的展开、里面的数字真的是人话；
-//   ③ 拖动、右键隐藏、重复注入这些路径真的改到了该改的状态；
-//   ④ 全程那条 `client failed` 警告一次都没响（异常被吞掉这件事本身要被测到）。
-//
+// assets/client.js：开机动画、背景、余额提示。在假 DOM 里真跑一遍。
 //   node test/capsule.test.mjs
 
 import assert from 'node:assert/strict';
@@ -23,11 +8,10 @@ import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const PROJECT = path.resolve(HERE, '..');
-const SRC = readFileSync(path.join(PROJECT, 'plugins', 'dsh-up-t', 'assets', 'client.js'), 'utf8');
+const SRC = readFileSync(path.resolve(HERE, '..', 'plugins', 'dsh-up-t', 'assets', 'client.js'), 'utf8');
 
 const results = [];
-const RUNS = []; // 每次沙箱运行都记一笔，最后横向检查有没有哪一次让外层 catch 响了
+const RUNS = [];
 async function check(name, fn) {
   try {
     await fn();
@@ -37,15 +21,10 @@ async function check(name, fn) {
   }
 }
 
-// ── 假 DOM ────────────────────────────────────────────────────────
-//
-// 只需要实现这段脚本真的用到的那些：createElement / appendChild / style / textContent /
-// addEventListener / dispatch / getBoundingClientRect / setPointerCapture。
-// textContent 的 setter 必须像真 DOM 一样**顺手清掉子节点**（脚本靠 `panel.textContent=''` 重画面板）。
-
 function makeNode(tag) {
   const node = {
     tagName: String(tag).toUpperCase(),
+    id: '',
     style: {},
     children: [],
     parentNode: null,
@@ -55,29 +34,14 @@ function makeNode(tag) {
       node.children.push(child);
       return child;
     },
+    removeChild(child) {
+      const i = node.children.indexOf(child);
+      if (i >= 0) node.children.splice(i, 1);
+      child.parentNode = null;
+      return child;
+    },
     addEventListener(type, fn) {
       (node.listeners[type] || (node.listeners[type] = [])).push(fn);
-    },
-    removeEventListener(type, fn) {
-      node.listeners[type] = (node.listeners[type] || []).filter((f) => f !== fn);
-    },
-    setPointerCapture() {},
-    releasePointerCapture() {},
-    getBoundingClientRect() {
-      return {
-        left: parseFloat(node.style.left) || 0,
-        top: parseFloat(node.style.top) || 0,
-        width: 40,
-        height: 20,
-      };
-    },
-    dispatch(type, ev) {
-      const list = (node.listeners[type] || []).slice();
-      assert.ok(list.length > 0, `这个节点上没有 ${type} 监听器`);
-      for (const fn of list) fn(ev);
-    },
-    hasListener(type) {
-      return (node.listeners[type] || []).length > 0;
     },
   };
   let text = '';
@@ -94,12 +58,13 @@ function makeNode(tag) {
   return node;
 }
 
-function makeDom({ body = true, documentElement = true, readyState = 'complete' } = {}) {
+function makeDom({ body = true, readyState = 'complete' } = {}) {
   const created = [];
   const docListeners = {};
   const document = {
     readyState,
     documentElement: null,
+    head: null,
     body: null,
     createElement(tag) {
       const n = makeNode(tag);
@@ -109,21 +74,22 @@ function makeDom({ body = true, documentElement = true, readyState = 'complete' 
     addEventListener(type, fn) {
       (docListeners[type] || (docListeners[type] = [])).push(fn);
     },
-    dispatch(type, ev) {
-      for (const fn of (docListeners[type] || []).slice()) fn(ev);
+    dispatch(type) {
+      for (const fn of (docListeners[type] || []).slice()) fn();
     },
-    listenerCount(type) {
-      return (docListeners[type] || []).length;
+    getElementById(id) {
+      return created.find((n) => n.id === id && n.parentNode) || null;
     },
   };
-  if (documentElement) {
-    const el = makeNode('html');
-    document.documentElement = el;
-    if (body) {
-      const b = makeNode('body');
-      el.appendChild(b);
-      document.body = b;
-    }
+  const html = makeNode('html');
+  document.documentElement = html;
+  const head = makeNode('head');
+  html.appendChild(head);
+  document.head = head;
+  if (body) {
+    const b = makeNode('body');
+    html.appendChild(b);
+    document.body = b;
   }
   return { document, created };
 }
@@ -132,457 +98,187 @@ function makeStorage(initial = {}, { throws = false } = {}) {
   const map = new Map(Object.entries(initial));
   return {
     getItem(k) {
-      if (throws) throw new Error('SecurityError: 存储被禁用');
+      if (throws) throw new Error('SecurityError');
       return map.has(k) ? map.get(k) : null;
     },
     setItem(k, v) {
-      if (throws) throw new Error('SecurityError: 存储被禁用');
+      if (throws) throw new Error('SecurityError');
       map.set(k, String(v));
     },
     removeItem(k) {
+      if (throws) throw new Error('SecurityError');
       map.delete(k);
     },
-    dump() {
-      return Object.fromEntries(map);
-    },
+    dump() { return Object.fromEntries(map); },
   };
 }
 
-const SEEN_URL = '/dsh-up-t/seen';
-
-/**
- * 假 fetch。默认把握手（/seen）答成 200 —— 大多数用例只关心状态查询那一次。
- * 想指定某一次调用，就给 responder 加 `match`（字符串按 includes、正则按 test）。
- * 没有 `match` 的 responder 只喂给非握手请求，免得顺序一挪就吃到握手那一次。
- */
-function makeFetch(responders = []) {
-  const calls = [];
-  const queue = responders.map((r) => ({ ...r, used: false }));
-  const matches = (m, url) => (typeof m === 'string' ? url.includes(m) : m.test(url));
-  const fetchImpl = (url, opts) => {
-    calls.push({ url, opts });
-    const idx = queue.findIndex((r) => !r.used && (r.match ? matches(r.match, url) : url !== SEEN_URL));
-    if (idx < 0) {
-      if (url === SEEN_URL) return Promise.resolve({ status: 200, json: async () => ({ ok: true }) });
-      return Promise.reject(new Error(`没有排队的假响应：${url}`));
-    }
-    const r = queue[idx];
-    r.used = true;
-    if (r.reject) return Promise.reject(new Error(r.reject));
-    return Promise.resolve({ status: r.status ?? 200, json: async () => r.json });
-  };
-  fetchImpl.calls = calls;
-  return fetchImpl;
-}
-
-const tick = () => new Promise((r) => setImmediate(r));
-
-/** 一份**真实形状**的 /dsh-up-t/status.json（字段抄自现场那台机器）。 */
-function statusPayload(over = {}) {
-  return {
-    ok: true,
-    time: '2026-10-06T09:20:00-07:00',
-    plugin: { name: 'dsh-up-t', version: '0.1.0', pid: 4242, startedAt: '2026-10-06T09:00:00-07:00' },
-    install: {
-      dir: 'D:\\Program Files (x86)\\deepseekharness',
-      version: '44.0.0',
-      asarBytes: 121415560,
-      backupBytes: 121348951,
-      sameSizeAsBackup: false,
-      judgedBy: 'size',
-    },
-    ...over,
-  };
-}
-
-function runCapsule({
-  readyState = 'complete',
-  body = true,
-  documentElement = true,
-  storage,
-  responders = [],
-  twice = false,
-  win = {},
-} = {}) {
-  const dom = makeDom({ body, documentElement, readyState });
+function run(opts = {}) {
+  const dom = makeDom(opts);
   const warns = [];
-  const infos = [];
   const timeouts = [];
-  const intervals = [];
-  const fetchImpl = makeFetch(responders);
-  const storageImpl = storage || makeStorage();
+  const fetchCalls = [];
+  const storage = opts.storage || makeStorage();
+  const session = opts.session || makeStorage();
   const window_ = {
-    innerWidth: 1200,
-    innerHeight: 800,
+    listeners: {},
     addEventListener(type, fn) {
       (window_.listeners[type] || (window_.listeners[type] = [])).push(fn);
     },
-    removeEventListener(type, fn) {
-      window_.listeners[type] = (window_.listeners[type] || []).filter((f) => f !== fn);
+    dispatchEvent(ev) {
+      for (const fn of (window_.listeners[ev.type] || []).slice()) fn(ev);
     },
-    listeners: {},
-    ...win,
+    matchMedia() { return { matches: opts.reduced === true }; },
   };
   const sandbox = {
     window: window_,
     document: dom.document,
-    localStorage: storageImpl,
-    fetch: fetchImpl,
-    console: {
-      warn: (...a) => warns.push(a.map((x) => String(x)).join(' ')),
-      info: (...a) => infos.push(a.map((x) => String(x)).join(' ')),
-      log: () => {},
+    localStorage: storage,
+    sessionStorage: session,
+    fetch(url, init) {
+      fetchCalls.push({ url, init });
+      if (opts.fetchReject) return Promise.reject(new Error('offline'));
+      return Promise.resolve({ status: 200, json: async () => ({ ok: true }) });
     },
-    setTimeout: (fn) => {
-      timeouts.push(fn);
-      return timeouts.length;
-    },
-    clearTimeout: () => {},
-    setInterval: (fn) => {
-      intervals.push(fn);
-      return intervals.length;
-    },
-    clearInterval: () => {},
-    Math,
-    JSON,
-    Object,
-    Array,
-    String,
-    Number,
-    Error,
-    parseFloat,
-    parseInt,
-    isFinite,
+    console: { warn: (...a) => warns.push(a.map(String).join(' ')), info() {}, log() {} },
+    setTimeout(fn) { timeouts.push(fn); return timeouts.length; },
+    clearTimeout() {},
+    Math, JSON, Object, String, Number, isFinite,
   };
   vm.createContext(sandbox);
-  const ctx = { filename: 'plugins/dsh-up-t/assets/client.js' };
-  vm.runInContext(SRC, sandbox, ctx);
-  if (twice) vm.runInContext(SRC, sandbox, ctx);
-  const run = { dom, window: window_, storage: storageImpl, fetch: fetchImpl, warns, infos, timeouts, intervals, sandbox };
-  RUNS.push(run);
-  return run;
+  vm.runInContext(SRC, sandbox, { filename: 'assets/client.js' });
+  if (opts.twice) vm.runInContext(SRC, sandbox, { filename: 'assets/client.js' });
+  const rec = { dom, window: window_, storage, session, fetchCalls, warns, timeouts };
+  RUNS.push(rec);
+  return rec;
 }
 
-// 胶囊用 borderRadius:999px 认，**不要**用 cursor === 'grab' 认：按下时它会被改成 'grabbing'，
-// 于是「按住之后再找一次胶囊」会找不到 —— 这正是第一版测试里两个用例假失败的原因。
-function findChip(dom) {
-  return dom.created.find((n) => n.style.borderRadius === '999px');
-}
-function findPanel(dom) {
-  return dom.created.find((n) => n.style.minWidth === '290px');
-}
-function findRoot(dom) {
-  return dom.created.find((n) => n.style.zIndex != null && n.style.position === 'fixed');
+const gif = 'data:image/gif;base64,R0lGODlhAQABAIABAP///wAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
+const prefs = (over) => JSON.stringify({
+  boot: true, background: 'none', customBackground: '', balance: '', cost: '', showBalance: true, ...over,
+});
+
+function attached(dom, id) {
+  return dom.created.filter((n) => n.id === id && n.parentNode);
 }
 
-// ── ① 它是经典脚本 ────────────────────────────────────────────────
-
-await check('是经典脚本（无 ESM）、有幂等标记、不往全局漏名字', () => {
-  assert.ok(!/^\s*(import|export)\s/m.test(SRC), '不得含 ESM import/export（CSP 不允许）');
-  assert.ok(SRC.includes('__DSH_UP_T_CLIENT__'), '必须有幂等标记，否则重复注入会挂出第二个胶囊');
-  assert.ok(/^\(function \(\) \{/m.test(SRC), '整段必须包在 IIFE 里');
+await check('经典脚本，幂等标记在', () => {
+  assert.equal(/^\s*(import|export)\s/m.test(SRC), false);
+  assert.match(SRC, /__DSH_UP_T_CLIENT__/);
+  assert.match(SRC, /^\(function \(\) \{/m);
 });
 
-// ── ② 挂载 ────────────────────────────────────────────────────────
-
-await check('readyState=complete 时立刻挂载：胶囊出现在 body 里、初始文案是 up-T', () => {
-  const r = runCapsule();
-  assert.ok(r.dom.document.body, '假 DOM 得有 body');
-  assert.equal(r.dom.document.body.children.length, 1, 'body 下应恰有一个胶囊根节点');
-  const root = r.dom.document.body.children[0];
-  assert.equal(root, findRoot(r.dom), '挂上去的应该是那个 position:fixed 的根节点');
-  const chip = findChip(r.dom);
-  assert.ok(chip, '必须造出可拖动的胶囊');
-  assert.equal(chip.textContent, 'up-T', '状态还没回来时文案就该是 up-T');
-  assert.deepEqual(r.warns, [], '外层 catch 不许响');
-});
-
-await check('readyState=loading（注入行在 head 里先跑）时先等 DOMContentLoaded，再挂载', () => {
-  const r = runCapsule({ readyState: 'loading' });
-  assert.equal(r.dom.created.length, 0, 'loading 阶段不该建任何节点');
-  assert.equal(r.dom.document.listenerCount('DOMContentLoaded'), 1, '必须挂上 DOMContentLoaded');
-  r.dom.document.dispatch('DOMContentLoaded', {});
-  assert.equal(r.dom.document.body.children.length, 1, 'DOMContentLoaded 之后应该挂上胶囊');
-});
-
-await check('没有 document.body 时退到 documentElement；两者都没有时重试而不是放弃', async () => {
-  const a = runCapsule({ body: false });
-  assert.equal(a.dom.document.documentElement.children.length, 1, '没有 body 时挂到 documentElement');
-  assert.equal(a.dom.created.length, 5, '根节点 + 胶囊 + 圆点 + 文案 + 面板');
-
-  const b = runCapsule({ body: false, documentElement: false });
-  assert.equal(b.dom.created.length, 0, '两者都没有时不该硬建节点');
-  assert.equal(b.timeouts.length, 1, '必须留下一次重试（setTimeout）');
-  const w = makeDom({ body: true, documentElement: true });
-  b.sandbox.document.documentElement = w.document.documentElement;
-  b.sandbox.document.body = w.document.body;
-  b.timeouts[0](); // 重试
-  assert.equal(w.document.body.children.length, 1, '重试成功时胶囊要挂上');
-});
-
-await check('重复注入同一段脚本只会有一个胶囊（幂等标记生效）', () => {
-  const r = runCapsule({ twice: true });
-  assert.equal(r.dom.document.body.children.length, 1, '第二次执行必须直接 return');
-  assert.equal(r.dom.created.length, 5, '第二次执行不该再造 5 个节点');
-});
-
-// ── ③ 握手 ────────────────────────────────────────────────────────
-
-await check('挂载时先向宿主握手：POST /dsh-up-t/seen，带自定义头与 via=capsule', () => {
-  const r = runCapsule({ storage: makeStorage(), responders: [{ json: statusPayload() }] });
-  const seen = r.fetch.calls.find((c) => c.url === '/dsh-up-t/seen');
-  assert.ok(seen, '没有发出握手请求');
-  assert.equal(seen.opts.method, 'POST');
-  assert.equal(seen.opts.headers['x-dsh-up-t'], '1', '握手必须带自定义头（宿主按它挡跨源）');
-  assert.deepEqual(JSON.parse(seen.opts.body), { via: 'capsule' }, '两条投递通道必须可区分');
-});
-
-await check('握手失败（宿主还是旧版、路由 404）不影响挂载', async () => {
-  const r = runCapsule({ responders: [{ match: SEEN_URL, reject: 'ECONNREFUSED' }] });
-  await tick();
-  assert.equal(r.dom.document.body.children.length, 1, '握手炸了胶囊仍要在');
-  assert.deepEqual(r.warns, [], '外层 catch 不许响');
-});
-
-// ── ④ 状态渲染 ────────────────────────────────────────────────────
-
-await check('状态回来后：文案变成「up-T · 44.0.0」、圆点变绿（已改造）', async () => {
-  const r = runCapsule({ responders: [{ json: statusPayload() }] });
-  await tick();
-  const label = r.dom.created.find((n) => n.tagName === 'SPAN' && /^up-T/.test(n.textContent));
-  assert.equal(label.textContent, 'up-T · 44.0.0');
-  const dot = r.dom.created.find((n) => n.style.borderRadius === '50%');
-  assert.equal(dot.style.background, '#3fb950', 'sameSizeAsBackup=false 应点绿');
+await check('默认：播放开机动画，背景样式为空，没有余额条，并发出握手', () => {
+  const r = run();
+  assert.equal(attached(r.dom, 'dsh-up-t-boot').length, 1);
+  assert.equal(attached(r.dom, 'dsh-up-t-boot')[0].textContent.includes('DeepSeek'), true);
+  assert.equal(attached(r.dom, 'dsh-up-t-bg')[0].textContent, '');
+  assert.equal(attached(r.dom, 'dsh-up-t-balance').length, 0);
+  assert.equal(r.fetchCalls[0].url, '/dsh-up-t/seen');
+  assert.equal(r.fetchCalls[0].init.headers['x-dsh-up-t'], '1');
+  assert.deepEqual(JSON.parse(r.fetchCalls[0].init.body), { via: 'capsule' });
   assert.deepEqual(r.warns, []);
+  assert.equal(r.session.dump()['dsh-up-t:boot-played'], '1');
 });
 
-await check('点一下胶囊展开面板：数字是人话、判定说「已被改造」、并给出依据与目录', async () => {
-  const r = runCapsule({ responders: [{ json: statusPayload() }] });
-  await tick();
-  const chip = findChip(r.dom);
-  const panel = findPanel(r.dom);
-  assert.equal(panel.style.display, 'none', '默认收起');
-  chip.dispatch('pointerdown', { clientX: 10, clientY: 10, pointerId: 1 });
-  chip.dispatch('pointerup', { clientX: 10, clientY: 10, pointerId: 1 });
-  assert.equal(panel.style.display, 'block', '点一下应展开');
-  const text = panel.textContent;
-  assert.match(text, /deepseek-up-T · 改造状态/);
-  assert.match(text, /dsh-up-t 0\.1\.0/);
-  assert.match(text, /Harness44\.0\.0/, '版本号要出现在面板里');
-  assert.match(text, /115\.8 MB/, 'app.asar 字节数要转成人话（115.8 MB）');
-  assert.match(text, /115\.7 MB/, '原版备份同理');
-  assert.match(text, /大小不同 —— 安装包已被改造/);
-  assert.match(text, /只比了文件大小/);
-  assert.match(text, /deepseekharness/, '要给出它认到的安装目录，否则无法对账');
-  assert.match(text, /右键点这个胶囊可以隐藏它/);
-  assert.deepEqual(r.warns, []);
+await check('同一页再执行一次不会再挂一层', () => {
+  const r = run({ twice: true });
+  assert.equal(attached(r.dom, 'dsh-up-t-boot').length, 1);
+  assert.equal(r.fetchCalls.length, 1);
 });
 
-await check('再点一下收起；拖动只改位置、不展开面板，并把位置存进 localStorage', async () => {
-  const r = runCapsule({ responders: [{ json: statusPayload() }] });
-  await tick();
-  const chip = findChip(r.dom);
-  const panel = findPanel(r.dom);
-  const root = findRoot(r.dom);
-
-  chip.dispatch('pointerdown', { clientX: 10, clientY: 10, pointerId: 1 });
-  chip.dispatch('pointermove', { clientX: 90, clientY: 60, pointerId: 1 });
-  chip.dispatch('pointerup', { clientX: 90, clientY: 60, pointerId: 1 });
-  assert.equal(panel.style.display, 'none', '拖动不该顺手把面板打开');
-  assert.equal(root.style.left, '92px', 'x 应被夹在窗口内（12 + 80）');
-  assert.equal(root.style.top, '50px');
-  assert.deepEqual(JSON.parse(r.storage.dump()['dsh-up-t:pos']), { x: 92, y: 50 });
-
-  chip.dispatch('pointerdown', { clientX: 10, clientY: 10, pointerId: 1 });
-  chip.dispatch('pointerup', { clientX: 10, clientY: 10, pointerId: 1 });
-  assert.equal(panel.style.display, 'block');
-  chip.dispatch('pointerdown', { clientX: 10, clientY: 10, pointerId: 1 });
-  chip.dispatch('pointerup', { clientX: 10, clientY: 10, pointerId: 1 });
-  assert.equal(panel.style.display, 'none', '第二下应收起');
-  assert.deepEqual(r.warns, []);
-});
-
-await check('右键隐藏：根节点消失、状态持久化、并留下找回自己的提示', () => {
-  const r = runCapsule();
-  const chip = findChip(r.dom);
-  const root = findRoot(r.dom);
-  let prevented = false;
-  chip.dispatch('contextmenu', { preventDefault: () => (prevented = true) });
-  assert.equal(prevented, true, '必须 preventDefault，否则会弹出浏览器菜单');
-  assert.equal(root.style.display, 'none');
-  assert.equal(r.storage.dump()['dsh-up-t:hidden'], '1');
-  assert.match(r.infos.join('\n'), /localStorage\.removeItem\("dsh-up-t:hidden"\)/);
-  assert.deepEqual(r.warns, []);
-});
-
-await check('已隐藏时重新挂载：不显示，但定时刷新还在跑', () => {
-  const r = runCapsule({
-    storage: makeStorage({ 'dsh-up-t:hidden': '1' }),
-    responders: [{ json: statusPayload() }],
-  });
-  assert.equal(findRoot(r.dom).style.display, 'none');
-  assert.equal(r.intervals.length, 1, 'refresh 必须挂上定时器（60s）');
-});
-
-// ── ⑤ 降级：坏数据不许变成「什么都不出现」 ─────────────────────────
-
-await check('状态查询失败 / 返回 null / 缺少 install：各自给降级文案，都不抛', async () => {
-  const cases = [
-    [{ reject: 'boom' }, /宿主没有回应状态查询/],
-    [{ json: null }, /宿主没有回应状态查询/],
-    [{ json: { ok: false, why: '还没重启' } }, /宿主没有回应状态查询/],
-    [{ json: { ok: true, plugin: { name: 'dsh-up-t', version: '0.1.0' }, install: null } }, /没找到 Harness 安装目录/],
-  ];
-  for (const [responder, expect] of cases) {
-    const r = runCapsule({ responders: [responder] });
-    await tick();
-    const panel = findPanel(r.dom);
-    findChip(r.dom).dispatch('pointerdown', { clientX: 1, clientY: 1, pointerId: 1 });
-    findChip(r.dom).dispatch('pointerup', { clientX: 1, clientY: 1, pointerId: 1 });
-    assert.match(panel.textContent, expect, `降级文案不对：${JSON.stringify(responder)}`);
-    assert.equal(findRoot(r.dom).style.display, undefined, '降级时胶囊本身必须还在');
-    assert.deepEqual(r.warns, [], '降级不是异常');
-  }
-});
-
-await check('拿不到备份时判定说「无法判断」并把圆点标黄', async () => {
-  const r = runCapsule({
-    responders: [
-      {
-        json: statusPayload({
-          install: { dir: 'D:\\apps', version: '44.0.0', asarBytes: 121415560, backupBytes: null, sameSizeAsBackup: null, judgedBy: 'unavailable' },
-        }),
-      },
-    ],
-  });
-  await tick();
-  const label = r.dom.created.find((n) => n.tagName === 'SPAN' && /^up-T/.test(n.textContent));
-  assert.equal(label.textContent, 'up-T · 44.0.0');
-  const dot = r.dom.created.find((n) => n.style.borderRadius === '50%');
-  assert.equal(dot.style.background, '#d29922', '无法判断应标黄');
-  findChip(r.dom).dispatch('pointerdown', { clientX: 1, clientY: 1, pointerId: 1 });
-  findChip(r.dom).dispatch('pointerup', { clientX: 1, clientY: 1, pointerId: 1 });
-  assert.match(findPanel(r.dom).textContent, /没有原版备份可比（无法判断）/);
-  assert.match(findPanel(r.dom).textContent, /拿不到|unavailable/);
-});
-
-// ── ⑤½ 暂存产物：把「我改的东西还没落盘」变成看得见的一件事 ──────────
-//
-// 这条链的由来：一份含修复的暂存包在磁盘上等了一整天没落盘，而当时**界面上一个字都不说**
-// —— 打开面板看到的全是「一切正常」。所以这里钉的不是文案好不好看，而是三件不同的事
-// 必须长得不一样：待落盘（要人挑时间动手）、暂存包比在用的旧（要人重新构建）、拿不到（不猜）。
-
-await check('暂存包更新时：胶囊自己变成「待落盘」、圆点转橙、面板给出落盘命令', async () => {
-  const r = runCapsule({
-    responders: [
-      {
-        json: statusPayload({
-          staged: {
-            root: 'D:\\Z1848\\harness-ds\\deepseek-up-T',
-            file: 'D:\\Z1848\\harness-ds\\deepseek-up-T\\state\\staged\\app.asar',
-            bytes: 121422676,
-            mtimeMs: 1791353633926,
-            installedBytes: 121421984,
-            installedMtimeMs: 1791348000000,
-            deltaBytes: 692,
-            status: 'pending',
-            why: '暂存包比在用安装包新',
-          },
-        }),
-      },
-    ],
-  });
-  await tick();
-  // 胶囊本身：不点开也要能看见
-  const label = r.dom.created.find((n) => n.tagName === 'SPAN' && /^up-T/.test(n.textContent));
-  assert.equal(label.textContent, 'up-T · 待落盘', '「待落盘」必须写在胶囊上，不能只藏在面板里');
-  const dot = r.dom.created.find((n) => n.style.borderRadius === '50%');
-  assert.equal(dot.style.background, '#f0883e', '橙色与「无法判断」的黄(#d29922)必须分得开');
-  // 面板
-  findChip(r.dom).dispatch('pointerdown', { clientX: 1, clientY: 1, pointerId: 1 });
-  findChip(r.dom).dispatch('pointerup', { clientX: 1, clientY: 1, pointerId: 1 });
-  const text = findPanel(r.dom).textContent;
-  assert.match(text, /待落盘/);
-  assert.match(text, /比在用大 692 B/, '差多少字节要写出来，不能只说「有改动」');
-  assert.match(text, /install\.mjs --yes/, '要落到「我现在该做什么」');
-  assert.deepEqual(r.warns, []);
-});
-
-await check('暂存包比在用的旧 / 拿不到 / 缺字段：各自说各自的话，都不冒充「待落盘」', async () => {
-  const cases = [
-    [
-      { bytes: 121300000, mtimeMs: 1, installedBytes: 121421984, installedMtimeMs: 2, deltaBytes: -121984, status: 'behind', why: '暂存包比在用安装包旧' },
-      /比在用的旧/,
-      'up-T · 44.0.0',
-    ],
-    [
-      { bytes: 121422676, mtimeMs: 5, installedBytes: null, installedMtimeMs: 1, deltaBytes: null, status: 'unavailable', why: '没拿到在用安装包的大小，无法与暂存包比较' },
-      null,
-      'up-T · 44.0.0',
-    ],
-  ];
-  for (const [staged, expectPanel, expectLabel] of cases) {
-    const r = runCapsule({ responders: [{ json: statusPayload({ staged }) }] });
-    await tick();
-    const label = r.dom.created.find((n) => n.tagName === 'SPAN' && /^up-T/.test(n.textContent));
-    assert.equal(label.textContent, expectLabel, '不算「待落盘」时胶囊必须保持原样');
-    const dot = r.dom.created.find((n) => n.style.borderRadius === '50%');
-    assert.notEqual(dot.style.background, '#f0883e', '橙色是给「要你动手落盘」专用的');
-    findChip(r.dom).dispatch('pointerdown', { clientX: 1, clientY: 1, pointerId: 1 });
-    findChip(r.dom).dispatch('pointerup', { clientX: 1, clientY: 1, pointerId: 1 });
-    const text = findPanel(r.dom).textContent;
-    if (expectPanel === null) {
-      assert.ok(!/暂存包/.test(text), '拿不到证据时连「暂存包」这一行都不该出现 —— 不猜也不吓人');
-    } else {
-      assert.match(text, expectPanel);
-    }
+await check('减少动态效果、本会话已播过、或关掉开关时不自动播放', () => {
+  for (const opts of [
+    { reduced: true },
+    { session: makeStorage({ 'dsh-up-t:boot-played': '1' }) },
+    { storage: makeStorage({ 'dsh-up-t:prefs': prefs({ boot: false }) }) },
+  ]) {
+    const r = run(opts);
+    assert.equal(attached(r.dom, 'dsh-up-t-boot').length, 0, JSON.stringify(opts.storage?.dump?.() ?? opts));
     assert.deepEqual(r.warns, []);
   }
-  // 旧宿主（status.json 里根本没有 staged 字段）也不能坏：这是升级顺序里必然出现的一段时间
-  const r = runCapsule({ responders: [{ json: statusPayload() }] });
-  await tick();
-  const label = r.dom.created.find((n) => n.tagName === 'SPAN' && /^up-T/.test(n.textContent));
-  assert.equal(label.textContent, 'up-T · 44.0.0');
-  assert.ok(!/暂存包/.test(findPanel(r.dom).textContent));
-  assert.deepEqual(r.warns, []);
 });
 
-await check('localStorage 整个被禁（getItem/setItem 都抛）时胶囊仍然可用', async () => {
-  const r = runCapsule({ storage: makeStorage({}, { throws: true }), responders: [{ json: statusPayload() }] });
-  await tick();
-  assert.equal(r.dom.document.body.children.length, 1, '存储不可用不该让胶囊消失');
-  const chip = findChip(r.dom);
-  assert.ok(chip.hasListener('pointerup'), '要点得动：事件必须已经注册上');
-  chip.dispatch('pointerdown', { clientX: 10, clientY: 10, pointerId: 1 });
-  chip.dispatch('pointerup', { clientX: 10, clientY: 10, pointerId: 1 });
-  assert.equal(findPanel(r.dom).style.display, 'block', '存储炸了面板也得能展开');
-  chip.dispatch('contextmenu', { preventDefault: () => {} });
-  assert.equal(findRoot(r.dom).style.display, 'none');
-  assert.deepEqual(r.warns, []);
+await check('再看一次会重播，即使本会话已经播过', () => {
+  const r = run({ session: makeStorage({ 'dsh-up-t:boot-played': '1' }) });
+  assert.equal(attached(r.dom, 'dsh-up-t-boot').length, 0);
+  r.window.dispatchEvent({ type: 'dsh-up-t:replay' });
+  assert.equal(attached(r.dom, 'dsh-up-t-boot').length, 1);
+  r.timeouts.at(-1)();
+  assert.equal(attached(r.dom, 'dsh-up-t-boot').length, 0);
 });
 
-// ── ⑥ 收尾 ────────────────────────────────────────────────────────
-//
-// 每条 check 各自断言过自己那次运行的 warns，这里再横向看一遍：
-// 只要有**任何一次**运行让外层 catch 响过，就说明某个分支是靠异常收场的 —— 那正是用户
-// 重启后「什么都没有」的成因。所以这条不是重复，它保证的是「没有一次例外」。
+await check('默认背景：静夜、晨雾、流光', () => {
+  const night = run({ storage: makeStorage({ 'dsh-up-t:prefs': prefs({ background: 'night', boot: false }) }) });
+  assert.match(attached(night.dom, 'dsh-up-t-bg')[0].textContent, /radial-gradient/);
+  const dawn = run({ storage: makeStorage({ 'dsh-up-t:prefs': prefs({ background: 'dawn', boot: false }) }) });
+  assert.match(attached(dawn.dom, 'dsh-up-t-bg')[0].textContent, /linear-gradient\(165deg/);
+  const flow = run({ storage: makeStorage({ 'dsh-up-t:prefs': prefs({ background: 'flow', boot: false }) }) });
+  assert.match(attached(flow.dom, 'dsh-up-t-bg')[0].textContent, /dsh-up-t-flow/);
+  assert.match(attached(flow.dom, 'dsh-up-t-bg')[0].textContent, /animation:dsh-up-t-flow/);
+});
 
-await check('所有沙箱运行中都没有出现「client failed」（异常一次都没被吞掉）', () => {
-  assert.ok(RUNS.length >= 10, `只跑了 ${RUNS.length} 次沙箱，覆盖不够（这条会假通过）`);
+await check('自定义动图盖过默认背景；不是图片的 data URL 被丢掉', () => {
+  const ok = run({ storage: makeStorage({ 'dsh-up-t:prefs': prefs({ background: 'night', customBackground: gif, boot: false }) }) });
+  const css = attached(ok.dom, 'dsh-up-t-bg')[0].textContent;
+  assert.match(css, /data:image\/gif/);
+  assert.doesNotMatch(css, /radial-gradient/);
+  const bad = run({ storage: makeStorage({ 'dsh-up-t:prefs': prefs({
+    background: 'dawn', customBackground: 'data:text/html,<script>', boot: false,
+  }) }) });
+  assert.match(attached(bad.dom, 'dsh-up-t-bg')[0].textContent, /linear-gradient\(165deg/);
+});
+
+await check('余额条：次数、缺消耗、消耗为 0、关掉显示', () => {
+  const turns = run({ storage: makeStorage({ 'dsh-up-t:prefs': prefs({ balance: '20', cost: '0.8', boot: false }) }) });
+  assert.equal(attached(turns.dom, 'dsh-up-t-balance')[0].textContent, '余额 20 · 约 25 次');
+  const missing = run({ storage: makeStorage({ 'dsh-up-t:prefs': prefs({ balance: '10', boot: false }) }) });
+  assert.equal(attached(missing.dom, 'dsh-up-t-balance')[0].textContent, '余额 10 · 填上每次消耗可算次数');
+  const zero = run({ storage: makeStorage({ 'dsh-up-t:prefs': prefs({ balance: '10', cost: '0', boot: false }) }) });
+  assert.equal(attached(zero.dom, 'dsh-up-t-balance')[0].textContent, '余额 10 · 每次消耗要大于 0');
+  const hidden = run({ storage: makeStorage({ 'dsh-up-t:prefs': prefs({ balance: '10', cost: '1', showBalance: false, boot: false }) }) });
+  assert.equal(attached(hidden.dom, 'dsh-up-t-balance').length, 0);
+  const neg = run({ storage: makeStorage({ 'dsh-up-t:prefs': prefs({ balance: '-3', cost: '1', boot: false }) }) });
+  assert.equal(attached(neg.dom, 'dsh-up-t-balance')[0].textContent, '余额 -3 · 约 0 次');
+});
+
+await check('偏好事件会改余额条', () => {
+  const r = run({ storage: makeStorage({ 'dsh-up-t:prefs': prefs({ boot: false }) }) });
+  assert.equal(attached(r.dom, 'dsh-up-t-balance').length, 0);
+  r.storage.setItem('dsh-up-t:prefs', prefs({ balance: '3', cost: '1', boot: false }));
+  r.window.dispatchEvent({ type: 'dsh-up-t:prefs' });
+  assert.equal(attached(r.dom, 'dsh-up-t-balance')[0].textContent, '余额 3 · 约 3 次');
+});
+
+await check('存储被禁或握手失败时仍然安静', () => {
+  const blocked = run({ storage: makeStorage({}, { throws: true }), session: makeStorage({}, { throws: true }) });
+  assert.equal(attached(blocked.dom, 'dsh-up-t-bg').length, 1);
+  assert.deepEqual(blocked.warns, []);
+  const offline = run({ fetchReject: true });
+  assert.equal(attached(offline.dom, 'dsh-up-t-boot').length, 1);
+  assert.deepEqual(offline.warns, []);
+});
+
+await check('文档还在加载时等到 DOMContentLoaded', () => {
+  const r = run({ readyState: 'loading' });
+  assert.equal(attached(r.dom, 'dsh-up-t-boot').length, 0);
+  r.dom.document.dispatch('DOMContentLoaded');
+  assert.equal(attached(r.dom, 'dsh-up-t-boot').length, 1);
+});
+
+await check('没有一次让外层 catch 响', () => {
+  assert.ok(RUNS.length >= 8);
   const lines = RUNS.flatMap((r) => r.warns);
   assert.deepEqual(lines, []);
 });
 
 const failed = results.filter((r) => !r.ok);
-// 失败时把栈也打出来：这套测试的失败多半来自「假 DOM 少实现了一个方法」或
-// 「断言查的时机不对」，只看一句 message 往往要重新猜一遍。
 for (const r of results) {
   console.log(`${r.ok ? '  ok  ' : ' FAIL '} ${r.name}`);
-  if (!r.ok) console.log(`        ${r.err?.message ?? r.err}\n${r.err?.stack ?? ''}`);
+  if (!r.ok) console.log(`        ${r.err?.stack ?? r.err}`);
 }
-console.log('');
 if (failed.length) {
-  console.log(`胶囊单测失败：${failed.length}/${results.length}`);
+  console.log(`注入脚本单测失败：${failed.length}/${results.length}`);
   process.exit(1);
 }
-console.log(`胶囊单测通过：${results.length}/${results.length} 项`);
+console.log(`注入脚本单测通过：${results.length}/${results.length} 项`);
