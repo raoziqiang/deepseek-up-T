@@ -1,12 +1,6 @@
 // deepseek-up-T :: 「暂存包 vs 在用安装包」判定的单测
 //
-// 这条判定有两份实现，分别给两个地方看：
-//   · src/staged.mjs                        → 终端（dsht doctor / dsht upgrade）
-//   · plugins/dsh-up-t/lib/index.js         → 图形界面（左下角胶囊 / 设置页）
-// 两份必须说**同一句话**。各写各的就会出现「界面说待落盘、终端说一切正常」这种最坏结果：
-// 人不知道该信哪个，于是两个都不信。
-//
-// 所以这里最值钱的一条断言是**交叉对照**：同一张输入表喂给两份实现，逐格比对五个状态与措辞。
+// 暂存包判定只留在终端（dsht doctor / upgrade）。设置页不再展示它。
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -14,7 +8,6 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 import { stagedVerdict, stagedFacts, stagedLine } from '../src/staged.mjs';
-import { stagedVerdict as pluginVerdict } from '../plugins/dsh-up-t/lib/index.js';
 
 const HERE = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
 const PROJECT = path.resolve(HERE, '..');
@@ -74,26 +67,7 @@ check('五个状态：每一种都给得出状态、人话与差值，且不把�
   eq(noBytes.status, 'unavailable', '拿不到暂存大小 ⇒ unavailable');
 });
 
-// ── 2. ★ 交叉对照：终端那份与图形界面那份必须逐字相同 ────────────────────
-check('交叉对照：终端与插件对同一张输入表给出完全相同的结果与措辞', () => {
-  const table = [
-    { bytes: 121_422_676, mtimeMs: 2000 * MIN, installedBytes: 121_421_984, installedMtimeMs: 1000 * MIN },
-    { bytes: 121_421_984, mtimeMs: 1000 * MIN, installedBytes: 121_421_984, installedMtimeMs: 2000 * MIN },
-    { bytes: 100, mtimeMs: 2000 * MIN, installedBytes: 500, installedMtimeMs: 1000 * MIN },
-    { bytes: 500, mtimeMs: 1000 * MIN, installedBytes: 500, installedMtimeMs: 2000 * MIN },
-    { bytes: 100, mtimeMs: null, installedBytes: 500, installedMtimeMs: 2000 * MIN },
-    { bytes: 100, mtimeMs: 2000 * MIN, installedBytes: 500, installedMtimeMs: null },
-    { bytes: 0, mtimeMs: 2000 * MIN, installedBytes: 500, installedMtimeMs: 1000 * MIN },
-    { bytes: null, mtimeMs: null, installedBytes: 500, installedMtimeMs: null },
-    { bytes: 500, mtimeMs: null, installedBytes: null, installedMtimeMs: null },
-    { bytes: 1024 * 1024 * 1024, mtimeMs: 7, installedBytes: 1, installedMtimeMs: 9 },
-  ];
-  for (const row of table) {
-    eq(stagedVerdict(row), pluginVerdict(row), `输入 ${JSON.stringify(row)} 的两份实现`);
-  }
-});
-
-// ── 3. 读磁盘那一半：判定方向靠 mtime，缺证据就降级 ──────────────────────
+// ── 2. 读磁盘那一半：判定方向靠 mtime，缺证据就降级 ──────────────────────
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'up-t-staged-'));
 const stagedFile = path.join(sandbox, 'app.asar');
 const asar = path.join(sandbox, 'installed.asar');

@@ -5,16 +5,13 @@
 // 「暂存包比在用安装包新」是常态而不是故障 —— 但它曾经只存在于人的记忆里：
 // 一份含重播修复的暂存包在磁盘上等了一整天，界面上一个字都没说。
 //
-// 三条纪律（与图形界面那份实现完全一致）：
+// 三条纪律：
 //   1. **0 字节与读不到一律算「拿不到」**，不是反面证据 —— 不许把「测不到」说成「有改动」；
 //   2. **大小相同只说「大小相同」**，绝不说「逐字节相同」（这里刻意不算 121MB 的 sha256）；
 //   3. **方向（谁更新）只能由 mtime 判定** —— mtime 拿不到时状态是 `differs`（不同但判不出方向），
 //      而不是硬猜一个「待落盘」。
 //
-// ★ 同一条判定有两份实现：这里（终端：`dsht doctor` / `dsht upgrade`）与
-//   `plugins/dsh-up-t/lib/index.js`（图形界面：左下角胶囊 / 设置页）。两份必须给出**完全一样**的
-//   五态与措辞 —— `test/staged.test.mjs` 用一张输入表逐格对照。改一份忘另一份会立刻变红，
-//   而不是让终端与界面各说一套。
+// 设置页不再展示暂存包。这一份只给终端命令（dsht doctor / upgrade / accept）。
 
 import { statOrNull } from './paths.mjs';
 
@@ -30,7 +27,7 @@ function evidenceOrNull(n) {
  * 如果只能靠「改真文件再复原」来造，那么测试中途一死就会留下一个被改过的工作区 ——
  * 用一个 121 MB 的产物去换两条断言，不划算。所以判定与 I/O 分开，判定表直接喂数字。
  *
- * 措辞与 `plugins/dsh-up-t/lib/index.js` 的同一函数逐字相同（有对照测试钉住）。
+ * 措辞只在这里维护。设置页已经不再复述这份判定。
  */
 export function stagedVerdict({ bytes, mtimeMs, installedBytes, installedMtimeMs }) {
   const b = evidenceOrNull(bytes);

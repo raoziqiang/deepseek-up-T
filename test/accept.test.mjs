@@ -80,14 +80,14 @@ console.log('── 新版宿主 + 两条通道都握手 ──');
     '/dsh-up-t/status.json': (_q, res) => json(res, {
       ok: true, plugin: { name: 'dsh-up-t', version: '0.1.0' }, time: 't', install: { dir: 'D:\\x', version: '44.0.0', asarBytes: 121, backupBytes: 100, sameSizeAsBackup: false, judgedBy: 'size' },
     }),
-    '/dsh-up-t/action': (_q, res) => json(res, { ok: true, actions: ['doctor', 'accept'], note: 'POST' }),
+    '/dsh-up-t/appearance': (_q, res) => json(res, { ok: true, features: ['boot', 'background', 'balance'] }),
     '/dsh-up-t/seen': (_q, res) => json(res, { ok: true, seen: { count: 2, sources: { capsule: 't1', bundle: 't2' } }, note: 'POST' }),
   });
   const r = await run({ hash: false, url: host.url });
   await host.close();
 
   check('宿主在线 → pass', statusOf(r, 'host-up') === 'pass', find(r, 'host-up')?.detail);
-  check('新版宿主（/action 在线）→ pass', statusOf(r, 'host-new') === 'pass', find(r, 'host-new')?.detail);
+  check('新版宿主（/appearance 在线）→ pass', statusOf(r, 'host-new') === 'pass', find(r, 'host-new')?.detail);
   check('两条通道都握手 → pass', statusOf(r, 'renderer') === 'pass', find(r, 'renderer')?.detail);
   check('只发 GET，一个写请求都没有', host.seen.every((s) => s.method === 'GET'),
     JSON.stringify([...new Set(host.seen.map((s) => s.method))]));
@@ -95,7 +95,7 @@ console.log('── 新版宿主 + 两条通道都握手 ──');
     [...new Set(host.seen.map((s) => s.url))].every((u) => u.startsWith('/dsh-up-t/')),
     JSON.stringify([...new Set(host.seen.map((s) => s.url))]));
   check('观感类项存在，且标成 manual', r.items.filter((i) => i.status === 'manual').length >= 4);
-  check('观感类项里有挂件开关那一行（命令验不了，但清单不能漏）', Boolean(find(r, 'manual-charm')), find(r, 'manual-charm')?.detail);
+  check('观感类项里有背景那一项（命令验不了，但清单不能漏）', Boolean(find(r, 'manual-background')), find(r, 'manual-background')?.detail);
   check('manual 不计入失败：summary.fail 里没有它们', r.summary.fail === r.items.filter((i) => i.status === 'fail').length);
 }
 
@@ -105,7 +105,7 @@ console.log('── 挂件开关那一行（磁盘上的客户端 bundle）─�
 {
   const repoClient = path.join(PROJECT_ROOT, 'plugins', 'dsh-up-t', 'lib', 'client.js');
   const live = await run({ hash: false, url: 'http://127.0.0.1:1', timeoutMs: 800 });
-  check('本仓库那份 client.js 被判为含挂件开关注册', statusOf(live, 'charm-row') === 'pass', find(live, 'charm-row')?.detail);
+  check('本仓库那份 client.js 被判为新版设置页', statusOf(live, 'charm-row') === 'pass', find(live, 'charm-row')?.detail);
   check('detail 里点名是哪个文件', /lib[\\/]client\.js/.test(find(live, 'charm-row')?.detail ?? ''), find(live, 'charm-row')?.detail);
 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-up-t-accept-'));
@@ -114,7 +114,7 @@ console.log('── 挂件开关那一行（磁盘上的客户端 bundle）─�
   const stale = await run({ hash: false, url: 'http://127.0.0.1:1', timeoutMs: 800, clientBundle: oldFile });
   const s = find(stale, 'charm-row');
   check('旧 bundle → FAIL（不是 skip）', s?.status === 'fail', s?.detail);
-  check('措辞点明缺的是哪两个标记', /settings\.general\.item/.test(s?.detail ?? '') && /whale-charm/.test(s?.detail ?? ''), s?.detail);
+  check('措辞点明缺的是哪两个标记', /开机动画/.test(s?.detail ?? '') && /余额/.test(s?.detail ?? ''), s?.detail);
   check('修法指向硬刷新', /硬刷新/.test(s?.fix ?? ''), s?.fix);
 
   const gone = await run({ hash: false, url: 'http://127.0.0.1:1', timeoutMs: 800, clientBundle: path.join(tmp, 'nope.js') });
@@ -122,7 +122,7 @@ console.log('── 挂件开关那一行（磁盘上的客户端 bundle）─�
   check('SKIP 也说清了「试过哪些路径」', /试过/.test(find(gone, 'charm-row')?.detail ?? ''));
   fs.rmSync(tmp, { recursive: true, force: true });
   check('临时目录已清理', !fs.existsSync(tmp));
-  check('真仓库那份文件仍是新版（测试没有改动它）', /whale-charm/.test(fs.readFileSync(repoClient, 'utf8')));
+  check('真仓库那份文件仍是新版（测试没有改动它）', /开机动画/.test(fs.readFileSync(repoClient, 'utf8')) && /余额/.test(fs.readFileSync(repoClient, 'utf8')));
 }
 
 // ── 2. 旧宿主（/action 404）+ 一次都没握手：必须说准是哪一种坏 ──
@@ -138,7 +138,7 @@ console.log('── 旧版宿主（路由是后来才加的）+ 渲染层从没�
   await host.close();
 
   check('宿主在线 → pass（旧版插件也答得出 status.json）', statusOf(r, 'host-up') === 'pass');
-  check('/action 404 → FAIL', statusOf(r, 'host-new') === 'fail');
+  check('/appearance 404 → FAIL', statusOf(r, 'host-new') === 'fail');
   check('FAIL 的措辞指出「旧代码」而不是「没装」', /旧代码/.test(find(r, 'host-new')?.detail ?? ''), find(r, 'host-new')?.detail);
   check('FAIL 带一句修法（重启）', /退出 Harness/.test(find(r, 'host-new')?.fix ?? ''));
   check('seen 200 但从未握手 → FAIL（不是 skip）', statusOf(r, 'renderer') === 'fail', find(r, 'renderer')?.detail);
@@ -151,7 +151,7 @@ console.log('── 只有 capsule 握手（设置页没挂上）──');
 {
   const host = await fakeHost({
     '/dsh-up-t/status.json': (_q, res) => json(res, { ok: true, plugin: { name: 'dsh-up-t' }, time: 't', install: null }),
-    '/dsh-up-t/action': (_q, res) => json(res, { ok: true, actions: ['doctor'] }),
+    '/dsh-up-t/appearance': (_q, res) => json(res, { ok: true, features: ['boot', 'background', 'balance'] }),
     '/dsh-up-t/seen': (_q, res) => json(res, { ok: true, seen: { count: 1, sources: { capsule: 't1' } } }),
   });
   const r = await run({ hash: false, url: host.url });

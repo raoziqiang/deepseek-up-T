@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "deepseek-up-T —— DSH 改造控制台：环境基线、快照、体检、回滚、复现。",
+  "description": "开机动画、背景和余额提示。维护安装包的命令仍在终端里，不再放到设置页。",
   "engines": {
     "node": ">=20"
   },

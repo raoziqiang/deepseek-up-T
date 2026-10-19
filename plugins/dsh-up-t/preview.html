@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh-CN" translate="no">
+<head>
+  <meta charset="utf-8" />
+  <meta name="google" content="notranslate" />
+  <title>外观预览</title>
+  <style>
+    html, body { margin: 0; min-height: 100%; }
+    body { font: 15px/1.5 system-ui, sans-serif; color: #e8eef7; }
+    main { min-height: 100vh; display: grid; place-items: center; padding: 32px; }
+    .chat { width: min(560px, 100%); display: flex; flex-direction: column; gap: 12px; }
+    .bubble { max-width: 80%; padding: 10px 14px; border-radius: 14px; background: rgba(8, 12, 20, 0.55); }
+    .bubble.me { margin-left: auto; background: rgba(20, 40, 64, 0.72); }
+    aside {
+      position: fixed; top: 16px; right: 16px; z-index: 20; width: 280px;
+      padding: 14px; border-radius: 12px; background: rgba(10, 14, 22, 0.88); color: #f2f5f8;
+      box-shadow: 0 8px 28px rgba(0,0,0,.28);
+    }
+    aside h1 { font-size: 15px; margin: 0 0 10px; }
+    aside button, aside label { font: inherit; }
+    aside button { margin: 0 6px 6px 0; padding: 4px 8px; border-radius: 8px; border: 1px solid rgba(255,255,255,.25); background: transparent; color: inherit; }
+    aside button[data-on="1"] { border-color: #7aa2c4; }
+    aside input[type="number"] { width: 120px; margin-top: 4px; }
+    aside p { margin: 8px 0 0; font-size: 12px; opacity: .75; }
+  </style>
+</head>
+<body>
+  <aside>
+    <h1>外观</h1>
+    <div id="presets"></div>
+    <button type="button" id="gif">示例动图</button>
+    <button type="button" id="clear">去掉图片</button>
+    <button type="button" id="replay">再看一次</button>
+    <label style="display:block;margin-top:8px">当前余额<br><input id="balance" type="number" step="any" value="20"></label>
+    <label style="display:block;margin-top:8px">每次大约消耗<br><input id="cost" type="number" step="any" value="0.8"></label>
+    <p id="hint"></p>
+  </aside>
+  <main>
+    <div class="chat">
+      <div class="bubble">背景铺在整个窗口后面。流光会自己动，选中的图片也会动。</div>
+      <div class="bubble me">左下角是余额还能用几次。</div>
+    </div>
+  </main>
+  <script>
+    var KEY = 'dsh-up-t:prefs';
+    var presets = [
+      ['none', '跟随界面'],
+      ['night', '静夜'],
+      ['dawn', '晨雾'],
+      ['flow', '流光']
+    ];
+    var box = document.getElementById('presets');
+    presets.forEach(function (pair) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = pair[1];
+      b.dataset.id = pair[0];
+      b.onclick = function () { save({ background: pair[0], customBackground: '' }); };
+      box.appendChild(b);
+    });
+    function read() {
+      try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) { return {}; }
+    }
+    function save(patch) {
+      var cur = read();
+      var next = {
+        boot: true,
+        background: cur.background || 'flow',
+        customBackground: cur.customBackground || '',
+        balance: document.getElementById('balance').value,
+        cost: document.getElementById('cost').value,
+        showBalance: true
+      };
+      Object.keys(patch || {}).forEach(function (k) { next[k] = patch[k]; });
+      localStorage.setItem(KEY, JSON.stringify(next));
+      window.dispatchEvent(new Event('dsh-up-t:prefs'));
+      paint(next);
+    }
+    function paint(p) {
+      Array.prototype.forEach.call(box.children, function (b) {
+        b.dataset.on = !p.customBackground && b.dataset.id === (p.background || 'flow') ? '1' : '0';
+      });
+      var b = Number(p.balance), c = Number(p.cost);
+      document.getElementById('hint').textContent = (isFinite(b) && isFinite(c) && c > 0)
+        ? ('大约还能用 ' + (b <= 0 ? 0 : Math.floor(b / c)) + ' 次')
+        : '';
+    }
+    document.getElementById('balance').oninput = function () { save(); };
+    document.getElementById('cost').oninput = function () { save(); };
+    document.getElementById('replay').onclick = function () {
+      window.dispatchEvent(new Event('dsh-up-t:replay'));
+    };
+    document.getElementById('clear').onclick = function () { save({ customBackground: '' }); };
+    document.getElementById('gif').onclick = function () {
+      fetch('assets/sample-flow.gif').then(function (r) { return r.blob(); }).then(function (blob) {
+        var reader = new FileReader();
+        reader.onload = function () { save({ customBackground: String(reader.result) }); };
+        reader.readAsDataURL(blob);
+      });
+    };
+    if (!localStorage.getItem(KEY)) save({ background: 'flow' });
+    else paint(read());
+  </script>
+  <script src="assets/client.js"></script>
+</body>
+</html>

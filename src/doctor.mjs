@@ -175,7 +175,7 @@ export async function runDoctor({ hash = true } = {}) {
         add('运行时', 'T4 插件 dsh-up-t 心跳', 'warn', false,
           `${head}${step}`,
           '插件被加载了、`apply()` 也跑完了，但之后**没有走到 ready** —— 也就是 `webServer` 这个依赖一直没就绪：'
-          + '路由没注册，界面里既不会有胶囊也不会有设置页，而且不会有任何报错。'
+          + '路由没注册，界面里既不会有开机动画也不会有设置页，而且不会有任何报错。'
           + `去看 .plugin-manager/logs 里有没有加载错误；心跳本身在 ${P.pluginHeartbeat}。`);
       } else if (stage === 'ready' && !seenVia.length) {
         add('运行时', 'T4 插件 dsh-up-t 心跳', 'warn', false,
@@ -243,7 +243,7 @@ export async function runDoctor({ hash = true } = {}) {
   // 暂存产物：回答「我改的东西构建出来了没有、落盘了没有」。
   // 这一条曾经只存在于人的记忆里 —— 一份含重播修复的暂存包在磁盘上等了一整天，
   // 而报告里一个字都没说（它比的是「在用安装包 vs 原版备份」，暂存包根本不在比较里）。
-  // 判定表在 src/staged.mjs，与左下角胶囊/设置页那份**逐字相同**（有对照测试钉住）。
+  // 判定表在 src/staged.mjs。设置页不再展示暂存包。
   const staged = stagedFacts(P);
   if (!exists(P.stagedFile)) {
     add('安装包', '暂存包', 'info', true, '还没构建过（state/staged/app.asar 不存在）',

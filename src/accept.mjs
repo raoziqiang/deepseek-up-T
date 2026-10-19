@@ -174,28 +174,32 @@ export async function runAccept({ hash = true, url = process.env.DSH_WEB_URL || 
       '插件没被这个 profile 加载，或路由被别的东西占了。去看 profile 的 dsh.profile.bundles 有没有 dsh-up-t。'));
   }
 
-  const action = await probe(url, '/dsh-up-t/action', { timeoutMs });
-  if (!action.ok) {
+  const appearance = await probe(url, '/dsh-up-t/appearance', { timeoutMs });
+  const features = appearance.json?.features;
+  const hasAppearance = appearance.status === 200
+    && Array.isArray(features)
+    && ['boot', 'background', 'balance'].every((name) => features.includes(name));
+  if (!appearance.ok) {
     items.push(item('host-new', '宿主半侧是新版（重启已生效）', 'skip',
-      `探不到（${action.error}）`, null));
-  } else if (action.status === 200 && Array.isArray(action.json?.actions)) {
+      `探不到（${appearance.error}）`, null));
+  } else if (hasAppearance) {
     items.push(item('host-new', '宿主半侧是新版（重启已生效）', 'pass',
-      `操作通道在线，${action.json.actions.length} 个操作：${action.json.actions.join(', ')}`));
-  } else if (action.status === 404) {
+      `外观路由在线：${features.join(', ')}`));
+  } else if (appearance.status === 404) {
     items.push(item('host-new', '宿主半侧是新版（重启已生效）', 'fail',
-      'GET /dsh-up-t/action → 404：运行中的宿主是**旧代码**（这个路由是后来才加的）',
+      'GET /dsh-up-t/appearance → 404：运行中的宿主是**旧代码**（这一版才改成开机动画 / 背景 / 余额）',
       '完全退出 Harness 再启动一次。宿主半侧的改动不重启不会生效，而且不报错。'));
   } else {
     items.push(item('host-new', '宿主半侧是新版（重启已生效）', 'fail',
-      `GET /dsh-up-t/action → ${action.status}`, '这一条本该答 200 加一个 actions 列表。'));
+      `GET /dsh-up-t/appearance → ${appearance.status}`, '这一条本该答 200，并带上 boot、background、balance。'));
   }
 
   // ── 界面里那一行挂件开关：它住在设置页的客户端 bundle 里 ──────────
-  // 注意**不能**用 `/dsh-up-t/client.js` 去问：那条路由送的是 `assets/client.js`（左下角胶囊），
-  // 而设置页那一页来自 ModuleLoader 加载的 `lib/client.js`，它不走我们的路由。
+  // 注意**不能**用 `/dsh-up-t/client.js` 去问：那条路由送的是 `assets/client.js`（开机动画和背景），
+  // 而设置页来自 ModuleLoader 加载的 `lib/client.js`，它不走我们的路由。
   // 好在这个 bundle 也是**按 mtime 从磁盘重读**的（模块系统用 mtime 派生 rev），
   // 所以「磁盘上那一份是不是新版」就是要问的事实；剩下的一步（浏览器硬刷新）只有人能做。
-  const CHARM_MARKERS = ['settings.general.item', 'whale-charm'];
+  const PAGE_MARKERS = ['开机动画', '余额'];
   const installedClient = path.join(P.profileDir, 'node_modules', 'dsh-up-t', 'lib', 'client.js');
   const sourceClient = path.join(P.projectRoot, 'plugins', 'dsh-up-t', 'lib', 'client.js');
   const candidates = clientBundle ? [clientBundle] : [installedClient, sourceClient];
@@ -205,16 +209,16 @@ export async function runAccept({ hash = true, url = process.env.DSH_WEB_URL || 
     try { bundleText = readFileSync(f, 'utf8'); bundleFile = f; break; } catch { /* 试下一个 */ }
   }
   if (bundleText === null) {
-    items.push(item('charm-row', '挂件开关那一行已经在客户端 bundle 里', 'skip',
+    items.push(item('charm-row', '设置页已经是开机动画 / 背景 / 余额', 'skip',
       `读不到 lib/client.js（试过 ${candidates.join('、')}）`,
       '插件没装进这个 profile？装法见 plugins/dsh-up-t/README.md。'));
   } else {
-    const missing = CHARM_MARKERS.filter((m) => !bundleText.includes(m));
+    const missing = PAGE_MARKERS.filter((m) => !bundleText.includes(m));
     if (missing.length === 0) {
-      items.push(item('charm-row', '挂件开关那一行已经在客户端 bundle 里', 'pass',
-        `${bundleFile} 里有 ${CHARM_MARKERS.join(' / ')}（客户端 bundle 按 mtime 重读 ⇒ 硬刷新即生效）`));
+      items.push(item('charm-row', '设置页已经是开机动画 / 背景 / 余额', 'pass',
+        `${bundleFile} 里有 ${PAGE_MARKERS.join(' / ')}（客户端 bundle 按 mtime 重读 ⇒ 硬刷新即生效）`));
     } else {
-      items.push(item('charm-row', '挂件开关那一行已经在客户端 bundle 里', 'fail',
+      items.push(item('charm-row', '设置页已经是开机动画 / 背景 / 余额', 'fail',
         `${bundleFile} 里没有 ${missing.join(' / ')} —— 磁盘上这一份是旧版`,
         '先确认改的是 plugins/dsh-up-t/lib/client.js；改完硬刷新一次（设置页 bundle 走缓存就会有这种表现）。'));
     }
@@ -234,7 +238,7 @@ export async function runAccept({ hash = true, url = process.env.DSH_WEB_URL || 
     } else if (via.length) {
       const missing = via.includes('bundle') ? 'capsule' : 'bundle';
       items.push(item('renderer', '渲染层已握手（界面里真的出现了）', 'fail',
-        `只有 ${via.join(' + ')} 到了，缺 ${missing}（${missing === 'bundle' ? '设置页' : '左下角胶囊'}没挂上）`,
+        `只有 ${via.join(' + ')} 到了，缺 ${missing}（${missing === 'bundle' ? '设置页' : '开机动画'}没挂上）`,
         missing === 'bundle'
           ? 'ModuleLoader 没加载 lib/client.js：看 Harness 的渲染层控制台有没有报错。'
           : '注入行没被收集（宿主启动时一次性收集，装晚了就得重启）。'));
@@ -259,7 +263,7 @@ export async function runAccept({ hash = true, url = process.env.DSH_WEB_URL || 
       `stage=ready（${(beat.routes ?? []).length} 条路由）pid=${beat.pid}`));
   } else if (beat.stage === 'apply') {
     items.push(item('heartbeat', '插件写过心跳', 'fail',
-      `只走到 stage=apply：webServer 依赖没就绪 ⇒ 路由一条都没注册，界面里既不会有胶囊也不会有设置页，而且不报错`,
+      `只走到 stage=apply：webServer 依赖没就绪 ⇒ 路由一条都没注册，界面里既不会有开机动画也不会有设置页，而且不报错`,
       '这是最安静的坏法。看 doctor 的「运行时」段，那里会报同一条。'));
   } else {
     items.push(item('heartbeat', '插件写过心跳', 'skip',
@@ -279,14 +283,14 @@ export async function runAccept({ hash = true, url = process.env.DSH_WEB_URL || 
   }
 
   // ── 只能靠人眼的几项（不计入退出码）──────────────────────────
-  items.push(item('manual-splash', '等一下：启动时的鲸鱼动画', 'manual',
-    '看一眼启动画面有没有鲸鱼动画 —— 这是「好不好看」，命令验不了。'));
-  items.push(item('manual-capsule', '等一下：左下角胶囊能拖', 'manual',
-    '按住左下角胶囊拖一下（位置存在 localStorage，右键可隐藏）。'));
-  items.push(item('manual-settings', '等一下：设置里多出「deepseek-up-T」一整页', 'manual',
-    '设置 → 左侧应多出一项 deepseek-up-T：里面有事实行、心跳行、以及一排操作按钮。'));
-  items.push(item('manual-charm', '等一下：设置 →「通用」里的挂件开关能开', 'manual',
-    '设置 →「通用」里那一行「桌面鲸鱼挂件」：打开后桌面上出现小鲸鱼（可拖动、右键有菜单），关掉即消失。'));
+  items.push(item('manual-splash', '等一下：打开时有一段短动画', 'manual',
+    '看一眼开机动画（深色底、一条线、DeepSeek）。设置 → 外观里可以关掉，或点「再看一次」。'));
+  items.push(item('manual-background', '等一下：背景能换成自己的图', 'manual',
+    '设置 → 外观：静夜 / 晨雾 / 流光，或选一张 GIF、WebP、APNG。自定义图片优先于默认背景。'));
+  items.push(item('manual-balance', '等一下：角落里的余额次数', 'manual',
+    '填上当前余额和每次大约消耗，左下角应出现「余额 … · 约 N 次」。'));
+  items.push(item('manual-settings', '等一下：设置页只剩这三块', 'manual',
+    '设置 → 外观里不应再有体检、升级、快照、暂存包或心跳。'));
   items.push(item('manual-search', '等一下：会话全文搜索真的能搜到历史正文', 'manual',
     '搜一个只出现在历史正文里的词（例如 resolveBundleDir），看有没有命中。'));
   items.push(item('manual-ralph', '等一下：工具目录里有 ralph', 'manual',

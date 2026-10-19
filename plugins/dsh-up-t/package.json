@@ -1,7 +1,7 @@
 {
   "name": "dsh-up-t",
   "version": "0.1.0",
-  "description": "deepseek-up-T 的状态挂件：在 DSH Web 界面左下角显示 Harness 版本与安装包是否被改造过，点开有细节",
+  "description": "开机动画、背景（默认与自定义，含动图）和余额还能用几次。设置页不再放体检、快照或升级按钮。",
   "keywords": [
     "dsh",
     "dsh-plugin",

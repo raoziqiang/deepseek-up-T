@@ -1,13 +1,10 @@
-// deepseek-up-T :: dsh-up-t 的客户端半身
+// deepseek-up-T :: 开机动画、背景、余额提示
 //
-// 由宿主的 `/dsh-up-t/client.js` 路由提供，按 mtime 重读 —— 改这个文件后硬刷新页面即生效。
-// 没有构建步骤、没有依赖、没有 ESM（CSP 不允许），所以这里是一段经典脚本，
-// 而且整段包在 IIFE 里，避免往全局泄漏任何名字（只留一个 __DSH_UP_T_LOADED__ 幂等标记）。
+// 由 /dsh-up-t/client.js 按 mtime 提供。经典脚本，无构建、无 ESM。
+// 整段包在 try 里：这里坏了也不能拖垮主界面。
 //
-// 设计约束：这个挂件绝不能影响主体功能。
-//   · 找不到挂载点就静默退出；
-//   · 任何异常都吞掉，绝不冒泡成未捕获错误；
-//   · 只占左下角一个小胶囊，可拖动、可关闭，位置与关闭状态存 localStorage。
+// 偏好与设置页共用 localStorage 键 dsh-up-t:prefs。
+// 设置页改完会派发 dsh-up-t:prefs；「再看一次」派发 dsh-up-t:replay。
 
 (function () {
   'use strict';
@@ -15,328 +12,245 @@
     if (window.__DSH_UP_T_CLIENT__) return;
     window.__DSH_UP_T_CLIENT__ = true;
 
-    var STATUS_URL = '/dsh-up-t/status.json';
+    var PREF_KEY = 'dsh-up-t:prefs';
+    var BOOT_KEY = 'dsh-up-t:boot-played';
     var SEEN_URL = '/dsh-up-t/seen';
-    var POS_KEY = 'dsh-up-t:pos';
-    var HIDDEN_KEY = 'dsh-up-t:hidden';
-    var Z = 2147483000;
+    var BOOT_MS = 2200;
 
-    // 握手：把「这段脚本真的在渲染层跑起来了」告诉宿主。
-    // 宿主知道自己注册了路由，但不知道注入行有没有被收集、脚本有没有真的执行 ——
-    // 这两件事失败时都是静默的（没有胶囊、也没有报错）。失败不影响任何功能，纯证据。
     try {
       fetch(SEEN_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-dsh-up-t': '1' },
-        body: JSON.stringify({ via: 'capsule' })
+        body: JSON.stringify({ via: 'capsule' }),
       }).catch(function () {});
-    } catch (e) { /* 握手失败不该影响挂件 */ }
+    } catch (e) { /* 握手失败不影响外观 */ }
 
-    var hideTimer = null;
-
-    function el(tag, style, text) {
-      var n = document.createElement(tag);
-      if (style) for (var k in style) n.style[k] = style[k];
-      if (text != null) n.textContent = text;
-      return n;
-    }
-
-    function human(bytes) {
-      if (typeof bytes !== 'number' || !isFinite(bytes)) return '—';
-      var u = ['B', 'KB', 'MB', 'GB'];
-      var i = 0;
-      var v = bytes;
-      while (v >= 1024 && i < u.length - 1) { v /= 1024; i += 1; }
-      return (i === 0 ? v : v.toFixed(1)) + ' ' + u[i];
-    }
-
-    // 暂存产物（state/staged/app.asar）的结论。
-    //
-    // 这条为什么必须显示出来：项目的工作流是「改 → 构建到暂存包 → 落盘 → 重启」，而落盘要等
-    // Harness 完全退出（人可以拖很久）。于是「暂存包比在用安装包新」是常态，而界面上原来一个
-    // 字都不说 —— 打开面板看到全是正常，就会以为改动已经生效了。
-    //
-    // 三种状态的颜色不同，是因为**要人做的事不同**：待落盘要人挑时间动手，暂存包更旧要人重新
-    // 构建，其余只是信息。拿不到就说拿不到：绝不把「没证据」当成「没改动」。
-    function stagedText(staged) {
-      if (!staged || staged.status === 'unavailable') {
-        return { text: '没拿到暂存产物的信息', color: '#8b949e', pending: false };
-      }
-      var d = staged.deltaBytes;
-      var delta = (typeof d === 'number' && d !== 0)
-        ? '（' + (d > 0 ? '比在用大 ' : '比在用小 ') + human(Math.abs(d)) + '）'
-        : '';
-      if (staged.status === 'pending') {
-        return { text: '待落盘 · 暂存包更新' + delta, color: '#f0883e', pending: true };
-      }
-      if (staged.status === 'behind') {
-        return { text: '暂存包比在用的旧，别拿它落盘' + delta, color: '#d29922', pending: false };
-      }
-      if (staged.status === 'same-size') {
-        return { text: '与在用安装包大小相同', color: '#8b949e', pending: false };
-      }
-      return { text: '大小不同，但判不出谁更新' + delta, color: '#d29922', pending: false };
-    }
-
-    function readPos() {
+    function readPrefs() {
+      var empty = {
+        boot: true,
+        background: 'none',
+        customBackground: '',
+        balance: '',
+        cost: '',
+        showBalance: true,
+      };
       try {
-        var raw = localStorage.getItem(POS_KEY);
-        if (!raw) return null;
+        var raw = localStorage.getItem(PREF_KEY);
+        if (!raw) return empty;
         var p = JSON.parse(raw);
-        if (typeof p.x === 'number' && typeof p.y === 'number') return p;
-      } catch (e) { /* 忽略坏数据 */ }
-      return null;
+        if (!p || typeof p !== 'object') return empty;
+        return {
+          boot: p.boot !== false,
+          background: p.background || 'none',
+          customBackground: typeof p.customBackground === 'string' ? p.customBackground : '',
+          balance: p.balance == null ? '' : String(p.balance),
+          cost: p.cost == null ? '' : String(p.cost),
+          showBalance: p.showBalance !== false,
+        };
+      } catch (e) {
+        return empty;
+      }
+    }
+
+    function trimNum(n) {
+      return String(Math.round(Number(n) * 1000) / 1000);
+    }
+
+    function balanceChip(prefs) {
+      if (!prefs.showBalance) return '';
+      var bEmpty = prefs.balance === '' || prefs.balance == null;
+      var b = bEmpty ? NaN : Number(prefs.balance);
+      if (bEmpty || !isFinite(b)) return '';
+      var text = '余额 ' + trimNum(b);
+      var cEmpty = prefs.cost === '' || prefs.cost == null;
+      var c = cEmpty ? NaN : Number(prefs.cost);
+      if (cEmpty || !isFinite(c)) return text + ' · 填上每次消耗可算次数';
+      if (c <= 0) return text + ' · 每次消耗要大于 0';
+      var turns = b <= 0 ? 0 : Math.floor(b / c);
+      return text + ' · 约 ' + turns + ' 次';
+    }
+
+    function safeImageUrl(url) {
+      if (typeof url !== 'string') return '';
+      if (!/^data:image\/(gif|webp|png|apng|jpeg|jpg);/i.test(url)) return '';
+      if (/["\\\n\r<>]/.test(url)) return '';
+      return url;
+    }
+
+    function backgroundCss(prefs) {
+      var custom = safeImageUrl(prefs.customBackground);
+      if (custom) {
+        return 'html{background:#0e1116 url("' + custom + '") center/cover no-repeat fixed !important;}';
+      }
+      if (prefs.background === 'night') {
+        return 'html{background:radial-gradient(1200px 700px at 18% 0%,#1d3d66 0%,#0c1220 52%,#07090f 100%) fixed !important;}';
+      }
+      if (prefs.background === 'dawn') {
+        return 'html{background:linear-gradient(165deg,#f3eee6 0%,#d5e3ee 46%,#c7d5c3 100%) fixed !important;}';
+      }
+      if (prefs.background === 'flow') {
+        return '@keyframes dsh-up-t-flow{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}'
+          + 'html{background-image:linear-gradient(120deg,#10182c,#1d4e62,#16345a,#10182c) !important;'
+          + 'background-size:240% 240% !important;background-attachment:fixed !important;'
+          + 'animation:dsh-up-t-flow 18s ease infinite !important;}';
+      }
+      return '';
+    }
+
+    var bgNode = null;
+    var chip = null;
+    var bootGen = 0;
+
+    function parentFor(nodeDoc) {
+      return nodeDoc.body || nodeDoc.documentElement || nodeDoc.head || null;
+    }
+
+    function ensureStyle() {
+      if (bgNode && bgNode.parentNode) return bgNode;
+      bgNode = document.createElement('style');
+      bgNode.id = 'dsh-up-t-bg';
+      var parent = document.head || document.documentElement;
+      if (parent) parent.appendChild(bgNode);
+      return bgNode;
+    }
+
+    function applyBackground() {
+      var node = ensureStyle();
+      if (node) node.textContent = backgroundCss(readPrefs());
+    }
+
+    function updateBalance() {
+      var text = balanceChip(readPrefs());
+      if (!text) {
+        if (chip && chip.parentNode) chip.parentNode.removeChild(chip);
+        chip = null;
+        return;
+      }
+      if (!chip || !chip.parentNode) {
+        chip = document.createElement('div');
+        chip.id = 'dsh-up-t-balance';
+        chip.style.position = 'fixed';
+        chip.style.left = '16px';
+        chip.style.bottom = '16px';
+        chip.style.zIndex = '2147483000';
+        chip.style.padding = '6px 10px';
+        chip.style.borderRadius = '999px';
+        chip.style.background = 'rgba(12,16,24,0.78)';
+        chip.style.color = '#f2f5f8';
+        chip.style.font = '13px/1.4 system-ui,sans-serif';
+        chip.style.pointerEvents = 'none';
+        var parent = parentFor(document);
+        if (!parent) return;
+        parent.appendChild(chip);
+      }
+      chip.textContent = text;
+    }
+
+    function reducedMotion() {
+      try {
+        return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+      } catch (e) {
+        return false;
+      }
+    }
+
+    function removeBoot() {
+      var nodes = document.querySelectorAll ? document.querySelectorAll('#dsh-up-t-boot') : [];
+      if (nodes && nodes.length) {
+        for (var i = 0; i < nodes.length; i += 1) {
+          if (nodes[i].parentNode) nodes[i].parentNode.removeChild(nodes[i]);
+        }
+        return;
+      }
+      var root = document.getElementById ? document.getElementById('dsh-up-t-boot') : null;
+      if (root && root.parentNode) root.parentNode.removeChild(root);
+    }
+
+    function playBoot(force) {
+      var prefs = readPrefs();
+      if (!force && !prefs.boot) return;
+      if (!force && reducedMotion()) return;
+      try {
+        if (!force && sessionStorage.getItem(BOOT_KEY) === '1') return;
+        sessionStorage.setItem(BOOT_KEY, '1');
+      } catch (e) { /* 存不了就每次都播，不影响主界面 */ }
+      var gen = ++bootGen;
+      removeBoot();
+      var parent = parentFor(document);
+      if (!parent) return;
+      if (!document.getElementById || !document.getElementById('dsh-up-t-boot-style')) {
+        var style = document.createElement('style');
+        style.id = 'dsh-up-t-boot-style';
+        style.textContent = '@keyframes dsh-up-t-boot{0%{opacity:0}12%{opacity:1}78%{opacity:1}100%{opacity:0}}'
+          + '@keyframes dsh-up-t-line{from{transform:scaleX(0)}to{transform:scaleX(1)}}';
+        var head = document.head || document.documentElement;
+        if (head) head.appendChild(style);
+      }
+      var overlay = document.createElement('div');
+      overlay.id = 'dsh-up-t-boot';
+      overlay.style.position = 'fixed';
+      overlay.style.left = '0';
+      overlay.style.top = '0';
+      overlay.style.right = '0';
+      overlay.style.bottom = '0';
+      overlay.style.zIndex = '2147483000';
+      overlay.style.display = 'flex';
+      overlay.style.alignItems = 'center';
+      overlay.style.justifyContent = 'center';
+      overlay.style.background = '#0b1020';
+      overlay.style.animation = 'dsh-up-t-boot ' + (BOOT_MS / 1000) + 's ease forwards';
+      var line = document.createElement('div');
+      line.id = 'dsh-up-t-boot-line';
+      line.style.position = 'absolute';
+      line.style.left = '18%';
+      line.style.right = '18%';
+      line.style.top = '50%';
+      line.style.height = '1px';
+      line.style.background = 'rgba(186,214,232,0.85)';
+      line.style.transformOrigin = 'center';
+      line.style.animation = 'dsh-up-t-line 0.9s ease forwards';
+      var title = document.createElement('div');
+      title.id = 'dsh-up-t-boot-title';
+      title.textContent = 'DeepSeek';
+      title.style.position = 'relative';
+      title.style.color = '#e8eef7';
+      title.style.font = '600 28px/1 system-ui,sans-serif';
+      title.style.letterSpacing = '0.18em';
+      overlay.appendChild(line);
+      overlay.appendChild(title);
+      parent.appendChild(overlay);
+      setTimeout(function () {
+        if (gen !== bootGen) return;
+        removeBoot();
+      }, BOOT_MS);
+    }
+
+    function applyAll() {
+      applyBackground();
+      updateBalance();
     }
 
     function mount() {
-      var host = document.body || document.documentElement;
-      if (!host) { setTimeout(mount, 200); return; }
-
-      var root = el('div', {
-        position: 'fixed',
-        zIndex: String(Z),
-        left: '12px',
-        bottom: '12px',
-        font: '12px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
-        color: '#e6edf3',
-        userSelect: 'none',
-        pointerEvents: 'auto',
+      applyAll();
+      playBoot(false);
+      window.addEventListener('dsh-up-t:prefs', applyAll);
+      window.addEventListener('storage', function (ev) {
+        if (!ev || !ev.key || ev.key === PREF_KEY) applyAll();
       });
-
-      var chip = el('div', {
-        display: 'flex',
-        alignItems: 'center',
-        gap: '6px',
-        padding: '3px 9px',
-        borderRadius: '999px',
-        background: 'rgba(20,24,31,.86)',
-        border: '1px solid rgba(255,255,255,.14)',
-        boxShadow: '0 2px 10px rgba(0,0,0,.35)',
-        cursor: 'grab',
-        whiteSpace: 'nowrap',
-        backdropFilter: 'blur(6px)',
-      });
-
-      var dot = el('span', {
-        width: '7px',
-        height: '7px',
-        borderRadius: '50%',
-        background: '#8b949e',
-        flex: '0 0 auto',
-      });
-      var label = el('span', null, 'up-T');
-      chip.appendChild(dot);
-      chip.appendChild(label);
-
-      var panel = el('div', {
-        position: 'absolute',
-        left: '0',
-        bottom: '26px',
-        minWidth: '290px',
-        maxWidth: 'min(460px, 80vw)',
-        padding: '10px 12px',
-        borderRadius: '10px',
-        background: 'rgba(20,24,31,.97)',
-        border: '1px solid rgba(255,255,255,.16)',
-        boxShadow: '0 8px 28px rgba(0,0,0,.5)',
-        display: 'none',
-        whiteSpace: 'normal',
-        wordBreak: 'break-all',
-      });
-
-      root.appendChild(panel);
-      root.appendChild(chip);
-      host.appendChild(root);
-
-      var pos = readPos();
-      if (pos) {
-        root.style.left = pos.x + 'px';
-        root.style.top = pos.y + 'px';
-        root.style.bottom = 'auto';
-      }
-      // 存储整块被禁（企业策略 / 隐私模式）时 getItem 会直接抛。这一句曾经没包 try：
-      // 抛出去会被最外层那个 catch 吞掉，而那时事件监听与定时刷新**都还没注册** ——
-      // 表现是「胶囊在，但点不动、状态永远不刷新」，且没有任何报错。所以必须就地兜住。
-      var hidden = false;
-      try { hidden = localStorage.getItem(HIDDEN_KEY) === '1'; } catch (e) { /* 存储被禁：当成没隐藏 */ }
-      if (hidden) root.style.display = 'none';
-
-      var row = function (k, v, color) {
-        var line = el('div', { display: 'flex', gap: '8px', margin: '2px 0' });
-        line.appendChild(el('span', { color: '#8b949e', flex: '0 0 84px' }, k));
-        line.appendChild(el('span', { color: color || '#e6edf3' }, v));
-        return line;
-      };
-
-      function render(status) {
-        panel.textContent = '';
-        panel.appendChild(el('div', {
-          fontWeight: '600',
-          marginBottom: '6px',
-          color: '#e6edf3',
-        }, 'deepseek-up-T · 改造状态'));
-
-        if (!status || status.ok !== true) {
-          panel.appendChild(row('状态', '宿主没有回应状态查询', '#f0883e'));
-          return;
-        }
-
-        panel.appendChild(row('插件', (status.plugin && status.plugin.name) + ' ' + (status.plugin && status.plugin.version)));
-        var inst = status.install;
-        if (!inst) {
-          panel.appendChild(row('安装包', '没找到 Harness 安装目录', '#f0883e'));
-          return;
-        }
-        panel.appendChild(row('Harness', String(inst.version || '未知')));
-        panel.appendChild(row('app.asar', human(inst.asarBytes)));
-        panel.appendChild(row('原版备份', human(inst.backupBytes)));
-
-        var verdict;
-        var color;
-        if (inst.sameSizeAsBackup === true) {
-          verdict = '大小相同 —— 很可能还是原版（未被改造）';
-          color = '#8b949e';
-        } else if (inst.sameSizeAsBackup === false) {
-          verdict = '大小不同 —— 安装包已被改造';
-          color = '#3fb950';
-        } else {
-          verdict = '没有原版备份可比（无法判断）';
-          color = '#d29922';
-        }
-        panel.appendChild(row('判定', verdict, color));
-
-        // 暂存产物：这是「我改的东西到底生效了没有」的答案里唯一要人动手的那一格。
-        var staged = status.staged;
-        if (staged && staged.status !== 'unavailable') {
-          var st = stagedText(staged);
-          panel.appendChild(row('暂存包', st.text, st.color));
-          if (st.pending) {
-            panel.appendChild(el('div', {
-              marginTop: '4px',
-              color: '#f0883e',
-              fontSize: '11px',
-            }, '落盘要先把 Harness 完全退出（托盘 → Quit）：node vendor\\whale\\install.mjs --yes'));
-          }
-        }
-
-        panel.appendChild(el('div', {
-          marginTop: '7px',
-          paddingTop: '7px',
-          borderTop: '1px solid rgba(255,255,255,.12)',
-          color: '#8b949e',
-          fontSize: '11px',
-        }, '依据：' + (inst.judgedBy === 'size' ? '只比了文件大小（不算 121MB 的 sha256）'
-          : String(inst.judgedBy)) + '。要看逐字节结论请跑 `dsht upgrade`。'));
-
-        panel.appendChild(el('div', {
-          marginTop: '5px',
-          color: '#8b949e',
-          fontSize: '11px',
-        }, String(inst.dir)));
-      }
-
-      function refresh() {
-        try {
-          fetch(STATUS_URL, { cache: 'no-store' })
-            .then(function (r) { return r.json(); })
-            .then(function (j) {
-              render(j);
-              var inst = j && j.install;
-              var pending = !!(j && j.staged && j.staged.status === 'pending');
-              // 「待落盘」必须改胶囊本身的样子，不能只藏在展开后的面板里：
-              // 这件事要人挑时间动手，而人不会没事去点开一个说「一切正常」的胶囊。
-              if (pending) label.textContent = 'up-T · 待落盘';
-              if (!inst) {
-                dot.style.background = '#d29922';
-                if (!pending) label.textContent = 'up-T';
-                return;
-              }
-              if (!pending) label.textContent = 'up-T · ' + (inst.version || '?');
-              dot.style.background = pending ? '#f0883e'
-                : inst.sameSizeAsBackup === false ? '#3fb950'
-                : inst.sameSizeAsBackup === true ? '#8b949e' : '#d29922';
-            })
-            .catch(function () { render(null); });
-        } catch (e) { /* fetch 不存在也不会影响主界面 */ }
-      }
-
-      // ── 拖动 + 点击（区分「拖」与「点」靠位移阈值） ──
-      var dragging = false;
-      var moved = false;
-      var start = null;
-
-      chip.addEventListener('pointerdown', function (ev) {
-        dragging = true;
-        moved = false;
-        start = { mx: ev.clientX, my: ev.clientY, x: root.getBoundingClientRect().left, y: root.getBoundingClientRect().top };
-        chip.style.cursor = 'grabbing';
-        try { chip.setPointerCapture(ev.pointerId); } catch (e) { /* 老浏览器 */ }
-      });
-
-      chip.addEventListener('pointermove', function (ev) {
-        if (!dragging || !start) return;
-        var dx = ev.clientX - start.mx;
-        var dy = ev.clientY - start.my;
-        if (Math.abs(dx) + Math.abs(dy) > 4) moved = true;
-        if (!moved) return;
-        var x = Math.max(0, Math.min(window.innerWidth - 40, start.x + dx));
-        var y = Math.max(0, Math.min(window.innerHeight - 24, start.y + dy));
-        root.style.left = x + 'px';
-        root.style.top = y + 'px';
-        root.style.bottom = 'auto';
-      });
-
-      chip.addEventListener('pointerup', function (ev) {
-        if (!dragging) return;
-        dragging = false;
-        chip.style.cursor = 'grab';
-        try { chip.releasePointerCapture(ev.pointerId); } catch (e) { /* 同上 */ }
-        if (moved) {
-          try {
-            localStorage.setItem(POS_KEY, JSON.stringify({
-              x: parseFloat(root.style.left) || 0,
-              y: parseFloat(root.style.top) || 0,
-            }));
-          } catch (e) { /* 存储被禁就算了 */ }
-          return;
-        }
-        if (panel.style.display === 'none') {
-          panel.style.display = 'block';
-          panel.appendChild(el('div', {
-            marginTop: '7px',
-            color: '#8b949e',
-            fontSize: '11px',
-          }, '右键点这个胶囊可以隐藏它。'));
-          refresh();
-        } else {
-          panel.style.display = 'none';
-        }
-      });
-
-      // 右键：隐藏（持久化），并留一条给自己找回的提示
-      chip.addEventListener('contextmenu', function (ev) {
-        ev.preventDefault();
-        root.style.display = 'none';
-        try { localStorage.setItem(HIDDEN_KEY, '1'); } catch (e) { /* 忽略 */ }
-        try {
-          console.info('[dsh-up-t] 已隐藏。要恢复：在控制台执行 localStorage.removeItem("' + HIDDEN_KEY + '") 后刷新');
-        } catch (e) { /* 忽略 */ }
-      });
-
-      refresh();
-      hideTimer = setInterval(refresh, 60000);
-      window.addEventListener('beforeunload', function () {
-        if (hideTimer) clearInterval(hideTimer);
+      window.addEventListener('dsh-up-t:replay', function () {
+        try { sessionStorage.removeItem(BOOT_KEY); } catch (e) { /* 忽略 */ }
+        playBoot(true);
       });
     }
 
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', mount);
-    } else {
+    } else if (parentFor(document)) {
       mount();
+    } else {
+      setTimeout(mount, 0);
     }
   } catch (e) {
-    // 挂件坏了也不能影响主界面。
-    try { console.warn('[dsh-up-t] client failed:', e); } catch (_) { /* 忽略 */ }
+    try { console.warn('[dsh-up-t] client failed', e); } catch (ignore) { /* 控制台也没有 */ }
   }
-}());
+})();
