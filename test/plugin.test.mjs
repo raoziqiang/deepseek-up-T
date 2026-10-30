@@ -567,7 +567,8 @@ await checkAsync('runAction 真能把命令跑起来（顺带钉住「spawn 这�
   assert.ok(typeof r.stdout === 'string' && r.stdout.length > 0, 'stdout 不该是空的');
   assert.ok(Array.isArray(r.json?.items), '快照列表应该返回 JSON 条目');
   assert.match(r.display, /快照列表：共/);
-  assert.ok(r.root.endsWith('deepseek-up-T'));
+  // 仓库布局是 deepseek-up-T/deepseek-up-t；findProjectRoot 必须落到带 src/cli.mjs 的那一层。
+  assert.equal(path.normalize(r.root), path.normalize(path.resolve(HERE, '..')));
 });
 
 check('Electron 操作必须用独立 Node，不能退回会误读 ASAR 的 Electron 可执行文件', () => {

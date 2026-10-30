@@ -21,6 +21,8 @@
     "test:upgrade": "node test/run.mjs upgrade",
     "test:plugin": "node test/run.mjs plugin",
     "test:skill": "node test/run.mjs skill",
+    "test:modules": "node test/run.mjs modules",
+    "modules": "node src/cli.mjs modules",
     "test:snapshot": "node test/run.mjs snapshot",
     "build:whale": "node vendor/whale/build.mjs",
     "install:whale": "node vendor/whale/install.mjs"

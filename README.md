@@ -64,16 +64,21 @@ deepseek-up-T/
 │   ├── precheck.mjs        权威组合预检（隔离探针家 + Electron-as-Node）
 │   ├── patchdecl.mjs       patches/*.yml 声明解析（src 与 vendor 共用同一份）
 │   ├── upgrade.mjs         升级检测：L3 重打 / L0 漂移 / 素材过期
+│   ├── modules.mjs         模块宿主：up-t.config.yml + 热加载
 │   ├── doctor.mjs          体检
 │   ├── snapshot.mjs        快照 / 回滚
 │   └── cli.mjs             命令入口
+├── up-t.config.yml         模块启用清单（短配置）
+├── modules/                热加载模块（入口 modules/<name>/module.mjs）
+├── memory/project/topics/  项目笔记（对齐 Grok Build；见 up-t-memory skill）
 ├── docs/                   工程文档
 │   ├── 01-environment.md   环境基线与实测事实
 │   ├── 02-architecture.md  四层改造面与组合顺序
 │   ├── 03-workflow.md      标准改造工作流
 │   ├── 04-roadmap.md       五条工作线路线图
 │   ├── 05-conventions.md   约定与红线
-│   └── 06-precheck.md      权威组合预检：为什么 CLI 做不到、怎么绕、边界在哪
+│   ├── 06-precheck.md      权威组合预检：为什么 CLI 做不到、怎么绕、边界在哪
+│   └── 07-modules.md       模块宿主契约与热加载
 ├── patches/                L0/L3 改动的声明式副本（可审计、可重放）
 ├── plugins/                自建 DSH 插件（L1 层，升级幸存）
 │   └── dsh-up-t/           T4 样板：界面左下角显示改造状态的小胶囊

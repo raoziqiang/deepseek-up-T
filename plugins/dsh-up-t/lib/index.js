@@ -89,6 +89,15 @@ const RUNTIME_DIR = path.join(PACKAGE_ROOT, '.runtime');
 const HEARTBEAT_FILE = path.join(RUNTIME_DIR, 'heartbeat.json');
 /** 最近一次心跳写的返回值。写失败不该静默 —— 但也不该抛异常，所以留在这里给状态路由。 */
 let lastHeartbeatResult = null;
+/**
+ * 模块宿主最近一次状态。写进 ready 心跳，好让 doctor / status.json 看得见。
+ * 宿主异步启动，所以第一枚 ready 可能还是 null；后续 onStatus 会刷新。
+ */
+let lastModulesStatus = null;
+/** 正在跑的模块宿主（有 stop）。插件卸载时要停掉轮询，否则会在已退出的进程里空转。 */
+let moduleHostHandle = null;
+/** 递增以作废还在飞的 boot Promise，避免卸载后又被迟到的 then 重新拉起宿主。 */
+let moduleBootGen = 0;
 
 /**
  * 本次生命周期走过的那几步。
@@ -167,8 +176,72 @@ export function noteClientSeen(via) {
     sources: { ...prev.sources, [known]: now },
   };
   // 同时落进磁盘上的心跳：`doctor` 只读文件，不读内存里的变量。
-  writeHeartbeat('ready', { routes: ROUTE_PATHS, client: clientSeen });
+  writeHeartbeat('ready', readyExtra());
   return clientSeen;
+}
+
+/** ready 心跳共用字段：路由 + 握手 + 模块状态。后写的 extra 覆盖同名键。 */
+function readyExtra(extra = {}) {
+  return {
+    routes: ROUTE_PATHS,
+    client: clientSeen,
+    modules: lastModulesStatus,
+    ...extra,
+  };
+}
+
+/**
+ * 在普通 Node 里拉起与 CLI `modules` 同一份宿主。
+ * apply() 本身必须同步（Cordis 契约），所以这里用 Promise，失败只记进心跳。
+ */
+function bootModuleHost() {
+  const projectRoot = findProjectRoot();
+  if (!projectRoot) {
+    lastModulesStatus = { ok: false, modules: {}, error: '找不到项目根（缺少 src/cli.mjs）' };
+    writeHeartbeat('ready', readyExtra());
+    return;
+  }
+  const gen = ++moduleBootGen;
+  const modulesUrl = pathToFileURL(path.join(projectRoot, 'src', 'modules.mjs')).href;
+  Promise.resolve()
+    .then(() => import(modulesUrl))
+    .then(async ({ createModuleHost }) => {
+      if (gen !== moduleBootGen) return;
+      if (moduleHostHandle) {
+        try { await moduleHostHandle.stop(); } catch { /* 旧宿主停不掉也不挡新的 */ }
+        moduleHostHandle = null;
+      }
+      if (gen !== moduleBootGen) return;
+      const host = createModuleHost({
+        projectRoot,
+        onStatus: (status) => {
+          if (gen !== moduleBootGen) return;
+          lastModulesStatus = status;
+          writeHeartbeat('ready', readyExtra());
+        },
+      });
+      moduleHostHandle = host;
+      lastModulesStatus = await host.start();
+      if (gen !== moduleBootGen) {
+        try { await host.stop(); } catch { /* 已作废 */ }
+        if (moduleHostHandle === host) moduleHostHandle = null;
+        return;
+      }
+      writeHeartbeat('ready', readyExtra());
+    })
+    .catch((err) => {
+      if (gen !== moduleBootGen) return;
+      lastModulesStatus = { ok: false, modules: {}, error: String(err?.message ?? err) };
+      writeHeartbeat('ready', readyExtra());
+    });
+}
+
+async function stopModuleHost() {
+  moduleBootGen += 1;
+  const host = moduleHostHandle;
+  moduleHostHandle = null;
+  if (!host) return;
+  try { await host.stop(); } catch { /* 清理失败不影响退出 */ }
 }
 
 function readOwnPackage() {
@@ -858,12 +931,17 @@ export default {
 
       ctx.effect(() => () => {
         for (const d of disposers) { try { d(); } catch { /* 同上 */ } }
+        // 停模块宿主：轮询定时器与已启模块的 stop()。失败吞掉，不能拖垮卸载。
+        stopModuleHost();
       });
 
-      // ③ 走到这里才是真的「能用」：webServer 就绪、三条路由都注册上了。再落一枚心跳，
+      // ③ 走到这里才是真的「能用」：webServer 就绪、四条路由都注册上了。再落一枚心跳，
       //    把 stage 推到 ready。这一步本身不依赖任何服务，失败也不该影响插件工作，
       //    所以 writeHeartbeat 永远不抛。
-      writeHeartbeat('ready', { routes: ROUTE_PATHS, client: clientSeen });
+      writeHeartbeat('ready', readyExtra());
+
+      // ④ 模块宿主：与 CLI `modules` 同一份加载器。异步启动，失败只写进心跳的 modules 字段。
+      bootModuleHost();
     });
   },
 };

@@ -103,12 +103,33 @@ node vendor/whale/install.mjs --yes    # 需要先完全退出 Harness
       `test/precheck.test.mjs`（27 条，不 boot Electron，靠显式路径与合成输入）；顺带修掉三个真问题
       （空 dump 也算通过 / 失败的跑把上一条基线冲成空文件 / diff 按集合算行差异而真实 dump 里
       7 个条目有重复行、条目顺序变化完全不算 diff），见下方记录。
+- [x] **模块化热加载框架** —— 2026-10-30 完成：`src/modules.mjs` + `up-t.config.yml` + `modules/memory`
+      + `dsht modules` + 插件侧宿主 + `up-t-memory` skill；回合后摘录未做，见下方记录。
 
 ## 验收
 
 在干净机器上：`doctor` → 应用补丁 → 落盘 → 复验，全程无需人工记忆任何步骤。
 
 ## 记录
+
+### 2026-10-30 · 模块化热加载框架已立（摘录未做）
+
+**为什么**
+长期新能力若继续塞进 `cordis.patch.yml` / 新 L1 bundle，每次都要重启 Harness；
+组合层没有 watcher（见 `docs/01-environment.md`）。需要一层「已经挂上的插件里自己发现模块」的宿主，
+配置短、模块失败隔离、改入口可热加载。
+
+**做成了什么**
+- `src/modules.mjs` + 项目根 `up-t.config.yml`：解析、加载 `modules/<name>/module.mjs`、mtime 轮询热重载
+- `node src/cli.mjs modules`（`--watch` / `--json`）：普通 Node 热启动，不 boot Electron
+- `plugins/dsh-up-t` 在 `webServer` 就绪后拉起同一份宿主，心跳带 `modules` 字段
+- 空壳 `modules/memory`：确保 `memory/project/topics/` 与 `$DSH_HOME/up-t/memory/`
+- skill `.dsh/skills/up-t-memory`（对齐 Grok Build 笔记契约）+ 用户级 / 工作区级 junction
+- `docs/07-modules.md`、`test/modules.test.mjs`
+
+**怎么验的**：`node test/run.mjs modules`；`node src/cli.mjs modules` 打印 `memory: started`。
+
+**还没验的 / 未做**：回合后自动摘录、`/dream` 归并、记忆浏览界面；不拆胶囊/设置页为模块；不动灵枢。
 
 ### 2026-10-06 · 打通「权威组合预检」（M1 第一件）
 

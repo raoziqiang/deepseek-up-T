@@ -1,0 +1,7 @@
+# deepseek-up-T 模块宿主配置（见 docs/07-modules.md）
+# 未列出的模块不加载。未知顶层键会直接失败。
+
+modules:
+  memory: true
+
+memory: {}

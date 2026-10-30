@@ -132,6 +132,33 @@ check('两条 junction 都指向同一个真实目录（随仓库版本化的那
   }
 });
 
+check('up-t-memory skill 同样有项目真源 + 两条 junction', () => {
+  const name = 'up-t-memory';
+  const bundle = path.join(PROJECT, '.dsh', 'skills', name);
+  const skillMd = path.join(bundle, 'SKILL.md');
+  assert.ok(fs.existsSync(skillMd), `缺少 ${skillMd}`);
+  const src = fs.readFileSync(skillMd, 'utf8');
+  assert.ok(src.startsWith('---'), 'up-t-memory 必须以 frontmatter 开头');
+  const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(src);
+  assert.ok(m, 'up-t-memory frontmatter 解析失败');
+  const fields = {};
+  for (const line of m[1].split(/\r?\n/)) {
+    if (!line.trim() || line.trimStart().startsWith('#')) continue;
+    const kv = /^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$/.exec(line);
+    if (kv) fields[kv[1]] = kv[2].trim();
+  }
+  assert.equal(fields.name, name);
+  assert.ok(fields.description && fields.description.length >= 20);
+  const real = fs.realpathSync(bundle);
+  for (const link of [
+    path.join(DSH_HOME, 'skills', name),
+    path.join(WORKSPACE, '.dsh', 'skills', name),
+  ]) {
+    assert.ok(fs.existsSync(link), `缺少 skill 链接 ${link}`);
+    assert.equal(fs.realpathSync(link), real, `${link} 未指向仓库真源`);
+  }
+});
+
 check('正文提到的关键命令都还在（防止文档与 CLI 漂移）', () => {
   for (const cmd of ['doctor', 'snapshot create', 'precheck', 'baseline write', 'upgrade']) {
     assert.ok(fm.body.includes(cmd), `正文没提到 \`${cmd}\`——CLI 改了而 skill 没跟上`);

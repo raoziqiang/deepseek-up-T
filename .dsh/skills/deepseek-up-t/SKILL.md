@@ -57,6 +57,7 @@ DSH 的组合，报告退出码、问题数与逐条 diff。**差异行数要恰
 | `node src/cli.mjs baseline write` | 收尾：固化基线 |
 | `node src/cli.mjs upgrade [--no-hash]` | 升级检测 + 重打计划（`--json` 可机读） |
 | `node src/cli.mjs upgrade --stage` | 检测 + **真的构建**到 `state/staged/app.asar`（只写 `state/`，Harness 开着也能跑）；素材过期时先不构建 |
+| `node src/cli.mjs modules` | 热启动 `up-t.config.yml` 已启用的模块（普通 Node，不 boot Electron；`--watch` 轮询热加载） |
 | `node test/run.mjs` | 跑全部 `test/*.test.mjs`（发现式）。改完任何 `src/`、`plugins/` 之前之后都该跑 |
 | `node src/cli.mjs asar ls\|cat\|grep` | 只读地读安装包里**真正在跑的那份代码** |
 | `node vendor/whale/build.mjs` | 按 `patches/*.yml` 构建暂存包（**不碰安装目录**） |
@@ -91,6 +92,8 @@ DSH 的组合，报告退出码、问题数与逐条 diff。**差异行数要恰
 - `docs/03-workflow.md` — 六步环、YAML 模板、反模式
 - `docs/04-roadmap.md` — 五条线与里程碑、验收标准
 - `docs/05-conventions.md` — 红线、选层决策树、提交信息格式
+- `docs/07-modules.md` — 模块宿主契约、热加载、与 cordis 的边界
+- `.dsh/skills/up-t-memory/SKILL.md` — 跨会话项目笔记（对齐 Grok Build；与灵枢并存）
 - `tracks/T1..T5/README.md` — 每条线的现状、抓手、待办、**记录**（做过的事都记在这）
 - `patches/*.yml` — L3/L0 改动的声明
 - `vendor/README.md` — 归拢进来的工具清单与各自风险

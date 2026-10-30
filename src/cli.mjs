@@ -9,6 +9,7 @@
 //   node src/cli.mjs snapshot restore <id> --yes
 //   node src/cli.mjs snapshot prune     快照保留策略（预演；--yes 才删）
 //   node src/cli.mjs baseline write     固化基线
+//   node src/cli.mjs modules            热启动已启用模块（不 boot Electron）
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -28,6 +29,7 @@ import {
 import { runPrecheck, PROBE_PROFILE } from './precheck.mjs';
 import { runUpgradeCheck, reapplyPlan } from './upgrade.mjs';
 import { runAccept, printAccept } from './accept.mjs';
+import { createModuleHost, runModulesOnce } from './modules.mjs';
 
 const TAG = { error: 'FAIL', warn: 'WARN', info: 'INFO', ok: 'OK  ' };
 
@@ -714,6 +716,53 @@ async function cmdAccept({ flags, opts }) {
   return r.ok ? 0 : 1;
 }
 
+// ─────────────────────────── modules ────────────────────────────
+//
+// 在普通 Node 里热启动已启用模块。不 boot Electron（skill 红线：别为了看效果去启动 DSH）。
+// --watch：mtime 轮询，改配置或 module.mjs 只重启对应模块；Ctrl+C 停。
+
+async function cmdModules({ flags }) {
+  if (flags.has('--watch')) {
+    const host = createModuleHost({
+      projectRoot: PROJECT_ROOT,
+      onStatus: (status) => {
+        if (flags.has('--json')) {
+          process.stdout.write(`${JSON.stringify(status, null, 2)}\n`);
+          return;
+        }
+        const names = Object.keys(status.modules ?? {}).sort();
+        for (const name of names) {
+          const m = status.modules[name];
+          if (m.status === 'started') console.log(`${name}: started`);
+          else if (m.status === 'failed') console.log(`${name}: failed — ${m.error}`);
+          else console.log(`${name}: ${m.status}`);
+        }
+        if (status.error) console.log(`host: ${status.error}`);
+        if (!names.length && !status.error) console.log('(no modules enabled)');
+        console.log('— watching —');
+      },
+    });
+    await host.start();
+    await new Promise((resolve) => {
+      const stop = async () => {
+        try { await host.stop(); } catch { /* 退出时尽量干净 */ }
+        resolve();
+      };
+      process.once('SIGINT', stop);
+      process.once('SIGTERM', stop);
+    });
+    return 0;
+  }
+
+  const r = await runModulesOnce({ projectRoot: PROJECT_ROOT });
+  if (flags.has('--json')) {
+    process.stdout.write(`${JSON.stringify(r.status, null, 2)}\n`);
+  } else {
+    for (const line of r.lines) console.log(line);
+  }
+  return r.code;
+}
+
 // ───────────────────────────── help ─────────────────────────────
 
 function usage() {
@@ -738,9 +787,11 @@ function usage() {
   asar grep <正则>        在安装包内容里检索（只扫文本类条目）
   accept                  重启后验收：L3/L0 声明、宿主路由、渲染层握手一次问完
                           （只读；观感类项标 MANUAL 且不计入退出码）
+  modules                 热启动已启用模块（普通 Node，不 boot Electron；--watch 轮询热加载）
 
 选项
   --json                  机器可读输出
+  --watch                 modules：mtime 轮询，改配置/入口只重启对应模块
   --url <地址>            accept：探针地址（默认 $DSH_WEB_URL 或 http://127.0.0.1:19387）
   --no-hash               doctor / upgrade：跳过 121MB 安装包的 sha256（更快；upgrade 会退回按大小比较）
   --stage                 upgrade：把需要重打的声明真的构建到 state/staged/app.asar
@@ -779,6 +830,7 @@ async function main() {
     case 'precheck': case 'pre': return cmdPrecheck(parsed);
     case 'asar': return cmdAsar(parsed);
     case 'accept': return cmdAccept(parsed);
+    case 'modules': case 'mod': return cmdModules(parsed);
     case 'help': case '--help': case '-h': usage(); return 0;
     default:
       console.error(`未知命令：${cmd}\n`);
