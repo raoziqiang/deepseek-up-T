@@ -383,8 +383,8 @@ export async function runUpgradeCheck({ hash = true } = {}) {
 /** 需要落盘的补丁该跑什么（升级后的重打，与「从未落盘」的首装是同一条命令）。 */
 export function reapplyPlan(ids) {
   const lines = [
-    'node vendor/whale/build.mjs                 # 重新构建到 state/staged/app.asar',
-    'node vendor/whale/install.mjs --yes         # 完全退出 Harness 后落盘',
+    '# L3 构建/落盘链已移除（启动动画待重构），见 tracks/T1-appearance/README.md',
+    '# 通用 asar 读写仍在 vendor/asar/',
     'node src/cli.mjs baseline write             # 把新基线固化下来',
   ];
   if (ids?.length) lines.unshift(`# 涉及声明：${ids.join(', ')}`);

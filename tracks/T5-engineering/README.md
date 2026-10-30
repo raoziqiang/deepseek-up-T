@@ -112,6 +112,12 @@ node vendor/whale/install.mjs --yes    # 需要先完全退出 Harness
 
 ## 记录
 
+### 2026-10-30 · 删除启动动画相关内容（待重构）
+
+从仓库移除 L1 `dsh-whale-splash`、L3 `T1-whale-splash.yml`、`vendor/whale/`、`vendor/visual/`、
+`install-whale.cmd` 及 splash/install/assets 单测与取证产物。`upgrade --stage` / `doctor` / `accept`
+改为在无 L3 构建器时诚实降级。本机已落盘的 `app.asar` 不自动回滚。详见 `tracks/T1-appearance/README.md`。
+
 ### 2026-10-30 · 模块化热加载框架已立（摘录未做）
 
 **为什么**

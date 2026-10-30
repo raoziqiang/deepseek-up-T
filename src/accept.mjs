@@ -89,16 +89,12 @@ export async function runAccept({ hash = true, url = process.env.DSH_WEB_URL || 
   const items = [];
 
   // ── L3：安装包层 ──────────────────────────────────────────────
-  items.push(declItem(r, {
-    file: 'T1-whale-splash.yml', name: 'T1 鲸鱼启动动画已落盘', layer: 'L3',
-    fixMissing: '完全退出 Harness，然后双击 deepseek-up-T\\install-whale.cmd（它自带「Harness 还在跑」守卫）。',
-  }));
+  // 启动动画声明与构建链已删除待重构；这里只保留「安装包是否还被动过」的事实项。
 
   // 「安装包被动过没有」是所有 L3 改动的前提：它没变，下面任何 L3 项都不可能生效。
   if (r.pristine === true) {
-    items.push(item('asar-modified', 'app.asar 已被改造', 'fail',
-      `app.asar 仍是未改造的原版（与 app.asar.whale-backup 逐字节相同）`,
-      '任何 L3 改动都没生效。先在 Harness 完全退出后运行 install-whale.cmd，再重启。'));
+    items.push(item('asar-modified', 'app.asar 已被改造', 'pass',
+      `app.asar 与原版备份逐字节相同（当前仓库无 L3 声明待验收）`));
   } else if (r.pristine === false) {
     // 「原版备份」这一栏必须引用备份自己的字节数。落盘后 `baseline write` 会把基线刷成
     // 改造后的状态，基线里的 asarBytes 就成了「改造后的包」—— 拿它标「原版」会把
@@ -124,7 +120,7 @@ export async function runAccept({ hash = true, url = process.env.DSH_WEB_URL || 
   if (sf.status === 'pending') {
     items.push(item('staged-fresh', '这次验收的是最新构建', 'fail',
       `暂存包比在用安装包新（大 ${sf.deltaBytes} 字节）：上面那些项判的是「声明有没有落」，判不了「落的是不是最新的一份」`,
-      '完全退出 Harness（托盘 → Quit）→ node vendor/whale/install.mjs --yes（或双击 install-whale.cmd）→ 重启。落盘会把暂存包移走，这一项就不再出现。'));
+      '完全退出 Harness 后按新的 L3 工具链落盘（启动动画链已移除，见 tracks/T1-appearance/README.md）。落盘会把暂存包移走，这一项就不再出现。'));
   } else if (sf.status === 'behind') {
     items.push(item('staged-fresh', '这次验收的是最新构建', 'pass',
       '暂存包比在用的旧 ⇒ 没有「构建了但没落盘」的东西（但那份旧暂存包别拿去落盘，先重新构建）'));

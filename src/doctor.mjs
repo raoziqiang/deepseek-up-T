@@ -247,13 +247,13 @@ export async function runDoctor({ hash = true } = {}) {
   const staged = stagedFacts(P);
   if (!exists(P.stagedFile)) {
     add('安装包', '暂存包', 'info', true, '还没构建过（state/staged/app.asar 不存在）',
-      '改完声明后 `node vendor/whale/build.mjs`，或 `dsht upgrade --stage`。');
+      'L3 构建链待重构（tracks/T1-appearance）；通用 asar 工具在 vendor/asar/。');
   } else if (staged.status === 'pending') {
     add('安装包', '暂存包', 'info', true, stagedLine(staged),
-      '落盘要先把 Harness 完全退出（托盘 → Quit）：node vendor/whale/install.mjs --yes');
+      '落盘要先把 Harness 完全退出（托盘 → Quit）；L3 落盘工具待重构。');
   } else if (staged.status === 'behind') {
     add('安装包', '暂存包', 'warn', false, stagedLine(staged),
-      '先重新构建（node vendor/whale/build.mjs）再落盘 —— 拿旧产物落盘会把后来的修复冲掉。');
+      '先按新的 L3 工具链重新构建再落盘 —— 拿旧产物落盘会把后来的修复冲掉。');
   } else {
     // same-size / differs / unavailable 都是「说不了更多」的状态，照实说，不许升级成结论。
     add('安装包', '暂存包', 'info', true, stagedLine(staged), null);

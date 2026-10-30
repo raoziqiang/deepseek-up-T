@@ -208,9 +208,7 @@ console.log('── 真现场的 L0 声明 ──');
     check(`${f} 判为 pass（声明与现场一致）`, it?.status === 'pass', it?.status);
   }
   const t1 = declOf(r, 'T1-whale-splash.yml');
-  check('T1 声明存在（状态取决于有没有落盘，但必须找得到）', Boolean(t1), t1?.detail);
-  check('T1 的文件名与 cordis 行 id 不同这件事被正确处理（不是靠 id 找文件）',
-    Boolean(t1) && !/找不到声明文件/.test(t1.detail ?? ''));
+  check('T1 启动动画声明已删除（验收清单里不应再出现）', !t1);
   const pa = declOf(r, 'T2-product-analytics-off.yml');
   check('L0 项的 detail 里带上真正的 cordis id，便于对账', /product-analytics/.test(pa?.detail ?? ''), pa?.detail);
 }
@@ -229,7 +227,7 @@ console.log('── 待落盘的暂存包（验收的是不是最新构建）─
   check('有更新未落盘 → FAIL（不许显示成绿）', p?.status === 'fail', p?.detail);
   check('detail 说清「上面那些项判不了这个」', /判不了/.test(p?.detail ?? ''), p?.detail);
   check('detail 带出差值字节数', /692/.test(p?.detail ?? ''), p?.detail);
-  check('修法是落盘三步（托盘退出 → install.mjs → 重启）', /托盘/.test(p?.fix ?? '') && /install\.mjs --yes/.test(p?.fix ?? ''), p?.fix);
+  check('修法指向退出 Harness 后落盘（L3 链待重构）', /完全退出 Harness/.test(p?.fix ?? '') && /T1-appearance/.test(p?.fix ?? ''), p?.fix);
   check('整份验收因此是失败的', pend.ok === false);
 
   const behind = await runAccept({ hash: false, url: 'http://127.0.0.1:1', timeoutMs: 800,

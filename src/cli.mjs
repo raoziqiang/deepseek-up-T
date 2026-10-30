@@ -503,15 +503,15 @@ const L0_LABEL = {
 
 // ── upgrade --stage：把「重打」这一步真的做掉（但不落盘）──
 //
-// 铁律是「写安装包必须由人挑时间」，构建不在这条铁律里：vendor/whale/build.mjs
-// 只读安装目录、只写 state/staged/，所以 Harness 开着也能跑。把构建自动化之后，
-// 升级后剩下的人工动作就只有「退出 → install --yes → 回来写基线」。
+// 铁律是「写安装包必须由人挑时间」，构建不在这条铁律里：L3 构建器只读安装目录、
+// 只写 state/staged/，所以 Harness 开着也能跑。
+//
+// 2026-10-30：启动动画的 vendor/whale 构建链已删除待重构。若磁盘上还有旧的
+// vendor/whale/build.mjs 就继续调用；否则诚实报告「构建器不在」。
 //
 // 两个刻意的决定：
-//   ① 素材过期时**直接不构建**。构建器自己也会拦（那是最后一道），但跑到一半才
-//      失败不如现在就说清楚：`action: patch` 的 source 必须与升级后归档逐字节相同。
-//   ② --json 下必须把子进程输出**捕获**而不是继承 —— 否则构建自己的 stdout 会插进
-//      我们正在写的 JSON 文档里，把机器可读输出弄坏（这类坏法很难看出来）。
+//   ① 素材过期时**直接不构建**。
+//   ② --json 下必须把子进程输出**捕获**而不是继承。
 function runStageBuild(r, ids, quiet) {
   if (!ids.length) {
     return { attempted: false, ok: true, ids: [], reason: '没有需要重打的声明' };
@@ -525,6 +525,14 @@ function runStageBuild(r, ids, quiet) {
     };
   }
   const build = path.join(PROJECT_ROOT, 'vendor', 'whale', 'build.mjs');
+  if (!fs.existsSync(build)) {
+    return {
+      attempted: false,
+      ok: false,
+      ids,
+      reason: 'L3 构建器已移除（启动动画待重构）；见 tracks/T1-appearance/README.md',
+    };
+  }
   const t0 = Date.now();
   const run = spawnSync(process.execPath, [build], {
     cwd: PROJECT_ROOT,
@@ -645,10 +653,10 @@ async function cmdUpgrade({ flags }) {
     console.log(`\n暂存产物：${s.why}${size}`);
     console.log(`  ${s.file}`);
     if (s.status === 'pending') {
-      console.log('  它还没进安装目录 —— 落盘要先把 Harness 完全退出（托盘 → Quit）：');
-      console.log('    node vendor/whale/install.mjs --yes');
+      console.log('  它还没进安装目录 —— 落盘要先把 Harness 完全退出（托盘 → Quit）。');
+      console.log('  （L3 落盘工具待重构；见 tracks/T1-appearance/README.md）');
     } else {
-      console.log('  别拿它落盘：先 node vendor/whale/build.mjs 重新构建。');
+      console.log('  别拿旧暂存包落盘：先按新的 L3 工具链重新构建。');
     }
   }
 
@@ -658,7 +666,7 @@ async function cmdUpgrade({ flags }) {
   if (r.neverApplied?.length) {
     console.log(`\n尚未落盘（不是被升级覆盖，而是从来没做过）（${r.neverApplied.length}）：${r.neverApplied.join(', ')}`);
     console.log('  安装包没变，所以这些不是「重打」，是「可以开始做」：');
-    console.log('  node vendor/whale/build.mjs 然后 node vendor/whale/install.mjs --yes（需先完全退出 Harness）。');
+    console.log('  L3 构建/落盘链已移除待重构（tracks/T1-appearance/README.md）。');
   }
   if (r.stale.length) {
     console.log(`\n重打前必须先修素材（${r.stale.length} 条声明）：`);
@@ -680,7 +688,7 @@ async function cmdUpgrade({ flags }) {
       console.log(`  ${TAG.ok} 已构建到 state/staged/app.asar（${(stage.ms / 1000).toFixed(1)}s），差异集合按声明核对通过`);
       console.log(`  涉及声明：${stage.ids.join(', ')}`);
       console.log('  构建只写了 state/staged/，没碰安装目录 —— 落盘仍然由你挑时间：');
-      console.log('    1) 完全退出 Harness    node vendor/whale/install.mjs --yes');
+      console.log('    1) 完全退出 Harness    （L3 落盘工具待重构）');
       console.log('    2) 回到命令行          node src/cli.mjs baseline write');
       console.log('       （基线必须在落盘之后写：提前写会把「还没装上的状态」固化成基线）');
     } else {

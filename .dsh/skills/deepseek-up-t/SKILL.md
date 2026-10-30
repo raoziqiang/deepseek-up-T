@@ -1,7 +1,7 @@
 ---
 name: deepseek-up-t
 description: 改造 DSH 本身（不是用 DSH 做事）时的作业规范：四层改造面怎么选、六步环怎么走、`dsht` 各命令什么时候用、哪些红线不能碰。做 DSH 的外观/插件/配置/安装包相关任务前先读这份。
-whenToUse: 任务涉及 DSH 自身的界面、插件、profile 配置、启动动画、安装包 `app.asar`，或就在 `D:\Z1848\harness-ds\deepseek-up-T` 里干活时。
+whenToUse: 任务涉及 DSH 自身的界面、插件、profile 配置、安装包 `app.asar`，或就在 `D:\Z1848\harness-ds\deepseek-up-T` 里干活时。
 ---
 
 # deepseek-up-T 作业规范
@@ -60,9 +60,9 @@ DSH 的组合，报告退出码、问题数与逐条 diff。**差异行数要恰
 | `node src/cli.mjs modules` | 热启动 `up-t.config.yml` 已启用的模块（普通 Node，不 boot Electron；`--watch` 轮询热加载） |
 | `node test/run.mjs` | 跑全部 `test/*.test.mjs`（发现式）。改完任何 `src/`、`plugins/` 之前之后都该跑 |
 | `node src/cli.mjs asar ls\|cat\|grep` | 只读地读安装包里**真正在跑的那份代码** |
-| `node vendor/whale/build.mjs` | 按 `patches/*.yml` 构建暂存包（**不碰安装目录**） |
-| `node vendor/whale/install.mjs --yes` | **唯一**会覆盖在用 `app.asar` 的操作。须先完全退出 Harness |
 | `node test/*.test.mjs` | 离线单测（升级检测、插件、假宿主） |
+
+启动动画的 L3 构建/落盘链已删除待重构，见 `tracks/T1-appearance/README.md`。
 
 ## 红线
 

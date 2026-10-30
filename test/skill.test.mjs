@@ -116,23 +116,18 @@ check('发现深度只有一层：skills 根下不存在嵌套的 SKILL.md', () 
   }
 });
 
-check('两条 junction 都指向同一个真实目录（随仓库版本化的那一份）', () => {
-  const links = [
-    path.join(DSH_HOME, 'skills', SKILL_NAME),
-    path.join(WORKSPACE, '.dsh', 'skills', SKILL_NAME),
-  ];
+check('工作区 junction 指向仓库真源（用户级 junction 可在卸载后缺席）', () => {
+  const link = path.join(WORKSPACE, '.dsh', 'skills', SKILL_NAME);
   const real = fs.realpathSync(BUNDLE);
-  for (const link of links) {
-    assert.ok(fs.existsSync(link), `缺少 skill 链接 ${link}`);
-    assert.equal(
-      fs.realpathSync(link),
-      real,
-      `${link} 没有解析到仓库里的 bundle，而 skill 就会读到别处的陈旧副本`,
-    );
+  assert.ok(fs.existsSync(link), `缺少 skill 链接 ${link}`);
+  assert.equal(fs.realpathSync(link), real, `${link} 没有解析到仓库里的 bundle`);
+  const user = path.join(DSH_HOME, 'skills', SKILL_NAME);
+  if (fs.existsSync(user)) {
+    assert.equal(fs.realpathSync(user), real, `${user} 存在时必须指向同一真源`);
   }
 });
 
-check('up-t-memory skill 同样有项目真源 + 两条 junction', () => {
+check('up-t-memory skill 有项目真源；工作区 junction 指向它', () => {
   const name = 'up-t-memory';
   const bundle = path.join(PROJECT, '.dsh', 'skills', name);
   const skillMd = path.join(bundle, 'SKILL.md');
@@ -150,13 +145,9 @@ check('up-t-memory skill 同样有项目真源 + 两条 junction', () => {
   assert.equal(fields.name, name);
   assert.ok(fields.description && fields.description.length >= 20);
   const real = fs.realpathSync(bundle);
-  for (const link of [
-    path.join(DSH_HOME, 'skills', name),
-    path.join(WORKSPACE, '.dsh', 'skills', name),
-  ]) {
-    assert.ok(fs.existsSync(link), `缺少 skill 链接 ${link}`);
-    assert.equal(fs.realpathSync(link), real, `${link} 未指向仓库真源`);
-  }
+  const ws = path.join(WORKSPACE, '.dsh', 'skills', name);
+  assert.ok(fs.existsSync(ws), `缺少 skill 链接 ${ws}`);
+  assert.equal(fs.realpathSync(ws), real, `${ws} 未指向仓库真源`);
 });
 
 check('正文提到的关键命令都还在（防止文档与 CLI 漂移）', () => {

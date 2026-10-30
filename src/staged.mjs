@@ -89,7 +89,7 @@ export function stagedFacts(paths) {
 
   const st = statOrNull(out.file);
   if (!st) {
-    out.why = '还没构建过暂存包（state/staged/app.asar 不存在）—— `node vendor/whale/build.mjs` 或 `dsht upgrade --stage` 会写它';
+    out.why = '还没构建过暂存包（state/staged/app.asar 不存在）—— L3 构建链待重构（tracks/T1-appearance）';
     return out;
   }
   out.bytes = evidenceOrNull(st.size);
