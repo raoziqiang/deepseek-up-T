@@ -1,5 +1,8 @@
 # dsh-whale-splash
 
+> **2026-11-02 已停用**：和欢迎窗口的启动动画叠着播，用户决定只留欢迎窗口那一套（见 `tracks/T1-appearance/README.md`）。
+> 请按文末「卸载」从 profile 里移除；目录暂留，确认真机已卸载后再删（junction 还指着这里，先删目录会让 Harness 找不到这个 bundle）。
+
 主窗口启动动画（L1 插件，升级 Harness 不会覆盖）：
 
 1. 启动瞬间铺一层星空幕布；用户指定的原版星光鲸鱼（`assets/whale.png` = `vendor/whale/materials/whale-3d.png`，

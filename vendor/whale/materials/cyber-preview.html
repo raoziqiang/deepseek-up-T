@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cyber splash · 预览</title>
+<style>
+html,body{width:100%;height:100%;margin:0;overflow:hidden;font-family:"Segoe UI","Microsoft YaHei UI",sans-serif}
+/* 假欢迎界面：动画收起后应当露出它 */
+#root{position:fixed;inset:0;display:grid;place-items:center;background:#f4f6fb;color:#1d2433}
+#root .card{width:min(320px,80vw);padding:28px;border-radius:14px;background:#fff;box-shadow:0 10px 40px rgba(20,30,60,.12);text-align:center}
+#root .card b{display:block;font-size:20px;margin-bottom:12px}
+#root .card span{display:block;height:36px;border-radius:8px;background:#e8ecf5;margin-top:10px}
+#whale-stage{position:fixed;inset:0;width:100%;height:100%;z-index:2;cursor:pointer;transition:opacity 240ms ease-out}
+#whale-stage.is-done{opacity:0;pointer-events:none}
+#replay{position:fixed;right:12px;bottom:12px;z-index:3;font:12px monospace;padding:6px 10px}
+</style>
+</head>
+<body>
+<div id="root"><div class="card"><b>DeepSeek Harness</b><span></span><span></span></div></div>
+<canvas id="whale-stage" aria-hidden="true"></canvas>
+<button id="replay">重播</button>
+<script src="./cyber-splash.js"></script>
+<script>
+// ?t=毫秒 → 定格在那一帧（抓帧用）；不带 → 实时播放，点画面或按键跳到收尾。
+const params = new URLSearchParams(location.search)
+let canvas = document.getElementById('whale-stage')
+let splash = null
+function play() {
+  splash?.stop()
+  const fresh = canvas.cloneNode(false)
+  fresh.className = ''
+  canvas.replaceWith(fresh)
+  canvas = fresh
+  splash = new CyberSplash(canvas, {
+    imageSrc: './whale-3d.png',
+    onDone: () => canvas.classList.add('is-done'),
+  })
+  window.__splash = () => splash
+  if (params.has('t')) {
+    const t = Number(params.get('t'))
+    splash.renderAt(t)
+    window.__frameReady = new Promise((r) => setTimeout(() => { splash.renderAt(t); r(true) }, 400))
+  } else {
+    splash.start()
+  }
+}
+document.getElementById('replay').addEventListener('click', play)
+play()
+</script>
+</body>

@@ -2,7 +2,35 @@
 
 > 启动、界面、常驻元素都符合自己的审美与习惯。
 
-## 最新进度 · 2026-10-12
+## 最新进度 · 2026-11-02 · 启动动画推倒重来（科幻 × 赛博朋克）
+
+**为什么**：真机上两套动画（欢迎窗口 L3 + 主窗口插件 `dsh-whale-splash`）叠着播，效果也不对味。
+用户拍板：**只留欢迎窗口那一套**，风格改成科幻 × 赛博朋克。
+
+**新动画** `vendor/whale/materials/cyber-splash.js` → 归档 `lib/welcome/cyber-splash.js`（声明 14 → 15 条目）：
+Canvas 2D、3.6 s；CRT 开机线 → 霓虹透视网格 + 合成器波日落 + 数字雨 → HUD 扫描环锁定 →
+全息鲸鱼（随包 `whale-3d.png` 着色 + RGB 分离 + 扫描线，图片加载失败退成线框核心）→
+`DEEPSEEK HARNESS` 从乱码解码出来 → 启动日志 / SYNC 进度条 → CRT 关机收成一条线、一个点，露出欢迎界面。
+点击或按任意键直接跳到收尾（约 0.5 s）。减动效：不播。
+
+- `renderer/whale-splash.js` 重写：播完淡出并把画布移出 DOM；**欢迎窗口里不再留可拖动小鲸鱼**（鲸鱼只在桌面挂件里常驻）。
+- `renderer/replay.js`（挂件菜单「Replay animation」）改用同一份动画，播完关窗；不可交互所以不接受跳过。
+- `whale-animation.js` 仍随包：桌面挂件 `pendant.html` 靠它的 `drawWhale`。
+- 预览：`node vendor/visual/serve-dir.mjs vendor/whale/materials 8129` → `http://127.0.0.1:8129/cyber-preview.html`
+  （`?t=毫秒` 定格某一帧）。
+- `test/splash.test.mjs` 整份重写（23 条，测仓库源文件；有暂存包时再核「暂存包里就是这一份」）。
+
+**怎么验的（云端 Linux，无 Harness）**：单测 23/23（删掉「移除画布」那行能抓到 4 条失败）；
+真 Chromium 在 900×600 / 480×620 / 1600×900 抓帧看过布局，实时播放 3.6 s 自己收场、点击跳过约 0.54 s、
+控制台零报错，无 GPU 的无头环境下 48–61 fps。
+
+**还没做（要在 Windows 真机上）**：
+1. 卸载主窗口插件 `dsh-whale-splash`（步骤见 `plugins/dsh-whale-splash/README.md` 末尾「卸载」）——
+   注意左下角的鲸鱼娘也是它画的，会一起消失。
+2. 构建 → 退出 Harness → 落盘 → 重启验收：
+   `node vendor/whale/build.mjs`，然后双击 `install-whale.cmd`，重启后 `node src/cli.mjs accept`。
+
+## 进度 · 2026-10-12
 
 ### 主窗口启动动画插件 `plugins/dsh-whale-splash`（L1，待安装）
 
