@@ -94,6 +94,9 @@ let lastHeartbeatResult = null;
  * 宿主异步启动，所以第一枚 ready 可能还是 null；后续 onStatus 会刷新。
  */
 let lastModulesStatus = null;
+/** 模块日志只留最近几条进心跳：够回答「模块启动时说了什么」，又不让心跳无限长。 */
+const MODULE_LOG_KEEP = 20;
+let moduleLogTail = [];
 /** 正在跑的模块宿主（有 stop）。插件卸载时要停掉轮询，否则会在已退出的进程里空转。 */
 let moduleHostHandle = null;
 /** 递增以作废还在飞的 boot Promise，避免卸载后又被迟到的 then 重新拉起宿主。 */
@@ -186,6 +189,7 @@ function readyExtra(extra = {}) {
     routes: ROUTE_PATHS,
     client: clientSeen,
     modules: lastModulesStatus,
+    modulesLog: moduleLogTail,
     ...extra,
   };
 }
@@ -202,6 +206,7 @@ function bootModuleHost() {
     return;
   }
   const gen = ++moduleBootGen;
+  moduleLogTail = []; // 新一轮宿主：上一轮的日志不再代表现场
   const modulesUrl = pathToFileURL(path.join(projectRoot, 'src', 'modules.mjs')).href;
   Promise.resolve()
     .then(() => import(modulesUrl))
@@ -218,6 +223,11 @@ function bootModuleHost() {
           if (gen !== moduleBootGen) return;
           lastModulesStatus = status;
           writeHeartbeat('ready', readyExtra());
+        },
+        // 不重写心跳：日志总是先于某次 onStatus 到达，那一次会把它一起带出去。
+        onLog: (entry) => {
+          if (gen !== moduleBootGen) return;
+          moduleLogTail = [...moduleLogTail, entry].slice(-MODULE_LOG_KEEP);
         },
       });
       moduleHostHandle = host;

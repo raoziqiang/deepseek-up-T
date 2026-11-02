@@ -41,6 +41,7 @@ node src/cli.mjs precheck                      # 改完 cordis.patch.yml 后、�
 node src/cli.mjs baseline write                # 把当前事实固化为基线
 node src/cli.mjs upgrade                       # Harness 升级后：哪些 L3 改动要重打、素材过期没
 node src/cli.mjs upgrade --stage               # 顺手把重打构建做掉（只写 state/staged/，不落盘）
+node src/cli.mjs memory lint                   # 项目笔记按 up-t-memory 契约检查（疑似凭据 = error）
 ```
 
 `doctor` 退出码：`0` = 无错误（警告不算），`1` = 存在 error 级问题。可直接接进任何 CI / 钩子。
@@ -65,6 +66,7 @@ deepseek-up-T/
 │   ├── patchdecl.mjs       patches/*.yml 声明解析（src 与 vendor 共用同一份）
 │   ├── upgrade.mjs         升级检测：L3 重打 / L0 漂移 / 素材过期
 │   ├── modules.mjs         模块宿主：up-t.config.yml + 热加载
+│   ├── memory.mjs          项目笔记只读浏览 + 契约检查（memory ls|show|lint）
 │   ├── doctor.mjs          体检
 │   ├── snapshot.mjs        快照 / 回滚
 │   └── cli.mjs             命令入口
