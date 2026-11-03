@@ -32,6 +32,15 @@
       }).catch(function () {});
     } catch (e) { /* 握手失败不该影响挂件 */ }
 
+    // 余额悬浮窗是另一段脚本（assets/balance.js），由这里带起来：注入行在启动时只收集一次，
+    // 不改它就能加新面板。加载失败只是没有余额窗，不影响胶囊。胶囊被隐藏也照样加载。
+    try {
+      var bs = document.createElement('script');
+      bs.src = '/dsh-up-t/balance.js';
+      bs.onerror = function () {};
+      (document.body || document.head || document.documentElement).appendChild(bs);
+    } catch (e) { /* 忽略 */ }
+
     var hideTimer = null;
 
     function el(tag, style, text) {

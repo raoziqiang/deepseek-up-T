@@ -402,3 +402,23 @@ node src\cli.mjs precheck    # 组合可用
 会被最外层 catch 吞掉 —— 那时事件监听与定时刷新**都还没注册**，表现是「胶囊在，但点不动、状态永不刷新」，
 且没有任何报错。现在这句话有 `try`，而「存储整个被禁时胶囊仍然可用」是其中一条断言。
 
+
+
+## DeepSeek 余额悬浮窗（2026-11-03）
+
+只认 **DeepSeek 官方 API**：`GET https://api.deepseek.com/user/balance`（Bearer 鉴权）。
+
+- **样子**：科幻 × 赛博朋克，与启动动画同一套配色。大字金额，下面是赠送 / 充值，底部是更新时间与偏低阈值。
+- **状态**：正常是青色；余额 ≤ 阈值变成琥珀色并呼吸闪烁；接口说余额不足（`is_available: false`）变成红色；
+  没有密钥、离线时变灰，并写明原因。
+- **操作**：整块拖到任意位置（位置会记住，窗口缩放时自动收回可见区）；方向键也能挪，按住 Shift 一次挪得更远；
+  「⟳」或双击刷新；「–」收成小胶囊，再点一下展开；右键隐藏（控制台会打印恢复办法）。
+- **密钥**（只在宿主进程里读，渲染层永远拿不到）：先读环境变量 `DEEPSEEK_API_KEY`；
+  没有就读 `$DSH_HOME/.credentials.yaml` 的 `refs:` 段里的 `DEEPSEEK_API_KEY:` 那一行。
+- **阈值**：环境变量 `DSH_UP_T_BALANCE_LOW`（默认 CNY 10 / USD 1.5）。
+- **频率**：宿主缓存 5 分钟，出错后缓存 1 分钟；手动刷新至少隔 10 秒才真的重新请求；同一时刻只有一个请求在飞。
+
+文件：`lib/balance.js`（宿主：密钥、请求、缓存）、`assets/balance.js`（悬浮窗）。
+新增两条路由：`/dsh-up-t/balance.json` 与 `/dsh-up-t/balance.js`。悬浮窗由 `assets/client.js` 带起，
+所以**注入行不变、profile 不用动**；但宿主侧多了路由，要**重启 Harness 一次**才会出现。之后改悬浮窗样子只需硬刷新。
+测试：`node test/balance.test.mjs`（17 条）。
