@@ -222,6 +222,8 @@ const setCharmEnabled = async (enabled) => {
 /** The replay window matches the active window (or full display work area) to seamlessly fill the view. */
 /** Safety net only: the replay page closes its own window when it is done. */
 const REPLAY_MAX_MS = 2e4;
+/** The boot splash plays once per app process (openInitialWindow can run again, e.g. after recovery). */
+let bootSplashPlayed = false;
 let charmReplayWindow;
 let charmReplayGuard;
 /** Play the startup animation once, in a short-lived non-interactive window. */
@@ -482,7 +484,12 @@ if (electronNames.has('screen')) {
   )
 }
 
-// ── 3. Start the charm at launch when it was left enabled ────────────────────
+// ── 3. At launch: play the boot splash, then restore the charm ────────────────
+// The welcome window (where the splash used to live) only opens for sign-in, so a
+// signed-in user never saw it. Play it in the replay overlay instead: before any
+// window exists the overlay covers the cursor's display, then collapses away to
+// reveal Harness. `revealCharmAfter` holds the charm back until the splash is done
+// (showCharm returns early while the reveal is deferred).
 replaceOnce(
   'startup hook',
   '\tconst openInitialWindow = async () => {\n\t\tif (quitting || recovery.active) return;',
@@ -490,6 +497,12 @@ replaceOnce(
 		if (quitting || recovery.active) return;
 		// The whale charm restores itself before any window is shown.
 		installCharmHandlers();
+		if (!bootSplashPlayed) {
+			bootSplashPlayed = true;
+			replaySplash({ revealCharmAfter: true }).catch((error) => {
+				console.error("boot splash: could not play", error);
+			});
+		}
 		if (readCharmState().enabled) showCharm().catch((error) => {
 			console.error("desktop charm: could not restore", error);
 		});`,
