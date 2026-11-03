@@ -2,13 +2,15 @@
 #
 # T1（外观与体验）的第一次 L3 改造声明。
 # 状态：2026-11-02 启动动画推倒重来 —— 星海鲸鱼换成科幻 × 赛博朋克的 cyber splash
-#   （lib/welcome/cyber-splash.js，15 条目）。仅在源码中，尚未构建、尚未落盘。
+#   （lib/welcome/cyber-splash.js）。仅在源码中，尚未构建、尚未落盘。
 #   whale-animation.js 仍随包：桌面挂件（pendant.html）靠它的 drawWhale 画鲸鱼。
+# 2026-11-03：去掉「视觉模型自动路由」（session-controller 补丁）—— 项目只做开机动画 / 余额 / 宠物，
+#   它每次升级都可能对不上锚点、拖住整个构建。patcher 文件仍在 vendor/whale/，要恢复把条目加回来（14 → 15）。
 #
 # 素材分两类（这一点决定了「一份全新 clone 能不能构建」）：
 #   · **本项目手写的素材**在 `vendor/whale/materials/`（welcome/pendant 两页、动画模块源、挂件 preload），
 #     已入库 —— 它们是手写的，丢了就重新写吧。
-#   · **`action: patch` 的原版素材**（下面三条 `../../.probe/*`）是**从原版归档抽出来的上游原文**，
+#   · **`action: patch` 的原版素材**（下面两条 `../../.probe/*`）是**从原版归档抽出来的上游原文**，
 #     不入库（体积大、且属于安装包内容）：它们可以从任何一份原版 app.asar 原样重抽
 #     （`node vendor/asar/list.mjs --get <归档内路径> <目标>`），而且构建时会逐字节校验
 #     它们与 `--from` 归档是否一致 —— 不一致就报错（见 build.mjs 里那句「原版素材与归档不一致」）。
@@ -20,13 +22,13 @@
 # 声明与实际差异不一致就报错退出（见 vendor/lib/harness.mjs 的 readPatchDecl）。
 
 id: T1-whale-splash
-name: 启动窗口 cyber 动画 + 桌面挂件 + 视觉模型自动路由
+name: 启动窗口 cyber 动画 + 桌面挂件
 track: T1
 
 target:
   archive: resources/app.asar
   entries:
-    # ── 改动的既有条目（4 个）──
+    # ── 改动的既有条目（3 个）──
     - path: renderer/welcome.html
       action: replace              # 换成带 cyber splash 画布的版本
       source: ../vendor/whale/materials/renderer/welcome.html
@@ -38,10 +40,6 @@ target:
       action: patch                # 锚点替换：挂件的 IPC 桥
       source: ../../.probe/preload-app.cjs
       patcher: vendor/whale/patch-preload.mjs
-    - path: dsh/node_modules/@deepseek-ai/dsh-api-session-controller/lib/index.js
-      action: patch                # 锚点替换：按模型能力自动路由视觉请求
-      source: ../../.probe/session-controller.js
-      patcher: vendor/whale/patch-session-controller.mjs
 
     # ── 新增条目（11 个）──
     - path: renderer/whale.css
@@ -80,7 +78,7 @@ target:
       source: ../vendor/whale/materials/whale-3d.png             # 原始透明星光鲸鱼；挂件纹理 + cyber splash 的全息鲸鱼
 
 verify:
-  expect_diff_entries: 15
+  expect_diff_entries: 14
   syntax_check:
     - lib/welcome/cyber-splash.js
     - lib/welcome/whale-animation.js
@@ -90,7 +88,6 @@ verify:
     - lib/main.js
     - lib/preload-app.cjs
     - lib/preload-charm.cjs
-    - dsh/node_modules/@deepseek-ai/dsh-api-session-controller/lib/index.js
 
 rollback:
   - node vendor/whale/install.mjs --rollback
