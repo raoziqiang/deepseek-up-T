@@ -419,6 +419,6 @@ node src\cli.mjs precheck    # 组合可用
 - **频率**：宿主缓存 5 分钟，出错后缓存 1 分钟；手动刷新至少隔 10 秒才真的重新请求；同一时刻只有一个请求在飞。
 
 文件：`lib/balance.js`（宿主：密钥、请求、缓存）、`assets/balance.js`（悬浮窗）。
-新增两条路由：`/dsh-up-t/balance.json` 与 `/dsh-up-t/balance.js`。悬浮窗由 `assets/client.js` 带起，
-所以**注入行不变、profile 不用动**；但宿主侧多了路由，要**重启 Harness 一次**才会出现。之后改悬浮窗样子只需硬刷新。
-测试：`node test/balance.test.mjs`（17 条）。
+新增一条路由 `/dsh-up-t/balance.json`；悬浮窗脚本由宿主拼在 `/dsh-up-t/client.js` 的响应后面一起送出，
+所以**注入行不变、profile 不用动**，胶囊的 DOM 也不多一个节点；但宿主侧多了路由，要**重启 Harness 一次**才会出现。之后改悬浮窗样子只需硬刷新。
+测试：`node test/balance.test.mjs`（16 条）。

@@ -6,7 +6,7 @@
 //   ② 官方返回体（金额是字符串）解析对：优先 CNY、偏低阈值、is_available=false；
 //   ③ 401/429/超时/断网/格式不对 —— 都变成人话 + code，绝不抛到路由外面；
 //   ④ 缓存：5 分钟内不重复打接口；并发只飞一个请求；手动刷新 10 秒内只认一次；
-//   ⑤ 路由 `/dsh-up-t/balance.json` 真的回 JSON，`?refresh=1` 能强刷；
+//   ⑤ 路由 `/dsh-up-t/balance.json` 真的回 JSON；悬浮窗随 client.js 一起送出；
 //   ⑥ 悬浮窗脚本是经典脚本、走 CSSOM 上样式、只从宿主路由取数。
 //
 //   node test/balance.test.mjs
@@ -220,7 +220,7 @@ await check('手动刷新：10 秒内的 force 不算数，之后才真的重打
 
 // ── ⑤ 宿主路由 ──────────────────────────────────────────────────
 
-await check('插件注册了 balance.json 与 balance.js 两条路由；balance.js 送出的是 assets/balance.js', async () => {
+await check('插件注册了 balance.json 路由；client.js 路由送出的是「胶囊 + 悬浮窗」两段', async () => {
   const mod = await import(pathToFileURL(path.join(PLUGIN, 'lib', 'index.js')).href);
   const routes = [];
   const root = {
@@ -243,13 +243,18 @@ await check('插件注册了 balance.json 与 balance.js 两条路由；balance.
   }
   const byPath = Object.fromEntries(routes.map((r) => [r.path, r]));
   assert.ok(byPath['/dsh-up-t/balance.json'], '没有 balance.json 路由');
-  assert.ok(byPath['/dsh-up-t/balance.js'], '没有 balance.js 路由');
+  assert.equal(byPath['/dsh-up-t/balance.js'], undefined, '悬浮窗不该再单独走一条路由');
 
   const res = { status: 0, headers: null, body: null, writeHead(s, h) { this.status = s; this.headers = h; }, end(b) { this.body = b; } };
-  byPath['/dsh-up-t/balance.js'].handler({ url: '/dsh-up-t/balance.js' }, res);
+  byPath['/dsh-up-t/client.js'].handler({ url: '/dsh-up-t/client.js' }, res);
   assert.equal(res.status, 200);
   assert.match(res.headers['Content-Type'], /javascript/);
-  assert.equal(String(res.body), fs.readFileSync(path.join(PLUGIN, 'assets', 'balance.js'), 'utf8'));
+  const body = String(res.body);
+  const capsule = fs.readFileSync(path.join(PLUGIN, 'assets', 'client.js'), 'utf8');
+  const panel = fs.readFileSync(path.join(PLUGIN, 'assets', 'balance.js'), 'utf8');
+  assert.ok(body.startsWith(capsule), '前半段应是胶囊原文');
+  assert.ok(body.endsWith(panel), '后半段应是悬浮窗原文');
+  new vm.Script(body, { filename: 'client-bundle.js' }); // 拼起来仍是合法的经典脚本
 
   // balance.json：本机没有密钥时也要回一份 JSON 结论（no-key），而不是 500。
   const prev = process.env.DEEPSEEK_API_KEY;
@@ -281,12 +286,6 @@ await check('悬浮窗脚本：经典脚本、只从宿主路由取数、样式�
   assert.doesNotMatch(src, /api\.deepseek\.com/, '渲染层不该直连官方接口（那需要密钥）');
   assert.doesNotMatch(src, /DEEPSEEK_API_KEY'\s*\)|Authorization/, '渲染层不该碰密钥');
   assert.match(src, /adoptedStyleSheets/);
-});
-
-await check('胶囊脚本会带起悬浮窗脚本（且失败吞掉）', () => {
-  const src = fs.readFileSync(path.join(PLUGIN, 'assets', 'client.js'), 'utf8');
-  assert.match(src, /bs\.src = '\/dsh-up-t\/balance\.js'/);
-  assert.match(src, /bs\.onerror = function \(\) \{\}/);
 });
 
 // ── 汇总 ────────────────────────────────────────────────────────

@@ -27,8 +27,7 @@ const STATUS_PATH = '/dsh-up-t/status.json';
 const ACTION_PATH = '/dsh-up-t/action';
 const SEEN_PATH = '/dsh-up-t/seen';
 const BALANCE_PATH = '/dsh-up-t/balance.json';
-const BALANCE_CLIENT_PATH = '/dsh-up-t/balance.js';
-const ALL_ROUTES = [CLIENT_PATH, STATUS_PATH, ACTION_PATH, SEEN_PATH, BALANCE_PATH, BALANCE_CLIENT_PATH];
+const ALL_ROUTES = [CLIENT_PATH, STATUS_PATH, ACTION_PATH, SEEN_PATH, BALANCE_PATH];
 
 const results = [];
 function check(name, fn) {
@@ -237,8 +236,8 @@ check('依赖就绪前就已经注册了注入行（这是桌面端能看到挂�
   settle();
 });
 
-check('依赖就绪后注册了 client.js / status.json / action / seen / 余额两条，共六条精确路由', () => {
-  assert.equal(state.routes.length, 6);
+check('依赖就绪后注册了 client.js / status.json / action / seen / balance.json 五条精确路由', () => {
+  assert.equal(state.routes.length, 5);
   const byPath = Object.fromEntries(state.routes.map((r) => [r.path, r]));
   assert.deepEqual(Object.keys(byPath).sort(), ALL_ROUTES.slice().sort());
   for (const r of state.routes) {

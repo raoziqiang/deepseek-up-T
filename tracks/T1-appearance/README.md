@@ -7,7 +7,7 @@
 用户定的：OpenCode 已弃用，只做 **DeepSeek 官方 API** 的余额；窗口能自由移动，风格切合新主题。
 做在已经装好的 `dsh-up-t` 插件里（L1，升级不丢，profile 不用动），详见 `plugins/dsh-up-t/README.md` 末节。
 在真 Chromium 里模拟了一个**不放行内联样式**的严格 CSP 页面：正常 / 偏低 / 余额不足 / 未配置四种状态都抓帧看过，
-拖动后位置在刷新后仍然保留，控制台没有报错。单测：`test/balance.test.mjs` 17 条，`test/plugin.test.mjs` 60 条。
+拖动后位置在刷新后仍然保留，控制台没有报错。单测：`test/balance.test.mjs` 16 条，`test/plugin.test.mjs` 60 条，`test/capsule.test.mjs` 不受影响。
 
 **还没做（真机）**：配好 `DEEPSEEK_API_KEY` → 重启 Harness 一次 → 看右上角的悬浮窗与真实余额。
 第三方余额小鲸鱼 `dsh-whale-widget` 还装着，确认新窗口没问题后再决定要不要卸载。

@@ -66,11 +66,10 @@ const ACTION_PATH = '/dsh-up-t/action';
  * `ready` 与「界面里出现了胶囊」之间隔着的那一段，只有渲染层自己说话才能填上。
  */
 const SEEN_PATH = '/dsh-up-t/seen';
-/** DeepSeek 官方余额：结论（不含密钥）与悬浮窗脚本。见 lib/balance.js 与 assets/balance.js。 */
+/** DeepSeek 官方余额的结论（不含密钥）。见 lib/balance.js；悬浮窗脚本随 client.js 一起送出。 */
 const BALANCE_PATH = '/dsh-up-t/balance.json';
-const BALANCE_CLIENT_PATH = '/dsh-up-t/balance.js';
 /** 宿主注册的那几条路由。心跳的 `ready` 与握手都引用它，避免两处各写一份。 */
-const ROUTE_PATHS = [CLIENT_PATH, STATUS_PATH, ACTION_PATH, SEEN_PATH, BALANCE_PATH, BALANCE_CLIENT_PATH];
+const ROUTE_PATHS = [CLIENT_PATH, STATUS_PATH, ACTION_PATH, SEEN_PATH, BALANCE_PATH];
 /**
  * 自定义请求头。跨源 `<form>`/`fetch` 不经过预检就带不上自定义头，而我们从不下发
  * CORS 允许头 —— 所以这一个字段就把「别的网页悄悄让本机跑命令」挡在外面。
@@ -289,6 +288,18 @@ function makeMtimeReader(file) {
 
 const readClientJs = makeMtimeReader(CLIENT_FILE);
 const readBalanceJs = makeMtimeReader(BALANCE_CLIENT_FILE);
+/**
+ * 客户端路由送出的脚本 = 胶囊 + 余额悬浮窗，拼在同一个响应里。
+ * 为什么不让胶囊再建一个 <script> 去加载悬浮窗：那会给胶囊多出一个 DOM 节点（胶囊的 DOM 足迹
+ * 被 test/capsule.test.mjs 逐个钉死），也多一次请求、多一条会 404 的路。两段都是自带 try/catch 的
+ * IIFE，一段坏了不影响另一段；悬浮窗文件读不到时只送胶囊。两个文件都按 mtime 重读，硬刷新即生效。
+ */
+function readClientBundle() {
+  const capsule = readClientJs();
+  if (capsule === null) return null;
+  const panel = readBalanceJs();
+  return panel === null ? capsule : `${capsule}\n;\n${panel}`;
+}
 /** 余额服务：整个宿主进程共用一份缓存。 */
 const balanceService = createBalanceService();
 
@@ -878,7 +889,7 @@ export default {
       disposers.push(ctx.webServer.register({
         kind: 'exact',
         path: CLIENT_PATH,
-        handler: (req, res) => sendJs(res, readClientJs()),
+        handler: (req, res) => sendJs(res, readClientBundle()),
       }));
 
       disposers.push(ctx.webServer.register({
@@ -953,12 +964,6 @@ export default {
               try { sendJson(res, { ok: false, code: 'error', error: String(err?.message ?? err) }, 500); } catch { /* 已断开 */ }
             });
         },
-      }));
-
-      disposers.push(ctx.webServer.register({
-        kind: 'exact',
-        path: BALANCE_CLIENT_PATH,
-        handler: (req, res) => sendJs(res, readBalanceJs()),
       }));
 
       // Web 形态（宿主自己渲染 index.html 时）用 tapIndex；桌面端靠上面的注入行。
