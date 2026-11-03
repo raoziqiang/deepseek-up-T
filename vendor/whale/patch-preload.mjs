@@ -56,4 +56,4 @@ electron.contextBridge.exposeInMainWorld("dshWhaleCharm", {
 )
 
 await writeFile(out, text, 'utf8')
-console.log(`patch-preload: wrote ${out} (${text.length} bytes)`)
+console.log(`patch-preload: wrote ${out} (${Buffer.byteLength(text, "utf8")} bytes)`)
