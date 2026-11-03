@@ -27,6 +27,9 @@
 
   var DURATION_MS = 13000
   var PLAYED_KEY = 'dsh-whale-splash-played'
+  // 2026-11-02 起主窗口不再播开场：它和欢迎窗口的 cyber splash 叠着播（用户反馈）。
+  // 只保留左下角鲸鱼娘。开场代码仍在（renderAt 预览照常可用），改回 true 即恢复。
+  var MAIN_INTRO = false
   var GIRL_POS_KEY = 'dsh-whale-girl-pos'
   var GIRL_HIDDEN_KEY = 'dsh-whale-girl-hidden'
   var Z = 2147483000
@@ -702,7 +705,7 @@
     ensureStyle()
     var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
     session.set(PLAYED_KEY, '1')
-    if (reduced) { girlAsset.ready.then(function () { showGirl(true) }); return null }
+    if (reduced || !MAIN_INTRO) { girlAsset.ready.then(function () { showGirl(true) }); return null }
     current = new Splash({
       replay: isReplay,
       onDone: function () { showGirl(false) },

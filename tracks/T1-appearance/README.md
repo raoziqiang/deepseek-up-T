@@ -25,8 +25,8 @@ Canvas 2D、3.6 s；CRT 开机线 → 霓虹透视网格 + 合成器波日落 + 
 控制台零报错，无 GPU 的无头环境下 48–61 fps。
 
 **还没做（要在 Windows 真机上）**：
-1. 卸载主窗口插件 `dsh-whale-splash`（步骤见 `plugins/dsh-whale-splash/README.md` 末尾「卸载」）——
-   注意左下角的鲸鱼娘也是它画的，会一起消失。
+1. ~~卸载主窗口插件~~ —— 改为**只关开场**（`assets/splash.js` 的 `MAIN_INTRO = false`）：
+   左下角鲸鱼娘保留，启动直接出现。插件是 junction 到仓库的，拉代码后硬刷新即生效，不用动 profile。
 2. 构建 → 退出 Harness → 落盘 → 重启验收：
    `node vendor/whale/build.mjs`，然后双击 `install-whale.cmd`，重启后 `node src/cli.mjs accept`。
 
