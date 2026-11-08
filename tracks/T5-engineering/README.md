@@ -105,12 +105,36 @@ node vendor/whale/install.mjs --yes    # 需要先完全退出 Harness
       7 个条目有重复行、条目顺序变化完全不算 diff），见下方记录。
 - [x] **模块化热加载框架** —— 2026-10-30 完成：`src/modules.mjs` + `up-t.config.yml` + `modules/memory`
       + `dsht modules` + 插件侧宿主 + `up-t-memory` skill；回合后摘录未做，见下方记录。
+- [x] **笔记契约能被检查了** —— 2026-11-02 完成：`src/memory.mjs` + `dsht memory ls|show|lint`，
+      `modules/memory` 启动时跑同一份 lint；`test/memory.test.mjs`（12 条），见下方记录。
+- [ ] 回合后自动摘录 / `/dream` 归并 —— 需要 DSH 的回合钩子，要在真机上验；写入必须先过 `memory lint`。
 
 ## 验收
 
 在干净机器上：`doctor` → 应用补丁 → 落盘 → 复验，全程无需人工记忆任何步骤。
 
 ## 记录
+
+### 2026-11-02 · 笔记契约从「一段文字」变成判据
+
+**为什么**
+`up-t-memory` skill 写了「一主题一文件、kebab-case、不许写密钥」，但没有任何东西会检查。
+以后要做回合后自动摘录，写入方是模型 —— 没有判据，第一条把令牌抄进仓库的笔记只能靠人肉发现。
+
+**做成了什么**
+- `src/memory.mjs`（只读）：列笔记、按主题找（项目优先）、按契约 lint
+- `dsht memory ls | show <主题> [--scope] | lint`（`--json`；lint 退出码 1 = 有 error）
+- `modules/memory` 启动时跑同一份 lint，计数进宿主日志；坏笔记只记 warn，模块不判 failed
+- 插件侧此前没给宿主传 `onLog`，模块日志在真 DSH 里**直接丢掉**；现在最近 20 条写进心跳的 `modulesLog`
+- `test/memory.test.mjs`（12 条，全在临时目录 + 临时 `DSH_HOME`）
+
+**取舍**：凭据判据宁可漏报 —— 「token: 见 docs/…」「password: true」「api_key: <你的>」都不报，测试钉住。
+
+**怎么验的**：`node test/run.mjs memory modules` 2/2 通过；`dsht memory lint` 在当前仓库报 0 条笔记、0 问题。
+本机（Linux 云端）没有 Harness 安装，另外 9 套依赖真实安装目录 / junction 的测试照旧跑不起来，与本轮无关。
+
+**还没验的**：真 DSH 重启后心跳的 `modulesLog` 里有没有 `memory lint` 这一条 —— 只做了 `node --check` 与现有插件单测，
+要在 Windows 真机重启后看 `plugins/dsh-up-t/.runtime/heartbeat.json`。
 
 ### 2026-10-30 · 模块化热加载框架已立（摘录未做）
 

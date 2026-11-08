@@ -2,7 +2,54 @@
 
 > 启动、界面、常驻元素都符合自己的审美与习惯。
 
-## 最新进度 · 2026-10-12
+## 最新进度 · 2026-11-03 · 开机动画改为「启动即播」
+
+真机（Harness 44.7.0）落盘后反馈「没有开机动画」。原因：动画放在**欢迎/登录窗口**里，
+而已登录的用户启动时 Harness 根本不开这个窗口；补丁的启动钩子只恢复了挂件，没有播动画。
+改法：`vendor/whale/patch-main.mjs` 的启动钩子在 `openInitialWindow` 一开头调用已有的
+`replaySplash({ revealCharmAfter: true })` —— 透明置顶的重播窗在主窗口出现前铺满光标所在屏幕，
+播完 CRT 收起露出 Harness；桌面挂件等动画播完再淡入。每个进程只播一次（`bootSplashPlayed`）。
+登录流程里欢迎窗口自己的那份也会播，但被上层的重播窗盖住，两者同时结束。
+
+## 最新进度 · 2026-11-03 · 余额提示重做：DeepSeek 官方余额悬浮窗
+
+用户定的：OpenCode 已弃用，只做 **DeepSeek 官方 API** 的余额；窗口能自由移动，风格切合新主题。
+做在已经装好的 `dsh-up-t` 插件里（L1，升级不丢，profile 不用动），详见 `plugins/dsh-up-t/README.md` 末节。
+在真 Chromium 里模拟了一个**不放行内联样式**的严格 CSP 页面：正常 / 偏低 / 余额不足 / 未配置四种状态都抓帧看过，
+拖动后位置在刷新后仍然保留，控制台没有报错。单测：`test/balance.test.mjs` 16 条，`test/plugin.test.mjs` 60 条，`test/capsule.test.mjs` 不受影响。
+
+**还没做（真机）**：配好 `DEEPSEEK_API_KEY` → 重启 Harness 一次 → 看右上角的悬浮窗与真实余额。
+第三方余额小鲸鱼 `dsh-whale-widget` 还装着，确认新窗口没问题后再决定要不要卸载。
+
+## 最新进度 · 2026-11-02 · 启动动画推倒重来（科幻 × 赛博朋克）
+
+**为什么**：真机上两套动画（欢迎窗口 L3 + 主窗口插件 `dsh-whale-splash`）叠着播，效果也不对味。
+用户拍板：**只留欢迎窗口那一套**，风格改成科幻 × 赛博朋克。
+
+**新动画** `vendor/whale/materials/cyber-splash.js` → 归档 `lib/welcome/cyber-splash.js`（声明 14 → 15 条目）：
+Canvas 2D、3.6 s；CRT 开机线 → 霓虹透视网格 + 合成器波日落 + 数字雨 → HUD 扫描环锁定 →
+全息鲸鱼（随包 `whale-3d.png` 着色 + RGB 分离 + 扫描线，图片加载失败退成线框核心）→
+`DEEPSEEK HARNESS` 从乱码解码出来 → 启动日志 / SYNC 进度条 → CRT 关机收成一条线、一个点，露出欢迎界面。
+点击或按任意键直接跳到收尾（约 0.5 s）。减动效：不播。
+
+- `renderer/whale-splash.js` 重写：播完淡出并把画布移出 DOM；**欢迎窗口里不再留可拖动小鲸鱼**（鲸鱼只在桌面挂件里常驻）。
+- `renderer/replay.js`（挂件菜单「Replay animation」）改用同一份动画，播完关窗；不可交互所以不接受跳过。
+- `whale-animation.js` 仍随包：桌面挂件 `pendant.html` 靠它的 `drawWhale`。
+- 预览：`node vendor/visual/serve-dir.mjs vendor/whale/materials 8129` → `http://127.0.0.1:8129/cyber-preview.html`
+  （`?t=毫秒` 定格某一帧）。
+- `test/splash.test.mjs` 整份重写（23 条，测仓库源文件；有暂存包时再核「暂存包里就是这一份」）。
+
+**怎么验的（云端 Linux，无 Harness）**：单测 23/23（删掉「移除画布」那行能抓到 4 条失败）；
+真 Chromium 在 900×600 / 480×620 / 1600×900 抓帧看过布局，实时播放 3.6 s 自己收场、点击跳过约 0.54 s、
+控制台零报错，无 GPU 的无头环境下 48–61 fps。
+
+**还没做（要在 Windows 真机上）**：
+1. ~~卸载主窗口插件~~ —— 改为**只关开场**（`assets/splash.js` 的 `MAIN_INTRO = false`）：
+   左下角鲸鱼娘保留，启动直接出现。插件是 junction 到仓库的，拉代码后硬刷新即生效，不用动 profile。
+2. 构建 → 退出 Harness → 落盘 → 重启验收：
+   `node vendor/whale/build.mjs`，然后双击 `install-whale.cmd`，重启后 `node src/cli.mjs accept`。
+
+## 进度 · 2026-10-12
 
 ### 主窗口启动动画插件 `plugins/dsh-whale-splash`（L1，待安装）
 

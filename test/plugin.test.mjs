@@ -26,6 +26,8 @@ const CLIENT_PATH = '/dsh-up-t/client.js';
 const STATUS_PATH = '/dsh-up-t/status.json';
 const ACTION_PATH = '/dsh-up-t/action';
 const SEEN_PATH = '/dsh-up-t/seen';
+const BALANCE_PATH = '/dsh-up-t/balance.json';
+const ALL_ROUTES = [CLIENT_PATH, STATUS_PATH, ACTION_PATH, SEEN_PATH, BALANCE_PATH];
 
 const results = [];
 function check(name, fn) {
@@ -234,10 +236,10 @@ check('依赖就绪前就已经注册了注入行（这是桌面端能看到挂�
   settle();
 });
 
-check('依赖就绪后注册了 client.js / status.json / action / seen 四条精确路由', () => {
-  assert.equal(state.routes.length, 4);
+check('依赖就绪后注册了 client.js / status.json / action / seen / balance.json 五条精确路由', () => {
+  assert.equal(state.routes.length, 5);
   const byPath = Object.fromEntries(state.routes.map((r) => [r.path, r]));
-  assert.deepEqual(Object.keys(byPath).sort(), [CLIENT_PATH, STATUS_PATH, ACTION_PATH, SEEN_PATH].sort());
+  assert.deepEqual(Object.keys(byPath).sort(), ALL_ROUTES.slice().sort());
   for (const r of state.routes) {
     assert.equal(r.kind, 'exact');
     assert.equal(typeof r.handler, 'function');
@@ -247,7 +249,7 @@ check('依赖就绪后注册了 client.js / status.json / action / seen 四条�
 check('依赖就绪后心跳推进到 ready，并记下路由与完整的 trail', () => {
   const beat = JSON.parse(readFileSync(mod.heartbeatPath, 'utf8'));
   assert.equal(beat.stage, 'ready');
-  assert.deepEqual(beat.routes, [CLIENT_PATH, STATUS_PATH, ACTION_PATH, SEEN_PATH]);
+  assert.deepEqual(beat.routes, ALL_ROUTES);
   assert.deepEqual(beat.trail.map((s) => s.stage), ['apply', 'ready'], 'trail 要能看出它走过哪两步');
   assert.equal(beat.loadedAt, beat.trail[0].at, 'loadedAt 必须钉在第一枚心跳的时刻，不能随 ready 一起被改写');
   assert.ok(beat.at >= beat.loadedAt, `at(${beat.at}) 不该早于 loadedAt(${beat.loadedAt})`);
@@ -262,7 +264,7 @@ check('只走到 apply 的心跳形状 = 加载了但依赖没就绪（doctor / 
   assert.equal(beat.routes, undefined, '没走到 ready 就不该声称注册了路由');
   assert.deepEqual(beat.trail.map((s) => s.stage), ['apply'], '新的 apply 要丢掉上一次生命周期的 trail');
   assert.equal(beat.loadedAt, beat.at, '只有一步时 loadedAt 就是它自己');
-  mod.writeHeartbeat('ready', { routes: [CLIENT_PATH, STATUS_PATH, ACTION_PATH, SEEN_PATH] }); // 还原，后面还要用
+  mod.writeHeartbeat('ready', { routes: ALL_ROUTES }); // 还原，后面还要用
 });
 
 check('注册了 tapIndex（Web 形态用；桌面端靠注入行）', () => {

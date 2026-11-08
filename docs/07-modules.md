@@ -50,7 +50,7 @@ node src/cli.mjs modules --watch   # mtime 轮询；改配置/入口只重启对
 node src/cli.mjs modules --json
 ```
 
-插件侧：`dsh-up-t` 在 `webServer` 就绪后拉起**同一份** `src/modules.mjs`，状态写进心跳的 `modules` 字段。
+插件侧：`dsh-up-t` 在 `webServer` 就绪后拉起**同一份** `src/modules.mjs`，状态写进心跳的 `modules` 字段，最近 20 条模块日志写进 `modulesLog` 字段（每轮宿主重新开始计）。
 
 ## 记忆
 
@@ -58,6 +58,29 @@ node src/cli.mjs modules --json
 - 项目笔记：`memory/project/topics/`
 - 全局笔记：`$DSH_HOME/up-t/memory/`（不进仓库）
 - 灵枢继续管会话召回；本层不管自动摘录（后续里程碑）
+
+浏览与检查（只读，判据在 `src/memory.mjs`，CLI 与模块共用一份）：
+
+```powershell
+node src/cli.mjs memory ls                      # 两处目录下的笔记（README.md 不算）
+node src/cli.mjs memory show <主题>             # 项目范围优先；--scope project|global 限定
+node src/cli.mjs memory lint                    # 退出码 1 = 有 error
+```
+
+| 判据 | 级别 | 对应 skill 里哪句话 |
+| --- | --- | --- |
+| 文件名不是 kebab-case `.md` | error | 一主题一文件，文件名 kebab-case |
+| 空文件 | error | — |
+| 疑似凭据（私钥 / `sk-` / `ghp_` / `AKIA` / `xox?-` / Bearer / `password=…`） | error | 不许写密钥、令牌、凭据 |
+| 第一行非空内容不是 `# 标题` | warn | — |
+| 超过 16 KB | warn | 笔记指向文档，不复制正文 |
+| 全局与项目同名 | warn（报在全局那份） | 读取时项目那份优先 |
+
+凭据判据**宁可漏报**：`token: 见 docs/…`、`password: true`、`api_key: <你的>` 这类说明文字不报
+（`test/memory.test.mjs` 钉住）。误报一多，人就学会忽略 lint。
+
+`modules/memory` 启动时跑同一份 lint，把计数记进宿主日志；有 error 只记 `warn`，模块仍是 `started` ——
+一条坏笔记不该把整个模块判成失败。
 
 ## 本轮边界
 

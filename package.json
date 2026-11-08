@@ -22,6 +22,8 @@
     "test:plugin": "node test/run.mjs plugin",
     "test:skill": "node test/run.mjs skill",
     "test:modules": "node test/run.mjs modules",
+    "test:memory": "node test/run.mjs memory",
+    "memory:lint": "node src/cli.mjs memory lint",
     "modules": "node src/cli.mjs modules",
     "test:snapshot": "node test/run.mjs snapshot",
     "build:whale": "node vendor/whale/build.mjs",

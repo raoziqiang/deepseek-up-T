@@ -1,13 +1,16 @@
 # patches/T1-whale-splash.yml
 #
 # T1（外观与体验）的第一次 L3 改造声明。
-# 状态：2026-10-09 现场已安装的是早先 13 条目版本；本次星海 3D 鲸鱼改造含 14 条目，
-#   目前仅在源码与暂存构建中，尚未写入正在使用的 app.asar。
+# 状态：2026-11-02 启动动画推倒重来 —— 星海鲸鱼换成科幻 × 赛博朋克的 cyber splash
+#   （lib/welcome/cyber-splash.js）。仅在源码中，尚未构建、尚未落盘。
+#   whale-animation.js 仍随包：桌面挂件（pendant.html）靠它的 drawWhale 画鲸鱼。
+# 2026-11-03：去掉「视觉模型自动路由」（session-controller 补丁）—— 项目只做开机动画 / 余额 / 宠物，
+#   它每次升级都可能对不上锚点、拖住整个构建。patcher 文件仍在 vendor/whale/，要恢复把条目加回来（14 → 15）。
 #
 # 素材分两类（这一点决定了「一份全新 clone 能不能构建」）：
 #   · **本项目手写的素材**在 `vendor/whale/materials/`（welcome/pendant 两页、动画模块源、挂件 preload），
 #     已入库 —— 它们是手写的，丢了就重新写吧。
-#   · **`action: patch` 的原版素材**（下面三条 `../../.probe/*`）是**从原版归档抽出来的上游原文**，
+#   · **`action: patch` 的原版素材**（下面两条 `../../.probe/*`）是**从原版归档抽出来的上游原文**，
 #     不入库（体积大、且属于安装包内容）：它们可以从任何一份原版 app.asar 原样重抽
 #     （`node vendor/asar/list.mjs --get <归档内路径> <目标>`），而且构建时会逐字节校验
 #     它们与 `--from` 归档是否一致 —— 不一致就报错（见 build.mjs 里那句「原版素材与归档不一致」）。
@@ -19,15 +22,15 @@
 # 声明与实际差异不一致就报错退出（见 vendor/lib/harness.mjs 的 readPatchDecl）。
 
 id: T1-whale-splash
-name: 启动窗口画卷鲸鱼动画 + 桌面挂件 + 视觉模型自动路由
+name: 启动窗口 cyber 动画 + 桌面挂件
 track: T1
 
 target:
   archive: resources/app.asar
   entries:
-    # ── 改动的既有条目（4 个）──
+    # ── 改动的既有条目（3 个）──
     - path: renderer/welcome.html
-      action: replace              # 换成带画卷/鲸鱼容器的版本
+      action: replace              # 换成带 cyber splash 画布的版本
       source: ../vendor/whale/materials/renderer/welcome.html
     - path: lib/main.js
       action: patch                # 锚点替换：挂件窗口的创建与生命周期
@@ -37,12 +40,8 @@ target:
       action: patch                # 锚点替换：挂件的 IPC 桥
       source: ../../.probe/preload-app.cjs
       patcher: vendor/whale/patch-preload.mjs
-    - path: dsh/node_modules/@deepseek-ai/dsh-api-session-controller/lib/index.js
-      action: patch                # 锚点替换：按模型能力自动路由视觉请求
-      source: ../../.probe/session-controller.js
-      patcher: vendor/whale/patch-session-controller.mjs
 
-    # ── 新增条目（10 个）──
+    # ── 新增条目（11 个）──
     - path: renderer/whale.css
       action: insert
       source: ../vendor/whale/materials/renderer/whale.css
@@ -67,17 +66,21 @@ target:
     - path: lib/preload-charm.cjs
       action: insert
       source: ../vendor/whale/materials/lib/preload-charm.cjs
+    - path: lib/welcome/cyber-splash.js
+      action: insert
+      source: ../vendor/whale/materials/cyber-splash.js          # 启动动画本体（经典脚本，直接插入，不打包）
     - path: lib/welcome/whale-animation.js
       action: insert
-      source: ../vendor/whale/materials/whale-animation.js      # 经 bundle 成经典脚本（CSP 不允许 ESM）
+      source: ../vendor/whale/materials/whale-animation.js      # 桌面挂件的 drawWhale；经 bundle 成经典脚本（CSP 不允许 ESM）
       bundler: vendor/whale/bundle.mjs
     - path: lib/welcome/whale-3d.png
       action: insert
-      source: ../vendor/whale/materials/whale-3d.png             # 用户指定原始透明星光鲸鱼；纹理与降级共用
+      source: ../vendor/whale/materials/whale-3d.png             # 原始透明星光鲸鱼；挂件纹理 + cyber splash 的全息鲸鱼
 
 verify:
   expect_diff_entries: 14
   syntax_check:
+    - lib/welcome/cyber-splash.js
     - lib/welcome/whale-animation.js
     - renderer/whale-splash.js
     - renderer/replay.js
@@ -85,7 +88,6 @@ verify:
     - lib/main.js
     - lib/preload-app.cjs
     - lib/preload-charm.cjs
-    - dsh/node_modules/@deepseek-ai/dsh-api-session-controller/lib/index.js
 
 rollback:
   - node vendor/whale/install.mjs --rollback
@@ -96,5 +98,7 @@ notes: |
   已知限制：
   1. Harness 升级会整体覆盖 app.asar，本次改造需要重新落盘（见 T5 的升级检测待办）。
   2. 启动窗口有严格 CSP，动画模块必须打成经典脚本，不能用 ESM。
-  3. 鲸鱼必须保留用户提供的原图。WebGL2 使用原图纹理网格实现柔和的 2.5D 变形，
-     不重建或替换鲸鱼造型；脚本内嵌同一 PNG 字节以支持本地文件纹理。无 WebGL2 时直接绘制原图。
+  3. 启动动画（2026-11-02 重做）：Canvas 2D、约 3.6 s、点击/按键跳到收尾，收尾像 CRT 关机一样
+     收成一条线露出欢迎界面，然后画布从 DOM 移除。全息鲸鱼用随包的 whale-3d.png（source-atop 着色，
+     不读回像素，file:// 也能画）；图片加载失败时退成线框核心，不影响其余画面。
+     旧版欢迎窗口里的可拖动小鲸鱼已去掉 —— 鲸鱼只在桌面挂件里常驻。

@@ -10,6 +10,7 @@
 //   node src/cli.mjs snapshot prune     快照保留策略（预演；--yes 才删）
 //   node src/cli.mjs baseline write     固化基线
 //   node src/cli.mjs modules            热启动已启用模块（不 boot Electron）
+//   node src/cli.mjs memory ls|show|lint 项目笔记浏览与契约检查（只读）
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -30,6 +31,7 @@ import { runPrecheck, PROBE_PROFILE } from './precheck.mjs';
 import { runUpgradeCheck, reapplyPlan } from './upgrade.mjs';
 import { runAccept, printAccept } from './accept.mjs';
 import { createModuleHost, runModulesOnce } from './modules.mjs';
+import { memoryRoots, listAllNotes, findNote, lintAll } from './memory.mjs';
 
 const TAG = { error: 'FAIL', warn: 'WARN', info: 'INFO', ok: 'OK  ' };
 
@@ -38,6 +40,7 @@ const VALUE_OPTS = new Map([
   ['-m', 'message'], ['--message', 'message'],
   ['--out', 'out'], ['--limit', 'limit'], ['--file', 'file'],
   ['--profile-json', 'profileJson'], ['--keep', 'keep'], ['--url', 'url'],
+  ['--scope', 'scope'],
 ]);
 
 function parseArgs(argv) {
@@ -763,6 +766,56 @@ async function cmdModules({ flags }) {
   return r.code;
 }
 
+// ───────────────────────────── memory ─────────────────────────────
+//
+// up-t-memory skill 的笔记只读浏览 + 契约检查。不写笔记：写是人（或模型按契约）的事，
+// 这里只负责「写下去的东西合不合契约」。lint 退出码 1 = 有 error（疑似凭据、文件名不合规、空文件）。
+
+function cmdMemory({ positional, flags, opts }) {
+  const sub = positional[1] ?? 'ls';
+  const roots = memoryRoots();
+  const json = flags.has('--json');
+
+  if (sub === 'ls' || sub === 'list') {
+    const notes = listAllNotes(roots);
+    if (json) { process.stdout.write(`${JSON.stringify({ roots, notes }, null, 2)}\n`); return 0; }
+    console.log(`项目笔记：${roots.project}`);
+    console.log(`全局笔记：${roots.global}`);
+    if (!notes.length) { console.log('（还没有笔记）'); return 0; }
+    for (const n of notes) {
+      console.log(`  ${pad(n.scope, 8)}${pad(n.topic, 28)}${pad(human(n.bytes), 10)}${n.title ?? '（无标题）'}`);
+    }
+    return 0;
+  }
+
+  if (sub === 'show' || sub === 'cat') {
+    const topic = positional[2];
+    if (!topic) { console.error('用法：memory show <主题> [--scope project|global]'); return 2; }
+    const r = findNote(topic, { roots, scope: opts.scope });
+    if (r.error) { console.error(r.error); return 1; }
+    if (json) { process.stdout.write(`${JSON.stringify(r, null, 2)}\n`); return 0; }
+    process.stdout.write(r.text.endsWith('\n') ? r.text : `${r.text}\n`);
+    return 0;
+  }
+
+  if (sub === 'lint' || sub === 'check') {
+    const r = lintAll(roots);
+    if (json) { process.stdout.write(`${JSON.stringify(r, null, 2)}\n`); return r.ok ? 0 : 1; }
+    for (const res of r.results) {
+      if (!res.issues.length) { console.log(`${TAG.ok} ${res.scope}/${path.basename(res.file)}`); continue; }
+      for (const i of res.issues) {
+        const where = i.line ? `:${i.line}` : '';
+        console.log(`${TAG[i.level]} ${res.scope}/${path.basename(res.file)}${where}  ${i.message}`);
+      }
+    }
+    console.log(`\n${r.notes} 条笔记，${r.errors} 个错误，${r.warns} 个警告`);
+    return r.ok ? 0 : 1;
+  }
+
+  console.error(`未知子命令：memory ${sub}（ls | show <主题> | lint）`);
+  return 2;
+}
+
 // ───────────────────────────── help ─────────────────────────────
 
 function usage() {
@@ -788,6 +841,9 @@ function usage() {
   accept                  重启后验收：L3/L0 声明、宿主路由、渲染层握手一次问完
                           （只读；观感类项标 MANUAL 且不计入退出码）
   modules                 热启动已启用模块（普通 Node，不 boot Electron；--watch 轮询热加载）
+  memory ls               列出项目 / 全局笔记（up-t-memory skill 的两处目录）
+  memory show <主题>      打印一条笔记（项目范围优先；--scope project|global 限定）
+  memory lint             按契约检查笔记：文件名 / 标题 / 体积 / 疑似凭据（退出码 1 = 有 error）
 
 选项
   --json                  机器可读输出
@@ -831,6 +887,7 @@ async function main() {
     case 'asar': return cmdAsar(parsed);
     case 'accept': return cmdAccept(parsed);
     case 'modules': case 'mod': return cmdModules(parsed);
+    case 'memory': case 'mem': return cmdMemory(parsed);
     case 'help': case '--help': case '-h': usage(); return 0;
     default:
       console.error(`未知命令：${cmd}\n`);

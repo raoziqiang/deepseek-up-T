@@ -1,5 +1,10 @@
 # dsh-whale-splash
 
+> **2026-11-02 起主窗口开场已关**：它和欢迎窗口的 cyber splash 叠着播。插件仍装着，只负责左下角**鲸鱼娘**：
+> 启动直接出现，双击只是把隐藏的她带回来（不再重播开场）。开关是 `assets/splash.js` 里的 `MAIN_INTRO`。
+> 本插件是 junction 到仓库的，拉代码后硬刷新（Ctrl+Shift+R）即生效，不用改 profile、不用重启。
+> 下文描述的是开场打开时的样子；连鲸鱼娘也不要的话，按文末「卸载」。
+
 主窗口启动动画（L1 插件，升级 Harness 不会覆盖）：
 
 1. 启动瞬间铺一层星空幕布；用户指定的原版星光鲸鱼（`assets/whale.png` = `vendor/whale/materials/whale-3d.png`，

@@ -1,28 +1,20 @@
-// deepseek-up-T :: 启动界面那几段脚本（whale-animation.js + whale-splash.js + replay.js）的离线行为级单测
+// deepseek-up-T :: 启动窗口动画（cyber splash）的离线行为级单测
 //
-// 为什么要有它：
-// 这几段脚本是 T1 里**唯一从来没有被执行过**的代码 —— 它们只有 `node --check`
-// （语法对不对）和逐字节核对（装进去的是不是这一份）。语法正确与「跑起来不抛」之间
-// 隔着一整类失败：
-//   · 打包（vendor/whale/bundle.mjs 把 ESM 包成经典脚本）可能漏掉某个导出，
-//     于是 `window.WhaleSplash` 是 undefined；
-//   · 画布 API 用错（坐标变成 NaN、某个方法不存在）在真浏览器里**不会报错**，
-//     只会让那一帧什么都不画 —— 表现是「启动窗口一片空白」，控制台干干净净。
-// 而启动窗口恰恰是人打开这个应用看到的第一屏，也是唯一没有别的界面兜底的一屏。
+// 2026-11-02 启动动画推倒重来：星海鲸鱼 → 科幻 × 赛博朋克。旧测试绑的是旧契约
+// （window.WhaleSplash、欢迎窗口里的可拖动小鲸鱼），整份重写。
 //
-// 所以这里不查语法：把**归档里真正那两份字节**拿出来，配一个最小的假 DOM
-// （假 canvas 2d 上下文、假 requestAnimationFrame、假 matchMedia、假 localStorage），
-// 然后真的跑一遍，断言落在「画了什么」和「交互改到了什么」这些具体产物上：
-//   ① 跨文件契约成立（whale-splash.js 依赖的 window.WhaleSplash / window.drawWhale 真的在）；
-//   ② 时间线真的推进（每一帧都画了东西，跑到末尾真的交出了挂件）；
-//   ③ 所有传给画布的坐标都是有限数（NaN 是 canvas 最典型的静默失败）；
-//   ④ 拖动 / 键盘 / 主题翻转 / 位置记忆真的改到了该改的状态；
-//   ⑤ 三条降级路径（减动效、没有画布、存储被禁）都不抛异常；
-//   ⑥ 挂件菜单那条「Replay animation」真的重播（replay.js 会淡出并关掉自己的窗口 ——
-//      以前主进程把 'replay' 发给主窗口，而启动画面在欢迎窗口里，那是个空操作）。
+// 测的是 vendor/whale/materials/ 里的源文件：这几份都是 `action: insert` / `replace`，
+// 构建时**原样**进归档（build.mjs 逐字节核对），所以源文件 = 将要落盘的字节。
+// 如果本机有暂存包，再额外核一遍「暂存包里的就是这一份」（防止拿旧构建去落盘）。
 //
-// 脚本取自**暂存包**（将要落盘的那一份），没有就退到**在用安装包**，两者都没有就 SKIP
-// —— 和 test/assets.test.mjs 一样：读不到产物不是「通过」，但也不该谎报失败。
+// 配一个最小的假浏览器（假 2d 上下文 / 可控时钟的 rAF / matchMedia / 计时器），然后真跑：
+//   ① 跨文件契约：welcome.html 的脚本顺序、window.CyberSplash 真的在；
+//   ② 每一帧在各种窗口尺寸下都画得出来，传给画布的数值全是有限数（NaN 在真浏览器里不报错，只是不画）；
+//   ③ 同一时刻画两次，画出来的东西逐调用相同（抓帧与复看靠它）；
+//   ④ 时间到点自己收场：画布淡出并从 DOM 移除 —— 绝不留一层东西压住欢迎界面；
+//   ⑤ 点击 / 按键跳到收尾；收尾后监听器都摘掉；
+//   ⑥ 降级：减动效、没有 CyberSplash、没有画布、某一帧抛异常 —— 都不卡住界面；
+//   ⑦ 挂件菜单「Replay animation」：播完关窗、减动效画静止帧后关窗、各种失败也关窗。
 //
 //   node test/splash.test.mjs
 
@@ -33,26 +25,17 @@ import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 
 import { readAsarEntry } from '../src/asar.mjs';
-import { resolvePaths } from '../src/paths.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT = path.resolve(HERE, '..');
-const P = resolvePaths();
+const MAT = path.join(PROJECT, 'vendor', 'whale', 'materials');
 
-const ANIMATION_ENTRY = 'lib/welcome/whale-animation.js';
-const SPLASH_ENTRY = 'renderer/whale-splash.js';
-// 第三段是后来才加进声明的（挂件菜单里的 “Replay animation”）：它**可以缺席** ——
-// 在用的安装包里还没有它的时候，只跳过 replay 那一节，其余断言照跑。
-const REPLAY_ENTRY = 'renderer/replay.js';
+const read = (rel) => fs.readFileSync(path.join(MAT, rel), 'utf8');
+const CYBER_SRC = read('cyber-splash.js');
+const SPLASH_SRC = read('renderer/whale-splash.js');
+const REPLAY_SRC = read('renderer/replay.js');
 
-// This VM deliberately has no GPU or Image. GPU visuals are reviewed in real Chrome.
-function unexpectedWarnings(p) {
-  const expected = 'Whale 3D fallback: WebGL2 unavailable';
-  assert.ok(p.warns.filter(w => w === expected).length <= 1, '降级告警不能逐帧重复');
-  return Array.from(p.warns).filter(w => w !== expected);
-}
 const results = [];
-const RUNS = []; // 每次沙箱运行记一笔，最后横向看有没有哪一次是靠异常收场的
 async function check(name, fn) {
   try {
     await fn();
@@ -62,882 +45,428 @@ async function check(name, fn) {
   }
 }
 
-// ── 找到这两段脚本的字节 ──────────────────────────────────────────────
-//
-// 顺序 = 「将要落盘的那一份」优先，其次是「正在跑的那一份」。二者都可能与源码仓库不同步，
-// 而这里要回答的问题是「用户看到的第一屏会不会是空白」，所以只认归档里的字节。
-
-const SOURCES = [
-  { label: '暂存包', file: path.join(PROJECT, 'state', 'staged', 'app.asar') },
-  { label: '在用安装包', file: P.asar },
-];
-
-function loadScripts() {
-  for (const s of SOURCES) {
-    if (!fs.existsSync(s.file)) continue;
-    let animation = null;
-    let splash = null;
-    let replay = null;
-    try {
-      animation = readAsarEntry(s.file, ANIMATION_ENTRY);
-      splash = readAsarEntry(s.file, SPLASH_ENTRY);
-    } catch {
-      continue;
-    }
-    if (!animation || !splash) continue;
-    try {
-      replay = readAsarEntry(s.file, REPLAY_ENTRY); // 可选，缺席不算失败
-    } catch {
-      replay = null;
-    }
-    return { label: s.label, file: s.file, animation, splash, replay };
-  }
-  return null;
-}
-
-const found = loadScripts();
-if (found === null) {
-  console.log(`SKIP 归档里还没有这两段脚本（${ANIMATION_ENTRY} / ${SPLASH_ENTRY}）`);
-  for (const s of SOURCES) console.log(`      试过 ${s.label}：${s.file}`);
-  console.log('      说明：先 `node vendor/whale/build.mjs` 构建一次，或先落盘。');
-  console.log('启动界面脚本单测：0 项（无可测产物）');
-  process.exit(0);
-}
-
-const ANIMATION_SRC = found.animation.toString('utf8');
-const SPLASH_SRC = found.splash.toString('utf8');
-// replay.js 缺席时 REPLAY_SRC 为 null，replay 那一节整体跳过（见文件末尾）。
-const REPLAY_SRC = found.replay ? found.replay.toString('utf8') : null;
-console.log(`脚本来源 ${found.label}  ${found.file}`);
-console.log(`        ${ANIMATION_ENTRY}  ${found.animation.length} 字节`);
-console.log(`        ${SPLASH_ENTRY}  ${found.splash.length} 字节`);
-console.log(
-  found.replay
-    ? `        ${REPLAY_ENTRY}  ${found.replay.length} 字节`
-    : `        ${REPLAY_ENTRY}  —— 缺席，跳过 replay 那一节`,
-);
-
-// ── 假 canvas 2d 上下文 ───────────────────────────────────────────────
-//
-// 记号：每个方法调用记一次名字；**每次调用都检查数值参数是不是有限数** ——
-// 这是这套测试里最有价值的一条检查：坐标算成 NaN 时真浏览器一声不吭，
-// 结果就是「每一帧都被调用、屏幕上什么都没有」。
-// 属性赋值（fillStyle 等）也记下来，用来证明深浅两套皮肤真的画得不一样。
+// ── 假 2d 上下文：记录每次调用，并检查数值参数是否有限 ──────────────────
 
 const CTX_METHODS = [
-  'beginPath', 'bezierCurveTo', 'save', 'restore', 'fill', 'moveTo', 'translate',
-  'stroke', 'fillRect', 'arc', 'rect', 'clip', 'quadraticCurveTo', 'closePath',
-  'roundRect', 'lineTo', 'scale', 'setTransform', 'clearRect', 'ellipse', 'rotate', 'drawImage',
+  'beginPath', 'save', 'restore', 'fill', 'moveTo', 'stroke', 'fillRect', 'strokeRect', 'arc', 'rect',
+  'clip', 'closePath', 'lineTo', 'setTransform', 'clearRect', 'drawImage', 'fillText',
 ];
 
-function makeCtx2d() {
-  const ops = [];
-  const bad = []; // 非有限数值参数
-  const styled = {}; // 最后一次赋值的属性值
-  const styledHistory = []; // 全部赋值（按顺序），用来比较两套皮肤的调色板
-  const gradients = [];
-
+function makeCtx2d({ throwOn = null } = {}) {
+  const calls = [];
+  const bad = [];
   const record = (name, args) => {
+    if (throwOn === name) throw new Error(`boom in ${name}`);
     for (const a of args) {
       if (typeof a === 'number' && !Number.isFinite(a)) bad.push(`${name}(${args.join(', ')})`);
     }
-    ops.push(name);
+    calls.push([name, args.map((a) => (typeof a === 'object' && a !== null ? '[obj]' : a))]);
   };
-
-  const target = { ops, bad, styled, styledHistory, gradients };
-  for (const m of CTX_METHODS) {
-    target[m] = (...args) => record(m, args);
-  }
-  const makeGradient = (name) => (...args) => {
+  const target = { calls, bad, letterSpacing: '0px' };
+  for (const m of CTX_METHODS) target[m] = (...args) => record(m, args);
+  const grad = (name) => (...args) => {
     record(name, args);
-    const g = { stops: [] };
-    g.addColorStop = (offset, color) => {
-      if (typeof offset === 'number' && !Number.isFinite(offset)) bad.push(`addColorStop(${offset})`);
-      g.stops.push([offset, color]);
+    return {
+      addColorStop(o, c) {
+        if (!Number.isFinite(o)) bad.push(`addColorStop(${o})`);
+        if (typeof c !== 'string' || /NaN|undefined/.test(c)) bad.push(`addColorStop color ${c}`);
+      },
     };
-    gradients.push(g);
-    return g;
   };
-  target.createLinearGradient = makeGradient('createLinearGradient');
-  target.createRadialGradient = makeGradient('createRadialGradient');
-
+  target.createLinearGradient = grad('createLinearGradient');
+  target.createRadialGradient = grad('createRadialGradient');
+  target.measureText = (s) => ({ width: String(s).length * 7 });
   return new Proxy(target, {
-    set(t, key, value) {
-      t[key] = value;
-      if (typeof key === 'string' && !key.startsWith('_')) {
-        styled[key] = value;
-        styledHistory.push([key, value]);
-      }
+    set(t, k, v) {
+      t[k] = v;
+      if (typeof k === 'string' && typeof v === 'string' && /NaN|undefined/.test(v)) bad.push(`${k} = ${v}`);
+      if (typeof k === 'string' && typeof v === 'number' && !Number.isFinite(v)) bad.push(`${k} = ${v}`);
+      calls.push([`=${String(k)}`, [typeof v === 'object' ? '[obj]' : v]]);
       return true;
-    },
-    get(t, key) {
-      const v = t[key];
-      return typeof v === 'function' ? v : v;
     },
   });
 }
 
-// ── 假 DOM ────────────────────────────────────────────────────────────
-//
-// 只实现这两段脚本真的用到的：getElementById / createElement / querySelector /
-// classList / style / offsetWidth（脚本靠它算拖动范围与钳制）/ appendChild /
-// addEventListener / dispatch / getBoundingClientRect / setPointerCapture。
-// offsetWidth 从 style.width 解析 —— 钳制逻辑只有在「量出来的尺寸是真的」时才被测到。
-
-function makeElement(tag, { rect = { width: 78, height: 84, left: 0, top: 0 }, ctx2d = null } = {}) {
+function makeEl(tag, ctx2d = null) {
   const classes = new Set();
-  const attrs = {};
   const listeners = {};
+  const attrs = {};
   const el = {
-    tagName: String(tag).toUpperCase(),
-    style: {},
-    attrs,
-    children: [],
-    parentNode: null,
-    listeners,
-    classes,
-    ctx2d,
+    tagName: tag.toUpperCase(),
+    width: 0,
+    height: 0,
     removed: false,
-    captured: null,
-    released: null,
+    listeners,
     classList: {
       add: (c) => classes.add(c),
       remove: (c) => classes.delete(c),
       contains: (c) => classes.has(c),
-      toggle: (c, on) => (on === undefined ? (classes.has(c) ? classes.delete(c) : classes.add(c)) : on ? classes.add(c) : classes.delete(c)),
     },
-    setAttribute(k, v) {
-      attrs[k] = String(v);
-    },
-    getAttribute(k) {
-      return Object.prototype.hasOwnProperty.call(attrs, k) ? attrs[k] : null;
-    },
-    removeAttribute(k) {
-      delete attrs[k];
-    },
-    hasAttribute(k) {
-      return Object.prototype.hasOwnProperty.call(attrs, k);
-    },
-    toggleAttribute(k, force) {
-      const on = force === undefined ? !Object.prototype.hasOwnProperty.call(attrs, k) : Boolean(force);
-      if (on) attrs[k] = '';
-      else delete attrs[k];
-      return on;
-    },
-    appendChild(child) {
-      child.parentNode = el;
-      el.children.push(child);
-      return child;
-    },
-    removeChild(child) {
-      el.children = el.children.filter((c) => c !== child);
-      child.parentNode = null;
-      return child;
-    },
-    addEventListener(type, fn) {
-      (listeners[type] || (listeners[type] = [])).push(fn);
-    },
-    removeEventListener(type, fn) {
-      listeners[type] = (listeners[type] || []).filter((f) => f !== fn);
-    },
-    listenerCount(type) {
-      return (listeners[type] || []).length;
-    },
-    dispatch(type, ev = {}) {
-      const list = (listeners[type] || []).slice();
-      assert.ok(list.length > 0, `${el.tagName} 上没有 ${type} 监听器`);
-      for (const fn of list) fn(ev);
-    },
-    setPointerCapture(id) {
-      el.captured = id;
-    },
-    releasePointerCapture(id) {
-      el.released = id;
-    },
-    getBoundingClientRect() {
-      return {
-        left: parseFloat(el.style.left) || rect.left,
-        top: parseFloat(el.style.top) || rect.top,
-        width: el.offsetWidth,
-        height: el.offsetHeight,
-      };
-    },
-    remove() {
-      el.removed = true;
-      if (el.parentNode) el.parentNode.removeChild(el);
-    },
-    get offsetWidth() {
-      const w = parseFloat(el.style.width);
-      return Number.isFinite(w) ? w : rect.width;
-    },
-    get offsetHeight() {
-      const h = parseFloat(el.style.height);
-      return Number.isFinite(h) ? h : rect.height;
-    },
-    get clientWidth() {
-      return el.offsetWidth;
-    },
-    get clientHeight() {
-      return el.offsetHeight;
-    },
+    addEventListener(type, fn) { (listeners[type] ||= []).push(fn); },
+    removeEventListener(type, fn) { listeners[type] = (listeners[type] || []).filter((f) => f !== fn); },
+    count(type) { return (listeners[type] || []).length; },
+    fire(type, ev = {}) { for (const fn of (listeners[type] || []).slice()) fn(ev); },
+    toggleAttribute(k, on) { if (on) attrs[k] = ''; else delete attrs[k]; },
+    hasAttribute(k) { return k in attrs; },
+    remove() { el.removed = true; },
+    getContext: (kind) => (kind === '2d' ? ctx2d : null),
   };
-  if (el.tagName === 'CANVAS') {
-    el.width = 0;
-    el.height = 0;
-    el.getContext = (kind) => (kind === '2d' ? el.ctx2d : null);
-  }
-  // 真 DOM 里 className 与 classList 是同一份数据的两个门：脚本用 `el.className = 'whale-pendant'`
-  // 建挂件，而查询用 `document.querySelector('.whale-pendant')`。两者不联动的话，
-  // 「挂件到底建出来没有」就会被假 DOM 说谎（第一版正是这么假失败的）。
-  Object.defineProperty(el, 'className', {
-    get() {
-      return [...classes].join(' ');
-    },
-    set(v) {
-      classes.clear();
-      for (const c of String(v).split(/\s+/)) if (c) classes.add(c);
-    },
-    configurable: true,
-  });
-  // __paint 是脚本挂在节点上的重绘函数（主题翻转时调用）。用计数器包一层，
-  // 这样「主题变了到底有没有重画」是被测到的，而不是只测到「挂了个函数」。
-  let paintFn = null;
-  el.paintCalls = 0;
-  Object.defineProperty(el, '__paint', {
-    get() {
-      if (paintFn === null) return undefined;
-      return (...args) => {
-        el.paintCalls += 1;
-        return paintFn(...args);
-      };
-    },
-    set(fn) {
-      paintFn = fn;
-    },
-    configurable: true,
-  });
   return el;
 }
 
-function makeStorage(initial = {}, { throws = false } = {}) {
-  const map = new Map(Object.entries(initial));
-  let attempts = 0;
-  return {
-    get attempts() {
-      return attempts;
-    },
-    getItem(k) {
-      attempts += 1;
-      if (throws) throw new Error('SecurityError: 存储被禁用');
-      return map.has(k) ? map.get(k) : null;
-    },
-    setItem(k, v) {
-      attempts += 1;
-      if (throws) throw new Error('SecurityError: 存储被禁用');
-      map.set(k, String(v));
-    },
-    removeItem(k) {
-      map.delete(k);
-    },
-    dump() {
-      return Object.fromEntries(map);
-    },
-  };
-}
-
-/** 假 matchMedia：两种查询各一个对象，可手动触发 change（模拟系统主题翻转）。 */
-function makeMatchMedia({ dark = false, reduce = false } = {}) {
-  const queries = new Map();
-  const list = [];
-  const matchMedia = (query) => {
-    const matches = query.includes('prefers-reduced-motion') ? reduce : query.includes('prefers-color-scheme') ? dark : false;
-    const listeners = [];
-    const mql = {
-      media: query,
-      matches,
-      listeners,
-      addEventListener(type, fn) {
-        if (type === 'change') listeners.push(fn);
-      },
-      removeEventListener(type, fn) {
-        const i = listeners.indexOf(fn);
-        if (i >= 0) listeners.splice(i, 1);
-      },
-      set(next) {
-        mql.matches = next;
-        for (const fn of listeners.slice()) fn({ matches: next, media: query });
-      },
-    };
-    queries.set(query, mql);
-    list.push(mql);
-    return mql;
-  };
-  matchMedia.queries = queries;
-  matchMedia.list = list;
-  matchMedia.dark = () => {
-    for (const m of list) if (m.media.includes('prefers-color-scheme')) m.set(!dark);
-  };
-  matchMedia.reduceQuery = (next) => {
-    for (const m of list) if (m.media.includes('prefers-reduced-motion')) m.set(next);
-  };
-  return matchMedia;
-}
-
 /**
- * 一个沙箱 = 一整个页面。`window` 就是沙箱的全局对象（脚本里既有 `window.x`
- * 也有裸的 `matchMedia` / `requestAnimationFrame` / `performance`，两者都得在）。
+ * 一个假窗口。时间完全由测试推进：advance(ms) 让时钟走、到点的计时器触发、
+ * 按 16ms 一帧跑 requestAnimationFrame。
  */
-function makePage({
-  reduce = false,
-  dark = false,
-  withCanvas = true,
-  storage,
-  savedPos = null,
-  innerWidth = 600,
-  innerHeight = 700,
-  devicePixelRatio = 2,
-  script = 'splash', // 'splash' = 欢迎窗口那两段；'replay' = 挂件重播页那一段
-  preScript = null, // (sandbox, document) => void，在被测脚本执行前改动沙箱
-  expectWarns = false, // 故意制造失败的页面：把它从「全程零告警」那条总账里摘出去
-} = {}) {
-  const body = makeElement('body', { rect: { width: innerWidth, height: innerHeight, left: 0, top: 0 } });
-  const documentElement = makeElement('html');
-  documentElement.appendChild(body);
-
-  const created = [];
-  const splashes = [];
-  const byId = new Map();
-  const document = {
-    body,
-    documentElement,
-    createElement(tag) {
-      const ctx2d = tag === 'canvas' ? makeCtx2d() : null;
-      const el = makeElement(tag, {
-        rect: { width: innerWidth, height: innerHeight, left: 0, top: 0 },
-        ctx2d,
-      });
-      if (ctx2d) splashes.push(el);
-      created.push(el);
-      return el;
-    },
-    getElementById: (id) => (byId.has(id) ? byId.get(id) : null),
-    querySelector: (sel) => {
-      if (sel.startsWith('.')) {
-        const want = sel.slice(1);
-        return body.children.find((c) => c.classes.has(want)) ?? null;
-      }
-      return null;
-    },
-    addEventListener() {},
-    removeEventListener() {},
-  };
-
-  // welcome.html 里那个 <canvas id="whale-stage">：它是 body 的孩子，正常跑完会被移除。
-  const stageCtx = makeCtx2d();
-  const stage = makeElement('canvas', { rect: { width: innerWidth, height: innerHeight, left: 0, top: 0 }, ctx2d: stageCtx });
-  if (withCanvas) {
-    byId.set('whale-stage', stage);
-    body.appendChild(stage);
-  }
-
-  const sandbox = {};
-  sandbox.window = sandbox;
-  sandbox.document = document;
-  sandbox.localStorage = storage ?? makeStorage(savedPos === null ? {} : { 'dsh-whale-pendant-position': JSON.stringify(savedPos) });
-
+function makeWindow({ w = 900, h = 600, reduced = false, withCanvas = true, throwOn = null, dpr = 1.5 } = {}) {
+  const ctx = makeCtx2d({ throwOn });
+  const canvas = withCanvas ? makeEl('canvas', ctx) : null;
+  if (canvas) canvas.getBoundingClientRect = () => ({ width: w, height: h, left: 0, top: 0 });
+  const body = makeEl('body');
   const winListeners = {};
-  sandbox.addEventListener = (type, fn) => {
-    (winListeners[type] || (winListeners[type] = [])).push(fn);
-  };
-  sandbox.removeEventListener = (type, fn) => {
-    winListeners[type] = (winListeners[type] || []).filter((f) => f !== fn);
-  };
-  sandbox.innerWidth = innerWidth;
-  sandbox.innerHeight = innerHeight;
-  sandbox.devicePixelRatio = devicePixelRatio;
-
-  const matchMedia = makeMatchMedia({ dark, reduce });
-  sandbox.matchMedia = matchMedia;
-
-  // ── 帧驱动 ──
-  const frames = new Map();
+  let now = 0;
+  let rafQ = [];
   let rafId = 0;
-  let clock = 1000;
-  let rafCalls = 0;
-  let cancelCalls = 0;
-  sandbox.requestAnimationFrame = (fn) => {
-    rafCalls += 1;
-    const id = ++rafId;
-    frames.set(id, fn);
-    return id;
-  };
-  sandbox.cancelAnimationFrame = (id) => {
-    cancelCalls += 1;
-    frames.delete(id);
-  };
-  sandbox.performance = { now: () => clock };
-
-  const timeouts = [];
-  sandbox.setTimeout = (fn, ms) => {
-    timeouts.push({ fn, ms });
-    return timeouts.length;
-  };
-  sandbox.clearTimeout = () => {};
-
+  let timers = [];
   const errors = [];
-  const warns = [];
-  sandbox.console = {
-    log: () => {},
-    info: () => {},
-    warn: (...a) => warns.push(a.map((x) => String(x)).join(' ')),
-    error: (...a) => warns.push(a.map((x) => String(x)).join(' ')),
+  const win = {
+    innerWidth: w,
+    innerHeight: h,
+    devicePixelRatio: dpr,
+    closed: false,
+    performance: { now: () => now },
+    console: { error: (...a) => errors.push(a.map(String).join(' ')), log() {}, warn() {} },
+    matchMedia: (q) => ({
+      matches: q.includes('reduced-motion') ? reduced : false,
+      addEventListener() {},
+      removeEventListener() {},
+    }),
+    requestAnimationFrame(fn) { rafId += 1; rafQ.push({ id: rafId, fn }); return rafId; },
+    cancelAnimationFrame(id) { rafQ = rafQ.filter((r) => r.id !== id); },
+    setTimeout(fn, ms) { timers.push({ at: now + (ms || 0), fn }); return timers.length; },
+    clearTimeout() {},
+    addEventListener(type, fn) { (winListeners[type] ||= []).push(fn); },
+    removeEventListener(type, fn) { winListeners[type] = (winListeners[type] || []).filter((f) => f !== fn); },
+    close() { win.closed = true; },
+    document: {
+      body,
+      getElementById: (id) => (id === 'whale-stage' ? canvas : null),
+      createElement: (tag) => makeEl(tag, makeCtx2d()),
+    },
   };
+  win.window = win;
+  vm.createContext(win);
 
-  // 脚本里用到的一批内置对象。跨 realm 的数组/对象与宿主不同源，所以断言一律
-  // 用 Array.isArray / Array.from / Object.keys，绝不用 deepEqual 比数组。
-  Object.assign(sandbox, {
-    Math, JSON, Object, Array, String, Number, Boolean, Error, Date, Map, Set, Symbol,
-    parseFloat, parseInt, isFinite, isNaN, Promise, RegExp,
-  });
-
-  // replay.js 会调 window.close() 关掉自己那个短命窗口；真实关窗归主进程，
-  // 这里只数次数 —— 断言「它确实打算自己收场」，而不是等外面的安全网。
-  let closeCalls = 0;
-  sandbox.close = () => {
-    closeCalls += 1;
+  const runTimers = () => {
+    let fired = true;
+    while (fired) {
+      fired = false;
+      const due = timers.filter((t) => t.at <= now);
+      timers = timers.filter((t) => t.at > now);
+      for (const t of due) { t.fn(); fired = true; }
+    }
   };
-
-  vm.createContext(sandbox);
-  vm.runInContext(ANIMATION_SRC, sandbox, { filename: ANIMATION_ENTRY });
-  // preScript：动画包已经就位、**页面脚本还没开始跑**的时候破坏沙箱里的某个东西。
-  // 有些降级路径只在「页面脚本跑起来的那一刻」才走得到，事后改属性已经太晚；
-  // 而放在动画包之前又会被它自己的导出盖回去。
-  if (preScript) preScript(sandbox, document);
-  if (script === 'replay') {
-    vm.runInContext(REPLAY_SRC, sandbox, { filename: REPLAY_ENTRY });
-  } else {
-    vm.runInContext(SPLASH_SRC, sandbox, { filename: SPLASH_ENTRY });
-  }
-
-  const page = {
-    sandbox,
-    expectWarns,
-    document,
-    body,
-    stage,
-    stageCtx,
-    created,
-    splashes,
-    frames,
-    timeouts,
-    errors,
-    warns,
-    matchMedia,
-    winListeners,
-    storage: sandbox.localStorage,
-    innerWidth,
-    innerHeight,
-    get rafCalls() {
-      return rafCalls;
-    },
-    get cancelCalls() {
-      return cancelCalls;
-    },
-    /** replay.js 调了几次 window.close()。 */
-    get closes() {
-      return closeCalls;
-    },
-    get now() {
-      return clock;
-    },
-    /** 推进 n 帧，每帧前进 stepMs 毫秒。捕获异常而不是让它冒出去（异常也要被断言）。 */
-    pump(n = 1, stepMs = 420) {
-      for (let i = 0; i < n; i += 1) {
-        clock += stepMs;
-        const pending = [...frames.entries()];
-        frames.clear();
-        for (const [, fn] of pending) {
-          try {
-            fn(clock);
-          } catch (err) {
-            errors.push(err);
-          }
-        }
+  return {
+    win, ctx, canvas, body, errors,
+    winCount: (type) => (winListeners[type] || []).length,
+    fireWin: (type, ev = {}) => { for (const fn of (winListeners[type] || []).slice()) fn(ev); },
+    run(src, name) { vm.runInContext(src, win, { filename: name }); },
+    get now() { return now; },
+    get pendingFrames() { return rafQ.length; },
+    advance(ms, frame = 16) {
+      const end = now + ms;
+      while (now < end) {
+        now = Math.min(end, now + frame);
+        const q = rafQ;
+        rafQ = [];
+        for (const r of q) r.fn(now);
+        runTimers();
       }
     },
-    dispatchWindow(type, ev = {}) {
-      for (const fn of (winListeners[type] || []).slice()) fn(ev);
-    },
-    pendant() {
-      return body.children.find((c) => c.classes.has('whale-pendant')) ?? null;
-    },
   };
-  RUNS.push(page);
-  return page;
 }
 
-/** 跑到时间线末尾（从共享动画时长计算帧数，每帧推进 420ms）。 */
-function runToEnd(page, frames = Math.ceil(page.sandbox.WhaleSplash.DURATION_MS / 420) + 2) {
-  page.pump(frames, 420);
-  return page;
-}
+// ── ① 跨文件契约 ───────────────────────────────────────────────────────
 
-// ── ① 跨文件契约：打包出来的东西真的是 whale-splash.js 要的 ──────────────
-
-let page = makePage();
-
-await check('三维表面的纹理与随包原图逐字节相同，保留用户指定鲸鱼', () => {
-  const image = readAsarEntry(found.file, 'lib/welcome/whale-3d.png');
-  const embedded = /const WHALE_IMAGE_DATA = 'data:image\/png;base64,([^']+)'/.exec(ANIMATION_SRC);
-  assert.ok(embedded, '独立文件预览所需的原图纹理未嵌入');
-  assert.ok(Buffer.from(embedded[1], 'base64').equals(image));
-  assert.ok(image.equals(fs.readFileSync(path.join(PROJECT, 'vendor/whale/materials/whale-3d.png'))));
+await check('welcome.html：cyber-splash.js → whale-splash.js → welcome.js 依次 defer 加载', () => {
+  const html = read('renderer/welcome.html');
+  const srcs = [...html.matchAll(/<script src="([^"]+)" defer><\/script>/g)].map((m) => m[1]);
+  assert.deepEqual(srcs, ['../lib/welcome/cyber-splash.js', 'whale-splash.js', '../lib/welcome/welcome.js']);
+  assert.match(html, /<canvas id="whale-stage"/);
+  assert.match(html, /font-src 'self'/, '原版 CSP 的 font-src 不能丢（丢了欢迎窗口没字体也不报错）');
 });
 
-await check('打包后的动画脚本暴露了 WhaleSplash / drawWhale / whalePath / __WHALE_PIXEL__', () => {
-  assert.equal(typeof page.sandbox.WhaleSplash, 'function', 'window.WhaleSplash 不是函数 —— 打包或导出漏了，动画会整段跳过');
-  assert.equal(typeof page.sandbox.drawWhale, 'function', 'window.drawWhale 不是函数 —— 挂件画不出来');
-  assert.equal(typeof page.sandbox.whalePath, 'function');
-  assert.equal(page.sandbox.__WHALE_PIXEL__, 6);
+await check('replay.html 用同一份动画；桌面挂件 pendant.html 仍靠 whale-animation.js 画鲸鱼', () => {
+  const replay = read('renderer/replay.html');
+  assert.ok(replay.indexOf('cyber-splash.js') > 0 && replay.indexOf('cyber-splash.js') < replay.indexOf('replay.js'));
+  assert.match(read('renderer/pendant.html'), /whale-animation\.js/);
 });
 
-await check('两份脚本都是经典脚本（没有 ESM 语法：启动窗口的 CSP 不允许）', () => {
-  assert.ok(!/^\s*(import|export)\s/m.test(ANIMATION_SRC), '动画脚本里出现了顶层 import/export');
-  assert.ok(!/^\s*(import|export)\s/m.test(SPLASH_SRC), 'splash 脚本里出现了顶层 import/export');
-});
-
-await check('脚本一加载完就起了帧循环，但还没有往画布上画任何东西', () => {
-  assert.equal(page.stageCtx.ops.length, 0, '加载完就画了东西？（第一个帧回调才该画）');
-  assert.equal(page.rafCalls, 1, '两段脚本都是 defer，加载完应当已经 start() 并排了第一帧');
-  assert.equal(page.pendant(), null, '挂件要等动画结束');
-  assert.ok(page.created.every(el => el.parentNode === null), '预计算画布不能覆盖页面');
-});
-
-// ── ② 时间线真的推进 ────────────────────────────────────────────────────
-
-await check('第一帧就画了背景（setTransform → clearRect → 渐变 → 填满）', () => {
-  page.pump(1, 10);
-  const ops = Array.from(page.stageCtx.ops);
-  assert.ok(ops.includes('setTransform'), '没有 setTransform：DPR 缩放没设，画面会偏小/模糊');
-  assert.ok(ops.includes('clearRect'), '没有 clearRect：上一帧不会擦掉，会糊成一片');
-  assert.ok(ops.includes('drawImage'), '预计算背景没有合成到场景');
-  assert.ok(page.created.some(el => el.ctx2d?.gradients.length > 0 && el.ctx2d.ops.includes('fillRect')), '离屏背景没有画出');
-});
-
-await check('无 WebGL 与图片时仍画出降级主体，并明确报告降级', () => {
-  runToEnd(page);
-  assert.equal(page.sandbox.WhaleSplash.rendererInfo().mode, 'fallback-image');
-  assert.equal(page.sandbox.WhaleSplash.rendererInfo().error, 'WebGL2 unavailable');
-  assert.ok(page.created.some(el => el.ctx2d?.ops.includes('ellipse') && el.ctx2d.ops.includes('fill')));
-  assert.deepEqual(Array.from(page.warns), ['Whale 3D fallback: WebGL2 unavailable']);
-});
-
-await check('所有传给画布的数值参数都是有限数（NaN 是 canvas 最典型的静默失败）', () => {
-  assert.ok(RUNS.length >= 1);
-  for (const p of RUNS) {
-    const bad = [p.stageCtx, ...p.created.map(el => el.ctx2d).filter(Boolean)].flatMap(ctx => Array.from(ctx.bad));
-    assert.deepEqual(Array.from(bad), [], `${SPLASH_ENTRY}: ${bad.slice(0, 5).join(' | ')}`);
+await check('三段脚本都是经典脚本（启动窗口 CSP 不允许 ESM）', () => {
+  for (const [name, src] of [['cyber-splash.js', CYBER_SRC], ['whale-splash.js', SPLASH_SRC], ['replay.js', REPLAY_SRC]]) {
+    assert.doesNotMatch(src, /^\s*(import|export)\s/m, `${name} 里有 ESM 语法`);
+    new vm.Script(src, { filename: name }); // 语法
   }
 });
 
-await check('时间到点后交出挂件：body 里出现 .whale-pendant，画布拿到 is-done', () => {
-  assert.ok(page.pendant() !== null, '跑完了却没有挂件 —— 用户会看到一个静止的空白启动页');
-  assert.ok(page.stage.classList.contains('is-done'));
-  assert.ok(!page.pendant().classList.contains('is-visible'), '场景淡出前挂件不能显示');
-  assert.ok(page.stage.listenerCount('transitionend') > 0, '没有 transitionend 兜底：淡出后的画布可能永远留着');
-  assert.ok(page.timeouts.some((t) => t.ms >= 600 && t.ms <= 1000), '没有那个「动画没触发也要移除画布」的定时器');
+await check('加载后暴露 window.CyberSplash，时长 3.6 s，收尾 0.52 s', () => {
+  const f = makeWindow();
+  f.run(CYBER_SRC, 'cyber-splash.js');
+  assert.equal(typeof f.win.CyberSplash, 'function');
+  assert.equal(f.win.CyberSplash.DURATION_MS, 3600);
+  assert.equal(f.win.CyberSplash.EXIT_MS, 520);
+  assert.equal(f.ctx.calls.length, 0, '只加载不该画任何东西');
 });
 
-await check('挂件的兜底移除真的生效（transitionend 不来也不会压住界面）', () => {
-  const timer = page.timeouts.find((t) => t.ms >= 600 && t.ms <= 1000);
-  timer.fn();
-  assert.equal(page.stage.removed, true);
-  assert.ok(!page.body.children.includes(page.stage));
-  page.pump(1, 16);
-  assert.ok(page.pendant().classList.contains('is-visible'), '场景移除后应显示挂件');
-});
+// ── ② ③ 每一帧都画得出来、数值有限、可复现 ─────────────────────────────
 
-await check('pagehide 停止活动动画，完成后也不继续空转', () => {
-  assert.equal(page.frames.size, 0, '完成后仍在空转');
-  const active = makePage();
-  active.pump(1, 100);
-  assert.ok(active.frames.size > 0);
-  active.dispatchWindow('pagehide');
-  assert.equal(active.frames.size, 0);
-  const before = active.rafCalls;
-  active.pump(3, 420);
-  assert.equal(active.rafCalls, before);
-});
+const SIZES = [[900, 600], [480, 620], [1600, 900], [3840, 2160], [200, 120], [1, 1], [0, 0]];
 
-// ── ③ 交互：拖动 / 键盘 / 主题 / 位置记忆 ────────────────────────────────
-
-page = runToEnd(makePage());
-
-await check('拖动：按住 → 移动（按窗口与挂件尺寸钳制）→ 松手写进 localStorage', () => {
-  const el = page.pendant();
-  assert.ok(el !== null);
-  // 默认落点：窗口右侧留 28px。600 - 78 - 28 = 494。
-  assert.equal(el.style.left, '494px');
-  assert.equal(el.style.top, '26px');
-
-  el.dispatch('pointerdown', { pointerId: 7, clientX: 500, clientY: 40, preventDefault: () => {} });
-  assert.ok(el.classList.contains('is-dragging'));
-  assert.equal(el.captured, 7, '没有抓指针：指针移出挂件后拖动会断');
-
-  // 期望值一律**算出来**，不写整数：挂件高度是 `size * 1.08`（78 → 84.24），
-  // 硬编码 616 会把「钳制对了」判成失败（第一版正是如此）。
-  const maxLeft = `${page.innerWidth - parseFloat(el.style.width)}px`;
-  const maxTop = `${page.innerHeight - parseFloat(el.style.height)}px`;
-  el.dispatch('pointermove', { clientX: 7000, clientY: 7000 });
-  assert.equal(el.style.left, maxLeft, '超出右边界没有钳制');
-  assert.equal(el.style.top, maxTop, '超出下边界没有钳制');
-
-  el.dispatch('pointerup', { pointerId: 7 });
-  assert.ok(!el.classList.contains('is-dragging'));
-  assert.equal(el.released, 7);
-  const saved = JSON.parse(page.storage.getItem('dsh-whale-pendant-position'));
-  assert.equal(saved.x, page.innerWidth - parseFloat(el.style.width));
-  assert.equal(saved.y, page.innerHeight - parseFloat(el.style.height));
-});
-
-await check('键盘：方向键挪 8px，按住 Shift 挪 24px（不用鼠标也够得着）', () => {
-  const el = page.pendant();
-  const startLeft = parseFloat(el.style.left);
-  const startTop = parseFloat(el.style.top);
-  el.dispatch('keydown', { key: 'ArrowLeft', preventDefault: () => {} });
-  assert.equal(parseFloat(el.style.left), startLeft - 8);
-  // 上一条用例把挂件拖到了下边界，再往下按会被钳住 —— 所以这里用 ArrowUp。
-  el.dispatch('keydown', { key: 'ArrowUp', shiftKey: true, preventDefault: () => {} });
-  assert.equal(parseFloat(el.style.top), startTop - 24);
-  el.dispatch('keydown', { key: 'a', preventDefault: () => {} });
-  assert.equal(parseFloat(el.style.left), startLeft - 8, '无关按键不该移动挂件');
-});
-
-await check('位置记忆：存过的位置会被恢复（含越界钳制）', () => {
-  const p = runToEnd(makePage({ savedPos: { x: 120, y: 90 } }));
-  const el = p.pendant();
-  assert.equal(el.style.left, '120px');
-  assert.equal(el.style.top, '90px');
-
-  const off = runToEnd(makePage({ savedPos: { x: 99999, y: 99999 } }));
-  assert.equal(off.pendant().style.left, '522px', '越界的历史位置没有被钳制回窗口内');
-});
-
-await check('主题翻转：body 记下深色标记，并让挂件重画（颜色是烤进画布的）', () => {
-  const el = page.pendant();
-  assert.equal(page.body.hasAttribute('data-ds-dark-theme'), false);
-  // 挂件把画笔挂在 `el.__paint` 上供主题变化时重画。**不要**断言此刻 paintCalls >= 1：
-  // `createPendant()` 里的首画是直接 `requestAnimationFrame(paint)` 排进去的，不走这层包装。
-  assert.equal(typeof el.__paint, 'function', '挂件没有把画笔暴露出来 —— 主题变了根本没法重画');
-  const before = el.paintCalls;
-
-  page.matchMedia.dark();
-  assert.equal(page.body.hasAttribute('data-ds-dark-theme'), true, '系统切深色时 body 没被标记');
-  assert.equal(el.paintCalls, before + 1, '主题变了但没有重画 —— 挂件会一直是浅色');
-
-  // 画布是挂件 div 里的孩子（div 自身没有 2d 上下文）。
-  const inner = el.children.find((c) => c.tagName === 'CANVAS');
-  assert.ok(inner, '挂件里没有画布节点');
-  const ops = Array.from(inner.ctx2d.ops);
-  assert.ok(ops.includes('ellipse'), '重画时没有画鲸鱼');
-  assert.equal(inner.ctx2d.bad.length, 0, '重画时把 NaN 喂给了画布');
-});
-
-// ── ④ 主题绘制与动作轨迹 ────────────────────────
-
-await check('同一鲸鱼在深浅主题下均能绘制，画布变换保持配对', () => {
-  for (const light of [false, true]) {
-    const ctx = makeCtx2d();
-    page.sandbox.drawWhale(ctx, 100, 63, true, light);
-    assert.ok(ctx.ops.includes('fill'));
-    assert.equal(ctx.ops.filter(x => x === 'save').length, ctx.ops.filter(x => x === 'restore').length);
-    assert.equal(ctx.bad.length, 0);
+await check('各种窗口尺寸 × 整条时间线：不抛、数值全有限、每帧都有画面', () => {
+  for (const [w, h] of SIZES) {
+    const f = makeWindow({ w, h });
+    f.run(CYBER_SRC, 'cyber-splash.js');
+    const s = new f.win.CyberSplash(f.canvas);
+    for (let t = 0; t <= 3600; t += 30) {
+      const before = f.ctx.calls.length;
+      s.renderAt(t);
+      if (w >= 2 && h >= 2) {
+        const drawn = f.ctx.calls.slice(before).filter(([n]) => n === 'fillRect' || n === 'stroke' || n === 'fill');
+        assert.ok(drawn.length > 0, `${w}x${h} @${t}ms 什么都没画`);
+      }
+    }
+    assert.deepEqual(f.ctx.bad, [], `${w}x${h} 出现非有限数：${f.ctx.bad.slice(0, 3).join(' | ')}`);
+    assert.equal(f.canvas.width, Math.max(1, Math.round(w * 1.5)), '画布按 DPR 设尺寸');
   }
 });
 
-await check('宽窄窗口均向左跃起再落下，沿经过的路径持续留下波峰', () => {
-  for (const [width, height] of [[600, 700], [1280, 800]]) {
-    const p = makePage({ innerWidth: width, innerHeight: height });
-    const animation = new p.sandbox.WhaleSplash(p.stage);
-    const poses = Array.from({length: 11}, (_, i) => animation.whalePose(i / 10));
-    assert.ok(poses.every((pose, i) => i === 0 || pose.x <= poses[i - 1].x));
-    assert.ok(animation.whalePose(.46).y < animation.whalePose(.16).y);
-    assert.ok(animation.whalePose(.46).y < animation.whalePose(.76).y);
-    animation.prepareFlow(.55);
-    assert.ok(animation.flowWaves.length >= 2, '游动途中应有多个仍在扩散的波峰');
-    assert.ok(animation.flowWaves.every(w => w.rx > 0 && w.ry > 0 && w.strength > 0));
-    const wave = animation.flowWaves[0];
-    const influence = animation.flowAt(wave.x + Math.cos(wave.angle) * wave.rx, wave.y + Math.sin(wave.angle) * wave.rx);
-    assert.ok(influence.light > 0, '尾迹必须影响星点，不能只有装饰线');
-    const tail = animation.tailAt(.55);
-    assert.ok(Number.isFinite(tail.x) && Number.isFinite(tail.y));
-    animation.reduced = true; animation.prepareFlow(.55);
-    assert.equal(animation.flowWaves.length, 0);
-    const still = animation.flowAt(tail.x, tail.y);
-    assert.equal(still.dx, 0); assert.equal(still.dy, 0);
-    animation.stop();
+await check('时间越界也安全（负数、NaN、远超时长都钳到 [0, 时长]）', () => {
+  const f = makeWindow();
+  f.run(CYBER_SRC, 'cyber-splash.js');
+  const s = new f.win.CyberSplash(f.canvas);
+  for (const t of [-500, Number.NaN, undefined, 1e9]) s.renderAt(t);
+  assert.deepEqual(f.ctx.bad, []);
+});
+
+await check('同一时刻画两次，逐调用相同（抓帧 / 复看可复现）', () => {
+  const f = makeWindow();
+  f.run(CYBER_SRC, 'cyber-splash.js');
+  const s = new f.win.CyberSplash(f.canvas);
+  for (const t of [100, 760, 1500, 1980, 3300]) {
+    const a0 = f.ctx.calls.length;
+    s.renderAt(t);
+    const a = JSON.stringify(f.ctx.calls.slice(a0));
+    const b0 = f.ctx.calls.length;
+    s.renderAt(t);
+    const b = JSON.stringify(f.ctx.calls.slice(b0));
+    assert.equal(a, b, `@${t}ms 两次不一样`);
   }
 });
 
-// ── ⑤ 三条降级路径 ──────────────────────────────────────────────────────
-
-await check('减动效偏好：不跑动画，直接出挂件（但挂件本身照样画出来）', () => {
-  const p = makePage({ reduce: true });
-  assert.equal(p.rafCalls, 1, '减动效时不该起动画帧循环（只该有挂件自己那一帧重绘）');
-  assert.ok(p.pendant() !== null, '减动效时连挂件都没有 —— 这一段就白屏了');
-  p.pump(1, 16);
-  assert.ok(p.stageCtx.ops.length === 0, '减动效时还在往启动画布上画');
-  // 挂件自己的画布是 div 里的那个 <canvas> 孩子（div 本身没有 2d 上下文）。
-  const inner = p.pendant().children.find((c) => c.tagName === 'CANVAS');
-  assert.ok(inner, '挂件里没有画布节点');
-  assert.ok(Array.from(inner.ctx2d.ops).includes('ellipse'), '挂件上的鲸鱼没画出来');
-  assert.deepEqual(Array.from(p.errors), []);
+await check('标题真的解码出来：2.3 s 时画的是 DEEPSEEK HARNESS（最后一个字 2235 ms 落定）', () => {
+  const f = makeWindow();
+  f.run(CYBER_SRC, 'cyber-splash.js');
+  const s = new f.win.CyberSplash(f.canvas);
+  s.renderAt(2300);
+  const texts = f.ctx.calls.filter(([n]) => n === 'fillText').map(([, a]) => a[0]);
+  assert.ok(texts.includes('DEEPSEEK HARNESS'), `没画出标题：${texts.slice(0, 8).join(' | ')}`);
+  s.renderAt(1200);
+  // 1.2 s 时标题还没开始
+  const before = f.ctx.calls.length;
+  s.renderAt(1200);
+  assert.ok(!f.ctx.calls.slice(before).some(([n, a]) => n === 'fillText' && a[0] === 'DEEPSEEK HARNESS'));
 });
 
-await check('没有 <canvas id="whale-stage">：整段安静退出，一个节点都不建', () => {
-  const p = makePage({ withCanvas: false });
-  assert.equal(p.created.length, 0);
-  assert.equal(p.rafCalls, 0);
-  assert.equal(p.errors.length, 0);
+await check('没有 Image（图片加载不了）时退成线框核心，不报错', () => {
+  const f = makeWindow();
+  f.run(CYBER_SRC, 'cyber-splash.js');
+  const s = new f.win.CyberSplash(f.canvas);
+  s.renderAt(2000);
+  assert.deepEqual(f.errors, []);
+  assert.deepEqual(f.ctx.bad, []);
 });
 
-await check('存储被禁（企业策略 / 隐私模式）：挂件仍在，拖动与位置读取都不抛', () => {
-  const storage = makeStorage({}, { throws: true });
-  const p = runToEnd(makePage({ storage }));
-  const el = p.pendant();
-  assert.ok(el !== null);
-  assert.equal(el.style.left, '494px', '读不到位置时没有退回默认落点');
-  el.dispatch('pointerdown', { pointerId: 1, clientX: 500, clientY: 40, preventDefault: () => {} });
-  el.dispatch('pointermove', { clientX: 460, clientY: 60 });
-  el.dispatch('pointerup', { pointerId: 1 });
-  assert.ok(storage.attempts >= 2, '存储被禁时应当尝试过读写（这条断言防止测试根本没碰到存储）');
-  assert.deepEqual(Array.from(p.errors), []);
-  assert.deepEqual(unexpectedWarnings(p), []);
+await check('最后一帧把整块画布清空（收尾后露出的是欢迎界面，不是一层黑）', () => {
+  const f = makeWindow({ w: 900, h: 600 });
+  f.run(CYBER_SRC, 'cyber-splash.js');
+  const s = new f.win.CyberSplash(f.canvas);
+  const at = f.ctx.calls.length;
+  s.renderAt(3600);
+  const frame = f.ctx.calls.slice(at);
+  const lastClear = frame.map(([n, a], i) => [n, a, i]).filter(([n, a]) => n === 'clearRect' && a[2] === 900 && a[3] === 600).pop();
+  assert.ok(lastClear, '最后一帧没有整块 clearRect');
+  const after = frame.slice(lastClear[2] + 1).filter(([n]) => n === 'fillRect');
+  // 清空之后只剩那条收成点的细线和光点（宽或高都很小）
+  for (const [, a] of after) assert.ok(a[2] <= 40 || a[3] <= 40, `清空后又铺了大块：${a.join(',')}`);
 });
 
-// ── ⑤-bis 挂件菜单里的「Replay animation」：renderer/replay.js ────────────
-//
-// 这段脚本只干三件事：把动画播一遍、淡出、**关掉自己那个短命窗口**。
-// 在它之前，主进程把 'replay' 发给主窗口，而启动画面跑在欢迎窗口里 ——
-// 那是个空操作，菜单点了没反应。所以这一节盯的就是「它真的会自己收场」：
-// 窗口既不立刻消失（那样等于没播），也不赖着不走（那样要等主进程的安全网）。
+// ── ④ ⑤ 欢迎窗口控制器 ─────────────────────────────────────────────────
 
-if (REPLAY_SRC === null) {
-  console.log(`  skip  ${REPLAY_ENTRY} 不在${found.label}里 —— 跳过 Replay 那一节`);
-} else {
-  await check('replay.js 是经典脚本，并使用共享动画时长', () => {
-    assert.ok(
-      !/^\s*(?:import|export)\s/m.test(REPLAY_SRC),
-      'replay.js 里出现了 ESM 语句 —— 它是以 <script defer> 经典脚本加载的，会整段语法报错',
-    );
-    assert.ok(REPLAY_SRC.includes('window.WhaleSplash?.DURATION_MS'));
-    assert.ok(SPLASH_SRC.includes('window.WhaleSplash?.DURATION_MS'));
-    const dur = page.sandbox.WhaleSplash.DURATION_MS;
-    assert.ok(dur > 0 && dur <= 20000);
-  });
-
-  await check('Replay：动画跑完自己淡出，关窗排进定时器而不是立刻关', () => {
-    const p = makePage({ script: 'replay' });
-    assert.equal(p.closes, 0, '动画还没开始，窗口就被关了');
-    runToEnd(p);
-    assert.deepEqual(Array.from(p.errors), []);
-    assert.ok(p.stage.classList.contains('is-done'), '跑完没有进入淡出状态（缺 is-done）—— 窗口会「啪」一下消失');
-    assert.ok(p.timeouts.length >= 1, '一个定时器都没排 —— 窗口永远不会自己关，只能等主进程的安全网');
-    assert.equal(p.closes, 0, 'window.close() 是同步调的 —— 淡出那 520ms 根本没播');
-    for (const t of p.timeouts.slice()) t.fn(); // slice：定时器里再排定时器也不会边跑边长
-    assert.equal(p.closes, 1, '定时器到点后没有恰到好处地关一次窗');
-    assert.ok(
-      (p.winListeners.pagehide || []).length === 1,
-      '没有注册 pagehide 清理 —— 窗口被强杀时动画还在跑',
-    );
-    p.dispatchWindow('pagehide'); // 不抛异常即可
-  });
-
-  await check('Replay + 减动效：直接画一张静止的鲸鱼，然后关窗', () => {
-    const p = makePage({ script: 'replay', reduce: true });
-    assert.equal(p.rafCalls, 0, '减动效时不该起动画帧循环');
-    assert.ok(Array.from(p.stageCtx.ops).includes('ellipse'), '静止那一帧没有画鲸鱼');
-    assert.equal(p.stageCtx.bad.length, 0, '静止那一帧里有非有限数坐标 —— 真浏览器会一声不吭什么都不画');
-    assert.ok(p.stage.classList.contains('is-done'), '减动效时没有淡出就走');
-    assert.equal(p.closes, 0, '减动效时窗口立刻就关了 —— 那张静止的鲸鱼没人看得见');
-    for (const t of p.timeouts.slice()) t.fn();
-    assert.equal(p.closes, 1);
-    assert.deepEqual(Array.from(p.errors), []);
-  });
-
-  await check('Replay 页连画布都没有：立刻关窗走人（不是留一个置顶空白窗等安全网）', () => {
-    const p = makePage({ script: 'replay', withCanvas: false });
-    assert.equal(p.created.length, 0);
-    assert.equal(p.rafCalls, 0);
-    assert.equal(p.timeouts.length, 0, '没有画布还排了定时器 —— 说明它打算慢慢来');
-    assert.equal(p.closes, 1, '没有画布却把窗口留着：它会当 20 秒的置顶空白方块，挡着界面');
-    assert.equal(p.errors.length, 0);
-  });
-
-  await check('Replay 画不出静止帧（drawWhale 抛异常）：照样淡出关窗', () => {
-    const p = makePage({
-      script: 'replay',
-      reduce: true,
-      expectWarns: true,
-      preScript: (s) => {
-        s.drawWhale = () => {
-          throw new Error('boom: drawWhale 炸了');
-        };
-      },
-    });
-    assert.equal(p.warns.length, 1, '画不出来时应当留一条 console.error（静默失败最难查）');
-    assert.ok(String(p.warns[0]).includes('still frame'), `告警内容对不上：${p.warns[0]}`);
-    assert.ok(p.stage.classList.contains('is-done'), '抛异常之后没有走淡出');
-    for (const t of p.timeouts.slice()) t.fn();
-    assert.equal(p.closes, 1, '画不出来就不关窗 —— 用户要盯着一块置顶空白 20 秒');
-    assert.equal(p.errors.length, 0, '异常应当被脚本自己吃掉，而不是逃到 window.onerror');
-  });
-
-  await check('Replay 动画起不来（WhaleSplash 构造抛异常）：退回静止帧并关窗', () => {
-    const p = makePage({
-      script: 'replay',
-      expectWarns: true,
-      preScript: (s) => {
-        s.WhaleSplash = function Broken() {
-          throw new Error('boom: 打包坏了');
-        };
-      },
-    });
-    assert.equal(unexpectedWarnings(p).length, 1);
-    assert.ok(String(p.warns[0]).includes('failed to start'), `告警内容对不上：${p.warns[0]}`);
-    assert.ok(
-      Array.from(p.stageCtx.ops).includes('ellipse'),
-      '动画起不来时应当退回画一张静止的鲸鱼，而不是留一块空白',
-    );
-    assert.equal(p.closes, 0);
-    for (const t of p.timeouts.slice()) t.fn();
-    assert.equal(p.closes, 1);
-    assert.equal(p.errors.length, 0);
-  });
+function bootWelcome(opts = {}) {
+  const f = makeWindow(opts);
+  if (opts.withCyber !== false) f.run(CYBER_SRC, 'cyber-splash.js');
+  f.run(SPLASH_SRC, 'whale-splash.js');
+  return f;
 }
 
-// ── ⑥ 收尾：没有一次运行是靠异常收场的 ────────────────────────────────────
-
-await check('所有沙箱运行无异常，只有预期的 WebGL 不可用降级诊断', () => {
-  assert.ok(RUNS.length >= 6, `只跑了 ${RUNS.length} 次沙箱，覆盖不够（这条会假通过）`);
-  const errs = RUNS.flatMap((p) => Array.from(p.errors).map((e) => String(e && e.message ? e.message : e)));
-  assert.deepEqual(errs, []);
-  // 故意制造失败的那几次运行（expectWarns）不看这条总账 —— 它们自己的用例里
-  // 已经逐字断言了「该有哪一条告警」，这里仍然不允许出现计划外的告警。
-  const warns = RUNS.filter((p) => !p.expectWarns).flatMap((p) => unexpectedWarnings(p));
-  assert.deepEqual(warns, []);
+await check('自己播完自己收场：3.6 s 后画布淡出，随即从 DOM 移除', () => {
+  const f = bootWelcome();
+  f.advance(3000);
+  assert.ok(!f.canvas.classList.contains('is-done'), '还没到点就收了');
+  assert.equal(f.canvas.removed, false);
+  f.advance(700);
+  assert.ok(f.canvas.classList.contains('is-done'), '到点没收');
+  f.advance(400);
+  assert.equal(f.canvas.removed, true, 'transitionend 不来也要移除画布');
+  assert.equal(f.pendingFrames, 0, '收场后帧循环还在空转');
+  assert.equal(f.winCount('keydown'), 0, '收场后按键监听没摘');
+  assert.equal(f.canvas.count('pointerdown'), 0, '收场后点击监听没摘');
+  assert.deepEqual(f.ctx.bad, []);
+  assert.deepEqual(f.errors, []);
 });
 
+await check('按任意键 / 点击画布：直接跳到收尾（约 0.52 s 后收场）', () => {
+  for (const how of ['key', 'click']) {
+    const f = bootWelcome();
+    f.advance(500);
+    if (how === 'key') f.fireWin('keydown', { key: 'Escape' });
+    else f.canvas.fire('pointerdown', {});
+    f.advance(500);
+    assert.ok(!f.canvas.classList.contains('is-done'), `${how}：收尾还没播完就收了`);
+    f.advance(120);
+    assert.ok(f.canvas.classList.contains('is-done'), `${how}：跳过后没有收场`);
+  }
+});
+
+await check('跳过只会往前跳：收尾阶段再按键不会重播', () => {
+  const f = bootWelcome();
+  f.advance(3300);
+  f.fireWin('keydown', {});
+  f.advance(350);
+  assert.ok(f.canvas.classList.contains('is-done'));
+});
+
+await check('减动效：一帧都不画，画布立刻移除', () => {
+  const f = bootWelcome({ reduced: true });
+  f.advance(200);
+  assert.equal(f.ctx.calls.length, 0);
+  assert.equal(f.canvas.removed, true);
+});
+
+await check('cyber-splash.js 没加载上：不抛，画布立刻移除（不留一层挡住界面）', () => {
+  const f = bootWelcome({ withCyber: false });
+  f.advance(200);
+  assert.equal(f.canvas.removed, true);
+});
+
+await check('没有 <canvas id="whale-stage">：两段脚本安静退出', () => {
+  const f = makeWindow({ withCanvas: false });
+  f.run(CYBER_SRC, 'cyber-splash.js');
+  f.run(SPLASH_SRC, 'whale-splash.js');
+  f.advance(4000);
+  assert.deepEqual(f.errors, []);
+});
+
+await check('某一帧抛异常：记一条错误并立刻收场，不卡在半截画面上', () => {
+  const f = bootWelcome({ throwOn: 'fillText' });
+  f.advance(1600);
+  assert.ok(f.errors.some((e) => /cyber splash: frame failed/.test(e)), JSON.stringify(f.errors));
+  f.advance(400);
+  assert.equal(f.canvas.removed, true);
+  assert.equal(f.pendingFrames, 0);
+});
+
+await check('pagehide：帧循环停下', () => {
+  const f = bootWelcome();
+  f.advance(300);
+  f.fireWin('pagehide', {});
+  f.advance(50);
+  assert.equal(f.pendingFrames, 0);
+});
+
+// ── ⑦ 挂件菜单的 Replay ────────────────────────────────────────────────
+
+function bootReplay(opts = {}) {
+  const f = makeWindow(opts);
+  if (opts.withCyber !== false) f.run(CYBER_SRC, 'cyber-splash.js');
+  f.run(REPLAY_SRC, 'replay.js');
+  return f;
+}
+
+await check('Replay：完整播一遍后自己关窗；不接受点击跳过（重播窗口不可交互）', () => {
+  const f = bootReplay();
+  assert.equal(f.winCount('keydown'), 0);
+  assert.equal(f.canvas.count('pointerdown'), 0);
+  f.advance(3500);
+  assert.equal(f.win.closed, false);
+  f.advance(500);
+  assert.equal(f.win.closed, true);
+  assert.deepEqual(f.ctx.bad, []);
+});
+
+await check('Replay 减动效：画一张静止帧（标题已出），1.6 s 后关窗', () => {
+  const f = bootReplay({ reduced: true });
+  const texts = f.ctx.calls.filter(([n]) => n === 'fillText').map(([, a]) => a[0]);
+  assert.ok(texts.includes('DEEPSEEK HARNESS'));
+  f.advance(1500);
+  assert.equal(f.win.closed, false);
+  f.advance(200);
+  assert.equal(f.win.closed, true);
+});
+
+await check('Replay 失败路径：没有 CyberSplash / 没有画布 / 帧异常 —— 都会关窗', () => {
+  let f = bootReplay({ withCyber: false });
+  f.advance(50);
+  assert.equal(f.win.closed, true, '没有 CyberSplash');
+  f = bootReplay({ withCanvas: false });
+  assert.equal(f.win.closed, true, '没有画布');
+  f = bootReplay({ throwOn: 'fillRect' });
+  f.advance(1000);
+  assert.equal(f.win.closed, true, '帧异常');
+});
+
+// ── 声明与暂存包 ───────────────────────────────────────────────────────
+
+await check('声明：cyber-splash.js 在条目与语法检查里，条目数 = expect_diff_entries', () => {
+  const decl = fs.readFileSync(path.join(PROJECT, 'patches', 'T1-whale-splash.yml'), 'utf8');
+  const entries = [...decl.matchAll(/^\s+- path: (\S+)/gm)].map((m) => m[1]);
+  assert.ok(entries.includes('lib/welcome/cyber-splash.js'));
+  const expect = Number(/expect_diff_entries:\s*(\d+)/.exec(decl)[1]);
+  assert.equal(entries.length, expect);
+  assert.match(decl, /syntax_check:[\s\S]*- lib\/welcome\/cyber-splash\.js/);
+  for (const m of decl.matchAll(/source: \.\.\/vendor\/whale\/materials\/(\S+)/g)) {
+    assert.ok(fs.existsSync(path.join(MAT, m[1])), `声明引用的素材不存在：${m[1]}`);
+  }
+});
+
+const staged = path.join(PROJECT, 'state', 'staged', 'app.asar');
+let stagedNote = null;
+await check('暂存包（若有）里的启动动画就是仓库这一份', () => {
+  if (!fs.existsSync(staged)) { stagedNote = `SKIP 没有暂存包 ${staged}（先 node vendor/whale/build.mjs）`; return; }
+  for (const [entry, rel] of [
+    ['lib/welcome/cyber-splash.js', 'cyber-splash.js'],
+    ['renderer/whale-splash.js', 'renderer/whale-splash.js'],
+    ['renderer/replay.js', 'renderer/replay.js'],
+    ['renderer/welcome.html', 'renderer/welcome.html'],
+  ]) {
+    let buf = null;
+    try { buf = readAsarEntry(staged, entry); } catch { buf = null; }
+    assert.ok(buf, `暂存包里没有 ${entry}：这是旧构建，重新 build 再落盘`);
+    assert.ok(buf.equals(fs.readFileSync(path.join(MAT, rel))), `暂存包里的 ${entry} 与仓库不一致：重新 build`);
+  }
+});
+
+// ── 汇总 ───────────────────────────────────────────────────────────────
+
+if (stagedNote) console.log(stagedNote);
 const failed = results.filter((r) => !r.ok);
-// 失败时连栈一起打：这套测试的失败多半来自「假 DOM 少实现了一个方法」或
-// 「断言查的时机不对」，只看一句 message 往往要重新猜一遍。
 for (const r of results) {
   console.log(`${r.ok ? '  ok  ' : ' FAIL '} ${r.name}`);
-  if (!r.ok) console.log(`        ${r.err?.message ?? r.err}\n${r.err?.stack ?? ''}`);
+  if (!r.ok) console.log(`        ${r.err?.message ?? r.err}`);
 }
 console.log('');
 if (failed.length) {
-  console.log(`启动界面脚本单测失败：${failed.length}/${results.length}`);
+  console.log(`启动动画单测失败：${failed.length}/${results.length}`);
   process.exit(1);
 }
-console.log(`启动界面脚本单测通过：${results.length}/${results.length} 项`);
+console.log(`启动动画单测通过：${results.length}/${results.length} 项`);

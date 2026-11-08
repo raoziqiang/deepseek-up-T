@@ -40,9 +40,12 @@ whenToUse: 在 deepseek-up-T 仓库里开工或收尾时；用户要求记住约
 - 一次性任务进度、临时猜测、未验证的结论
 - 仓库文档（`docs/`、`tracks/*/README.md`、`patches/`）里已经写清楚的事实 —— 笔记指向文档，不复制正文
 
+写完跑一次 `node src/cli.mjs memory lint`：文件名、标题、体积、疑似凭据按契约检查，退出码 1 = 有 error。
+找已有笔记用 `memory ls` / `memory show <主题>`。
+
 ## 模块宿主
 
-笔记目录由 `modules/memory` 在热启动时确保存在。
+笔记目录由 `modules/memory` 在热启动时确保存在，并顺带跑一遍同一份 lint（结果进宿主日志）。
 配置见项目根 `up-t.config.yml`；契约细节见 `docs/07-modules.md`。
 本轮**不做**回合后自动摘录，也没有 `/dream` 归并 —— 那些是后续里程碑。
 

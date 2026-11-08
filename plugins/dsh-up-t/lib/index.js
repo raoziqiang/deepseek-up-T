@@ -30,6 +30,8 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { createBalanceService } from './balance.js';
+
 // Electron 把 app.asar 当虚拟目录：node:fs.statSync(app.asar).size 在宿主中可能是 0。
 // 状态页需要磁盘上归档文件的真实大小；普通 Node 测试环境没有 original-fs，就用原生 fs。
 const require = createRequire(import.meta.url);
@@ -64,8 +66,10 @@ const ACTION_PATH = '/dsh-up-t/action';
  * `ready` 与「界面里出现了胶囊」之间隔着的那一段，只有渲染层自己说话才能填上。
  */
 const SEEN_PATH = '/dsh-up-t/seen';
+/** DeepSeek 官方余额的结论（不含密钥）。见 lib/balance.js；悬浮窗脚本随 client.js 一起送出。 */
+const BALANCE_PATH = '/dsh-up-t/balance.json';
 /** 宿主注册的那几条路由。心跳的 `ready` 与握手都引用它，避免两处各写一份。 */
-const ROUTE_PATHS = [CLIENT_PATH, STATUS_PATH, ACTION_PATH, SEEN_PATH];
+const ROUTE_PATHS = [CLIENT_PATH, STATUS_PATH, ACTION_PATH, SEEN_PATH, BALANCE_PATH];
 /**
  * 自定义请求头。跨源 `<form>`/`fetch` 不经过预检就带不上自定义头，而我们从不下发
  * CORS 允许头 —— 所以这一个字段就把「别的网页悄悄让本机跑命令」挡在外面。
@@ -73,6 +77,7 @@ const ROUTE_PATHS = [CLIENT_PATH, STATUS_PATH, ACTION_PATH, SEEN_PATH];
 const ACTION_HEADER = 'x-dsh-up-t';
 
 const CLIENT_FILE = path.join(PACKAGE_ROOT, 'assets', 'client.js');
+const BALANCE_CLIENT_FILE = path.join(PACKAGE_ROOT, 'assets', 'balance.js');
 
 /**
  * 心跳文件：`apply()` 一被执行就落一枚，内容是「谁、什么时候、在哪个进程里加载了我」。
@@ -94,6 +99,9 @@ let lastHeartbeatResult = null;
  * 宿主异步启动，所以第一枚 ready 可能还是 null；后续 onStatus 会刷新。
  */
 let lastModulesStatus = null;
+/** 模块日志只留最近几条进心跳：够回答「模块启动时说了什么」，又不让心跳无限长。 */
+const MODULE_LOG_KEEP = 20;
+let moduleLogTail = [];
 /** 正在跑的模块宿主（有 stop）。插件卸载时要停掉轮询，否则会在已退出的进程里空转。 */
 let moduleHostHandle = null;
 /** 递增以作废还在飞的 boot Promise，避免卸载后又被迟到的 then 重新拉起宿主。 */
@@ -186,6 +194,7 @@ function readyExtra(extra = {}) {
     routes: ROUTE_PATHS,
     client: clientSeen,
     modules: lastModulesStatus,
+    modulesLog: moduleLogTail,
     ...extra,
   };
 }
@@ -202,6 +211,7 @@ function bootModuleHost() {
     return;
   }
   const gen = ++moduleBootGen;
+  moduleLogTail = []; // 新一轮宿主：上一轮的日志不再代表现场
   const modulesUrl = pathToFileURL(path.join(projectRoot, 'src', 'modules.mjs')).href;
   Promise.resolve()
     .then(() => import(modulesUrl))
@@ -218,6 +228,11 @@ function bootModuleHost() {
           if (gen !== moduleBootGen) return;
           lastModulesStatus = status;
           writeHeartbeat('ready', readyExtra());
+        },
+        // 不重写心跳：日志总是先于某次 onStatus 到达，那一次会把它一起带出去。
+        onLog: (entry) => {
+          if (gen !== moduleBootGen) return;
+          moduleLogTail = [...moduleLogTail, entry].slice(-MODULE_LOG_KEEP);
         },
       });
       moduleHostHandle = host;
@@ -272,6 +287,21 @@ function makeMtimeReader(file) {
 }
 
 const readClientJs = makeMtimeReader(CLIENT_FILE);
+const readBalanceJs = makeMtimeReader(BALANCE_CLIENT_FILE);
+/**
+ * 客户端路由送出的脚本 = 胶囊 + 余额悬浮窗，拼在同一个响应里。
+ * 为什么不让胶囊再建一个 <script> 去加载悬浮窗：那会给胶囊多出一个 DOM 节点（胶囊的 DOM 足迹
+ * 被 test/capsule.test.mjs 逐个钉死），也多一次请求、多一条会 404 的路。两段都是自带 try/catch 的
+ * IIFE，一段坏了不影响另一段；悬浮窗文件读不到时只送胶囊。两个文件都按 mtime 重读，硬刷新即生效。
+ */
+function readClientBundle() {
+  const capsule = readClientJs();
+  if (capsule === null) return null;
+  const panel = readBalanceJs();
+  return panel === null ? capsule : `${capsule}\n;\n${panel}`;
+}
+/** 余额服务：整个宿主进程共用一份缓存。 */
+const balanceService = createBalanceService();
 
 /**
  * 桌面端注入行：一段**内联**脚本，自己建 `<script src>` 并吞掉 onerror。
@@ -816,7 +846,7 @@ function sendJson(res, payload, status = 200) {
 function sendJs(res, text) {
   if (text === null) {
     res.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8' });
-    res.end('dsh-up-t: assets/client.js not readable');
+    res.end('dsh-up-t: client script not readable');
     return;
   }
   const body = Buffer.from(text, 'utf8');
@@ -859,7 +889,7 @@ export default {
       disposers.push(ctx.webServer.register({
         kind: 'exact',
         path: CLIENT_PATH,
-        handler: (req, res) => sendJs(res, readClientJs()),
+        handler: (req, res) => sendJs(res, readClientBundle()),
       }));
 
       disposers.push(ctx.webServer.register({
@@ -922,6 +952,20 @@ export default {
         },
       }));
 
+      // 余额：GET 读缓存结论；`?refresh=1` 要求强制刷新（服务自己限 10 秒一次）。永不带密钥。
+      disposers.push(ctx.webServer.register({
+        kind: 'exact',
+        path: BALANCE_PATH,
+        handler: (req, res) => {
+          const force = /[?&]refresh=1(?:&|$)/.test(String(req.url ?? ''));
+          balanceService.get({ force })
+            .then((payload) => sendJson(res, payload))
+            .catch((err) => {
+              try { sendJson(res, { ok: false, code: 'error', error: String(err?.message ?? err) }, 500); } catch { /* 已断开 */ }
+            });
+        },
+      }));
+
       // Web 形态（宿主自己渲染 index.html 时）用 tapIndex；桌面端靠上面的注入行。
       disposers.push(ctx.webServer.tapIndex((html) => {
         if (html.includes(CLIENT_PATH)) return html;
@@ -935,7 +979,7 @@ export default {
         stopModuleHost();
       });
 
-      // ③ 走到这里才是真的「能用」：webServer 就绪、四条路由都注册上了。再落一枚心跳，
+      // ③ 走到这里才是真的「能用」：webServer 就绪、全部路由都注册上了。再落一枚心跳，
       //    把 stage 推到 ready。这一步本身不依赖任何服务，失败也不该影响插件工作，
       //    所以 writeHeartbeat 永远不抛。
       writeHeartbeat('ready', readyExtra());

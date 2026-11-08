@@ -7,7 +7,11 @@ html, body {
   background: transparent;
 }
 
-/* The whale splash layer sits above the welcome UI until the charm settles. */
+/*
+ * The cyber splash sits above the welcome UI while it plays. It takes pointer
+ * events so a click skips to the power-off; once it is done it fades and is
+ * removed from the DOM by whale-splash.js.
+ */
 #whale-stage {
   position: fixed;
   inset: 0;
@@ -15,16 +19,14 @@ html, body {
   display: block;
   width: 100%;
   height: 100%;
-  pointer-events: none;
+  cursor: pointer;
   opacity: 1;
-  border-radius: 0;
-  overflow: hidden;
-  box-shadow: none;
-  transition: opacity 600ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition: opacity 240ms ease-out;
 }
 
 #whale-stage.is-done {
   opacity: 0;
+  pointer-events: none;
 }
 
 #root {
@@ -32,44 +34,8 @@ html, body {
   z-index: 1;
 }
 
-/* The charm the splash leaves behind: a draggable whale pinned over the UI. */
-.whale-pendant {
-  position: fixed;
-  z-index: 5;
-  display: block;
-  cursor: grab;
-  touch-action: none;
-  -webkit-user-select: none;
-  user-select: none;
-  app-region: no-drag;
-  filter: drop-shadow(0 8px 24px rgba(56, 189, 248, 0.45));
-  opacity: 0;
-  transform: scale(0.92);
-  transition:
-    opacity 420ms cubic-bezier(0.16, 1, 0.3, 1),
-    transform 420ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.whale-pendant.is-visible {
-  opacity: 1;
-  transform: scale(1);
-}
-
-.whale-pendant:hover {
-  transform: scale(1.08);
-}
-
-.whale-pendant.is-dragging {
-  cursor: grabbing;
-  transition: none;
-}
-
-/* No splash motion for reduced-motion users: the charm appears immediately. */
 @media (prefers-reduced-motion: reduce) {
   #whale-stage {
-    transition: none;
-  }
-  .whale-pendant {
     transition: none;
   }
 }

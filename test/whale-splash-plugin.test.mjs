@@ -250,50 +250,25 @@ function makeBrowser({ reduced = false, session = {}, width = 1280, height = 800
 const DURATION = Number(/var DURATION_MS = (\d+)/.exec(SOURCE)?.[1]);
 assert.ok(DURATION > 0, 'splash.js 里找不到 DURATION_MS');
 
-await check('启动即挂上星空幕布，并且标记本会话已播放', async () => {
+await check('主窗口开场已停用：启动不挂幕布，直接在左下角出鲸鱼娘；零告警', async () => {
+  // 2026-11-02：主窗口开场与欢迎窗口的 cyber splash 叠着播，停用开场、只留鲸鱼娘。
+  assert.match(SOURCE, /var MAIN_INTRO = false/, '开场开关应为关闭');
   const b = makeBrowser();
   await b.load();
-  assert.ok(b.veil(), '没有幕布');
+  await b.advance(50);
+  assert.equal(b.veil(), null, '不该再挂幕布（会和欢迎窗口动画叠着播）');
   assert.equal(b.store.get('dsh-whale-splash-played'), '1');
   assert.equal(typeof b.sandbox.DshWhaleSplash.replay, 'function');
-});
-
-await check('整条时间线画完：幕布自己撤掉，左下角留下鲸鱼娘；全程参数有限、半径非负、零告警', async () => {
-  const b = makeBrowser();
-  await b.load();
-  await b.advance(DURATION * 0.5);
-  assert.ok(b.veil(), '播到一半幕布不该消失');
-  assert.equal(b.girl(), null, '鲸鱼娘要等动画收尾才常驻');
-  await b.advance(DURATION * 0.5 + 400);
-  assert.equal(b.veil(), null, '播完幕布必须移除，否则会挡住整个界面');
   const g = b.girl();
-  assert.ok(g, '播完没有鲸鱼娘');
+  assert.ok(g, '没有鲸鱼娘');
   assert.equal(parseFloat(g.style.left), 14);
   const top = parseFloat(g.style.top), h = parseFloat(g.style.height);
   assert.ok(Math.abs(top + h - (800 - 48)) < 0.5, '鲸鱼娘应坐在左下角、up-T 胶囊上方');
   assert.ok(g.children[0].src.endsWith('/dsh-whale-splash/whale-girl.png'));
+  await b.advance(DURATION + 400);
+  assert.equal(b.veil(), null);
   assert.deepEqual(b.problems, []);
   assert.deepEqual(b.warns.filter((w) => !w.includes('2D fallback')), []);
-});
-
-await check('幕布在揭幕阶段放行指针，不挡界面', async () => {
-  const b = makeBrowser();
-  await b.load();
-  await b.advance(200);
-  assert.equal(b.veil().style.pointerEvents, 'auto');
-  await b.advance(DURATION * 0.9);
-  assert.equal(b.veil().style.pointerEvents, 'none');
-});
-
-await check('点击幕布跳到变身段：剩余时间明显变短', async () => {
-  const b = makeBrowser();
-  await b.load();
-  await b.advance(300);
-  b.veil().dispatch('pointerdown');
-  await b.advance(DURATION * 0.22 + 300);
-  assert.equal(b.veil(), null, '跳过后应在约 20% 时长内收尾');
-  assert.ok(b.girl());
-  assert.deepEqual(b.problems, []);
 });
 
 await check('同一会话里重载：不再播放，直接出鲸鱼娘', async () => {
@@ -304,7 +279,7 @@ await check('同一会话里重载：不再播放，直接出鲸鱼娘', async (
   assert.ok(b.girl());
 });
 
-await check('右键隐藏鲸鱼娘并记住（本会话）；双击重播会把她带回来', async () => {
+await check('右键隐藏鲸鱼娘并记住（本会话）；双击把她带回来（不重播开场）', async () => {
   const b = makeBrowser({ session: { 'dsh-whale-splash-played': '1' } });
   await b.load();
   await b.advance(50);
@@ -313,9 +288,9 @@ await check('右键隐藏鲸鱼娘并记住（本会话）；双击重播会把�
   await b.advance(600);
   assert.equal(b.girl(), null);
   b.sandbox.DshWhaleSplash.replay();
-  assert.ok(b.veil(), '重播要重新挂幕布');
-  await b.advance(DURATION + 1600);
-  assert.ok(b.girl(), '重播结束后鲸鱼娘回来');
+  await b.advance(100);
+  assert.equal(b.veil(), null, '开场已停用：双击只把鲸鱼娘带回来，不重播开场');
+  assert.ok(b.girl(), '双击后鲸鱼娘回来');
   assert.equal(b.store.has('dsh-whale-girl-hidden'), false);
   assert.deepEqual(b.problems, []);
 });

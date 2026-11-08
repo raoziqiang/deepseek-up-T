@@ -313,7 +313,7 @@ if (welcomeAfter === null) {
   check('暂存包里有 renderer/welcome.html', false);
 } else {
   const refsAfter = refs(welcomeAfter);
-  for (const need of ['../lib/welcome/welcome.js', '../lib/welcome/welcome.css', '../lib/welcome/whale-animation.js']) {
+  for (const need of ['../lib/welcome/welcome.js', '../lib/welcome/welcome.css', '../lib/welcome/cyber-splash.js']) {
     check(`welcome.html 仍然加载 ${need}`, refsAfter.has(need));
   }
   check('welcome.html 不再指向不存在的 ../lib/welcome/whale-splash.js', !refsAfter.has('../lib/welcome/whale-splash.js'));

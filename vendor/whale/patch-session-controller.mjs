@@ -67,4 +67,4 @@ replaceOnce(
 )
 
 await writeFile(out, text, 'utf8')
-console.log(`patch-session-controller: wrote ${out} (${text.length} bytes)`)
+console.log(`patch-session-controller: wrote ${out} (${Buffer.byteLength(text, "utf8")} bytes)`)
